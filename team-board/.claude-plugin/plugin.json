@@ -22,5 +22,6 @@
     }
   },
   "homepage": "https://github.com/yeochul-jeon/yeocheol-mods/tree/main/team-board",
-  "repository": "https://github.com/yeochul-jeon/yeocheol-mods"
+  "repository": "https://github.com/yeochul-jeon/yeocheol-mods",
+  "license": "MIT"
 }

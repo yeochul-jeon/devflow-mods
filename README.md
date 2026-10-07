@@ -127,3 +127,7 @@ claude plugin test ./team-board         # 테스트
 claude plugin test ./eli12
 ```
 각 mod 의 화면·문구는 `hooks/` 의 순수 함수(`board.ts`, `diagram.ts`, `prompt.ts`)에 모여 있어 고치기 쉽습니다. README 와 테스트의 `order-svc`, `sub-2`, `PR38` 같은 이름은 예시입니다.
+
+## 라이선스
+
+[MIT](LICENSE)

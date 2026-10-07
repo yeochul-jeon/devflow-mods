@@ -8,5 +8,6 @@
   },
   "types": "./types/index.d.ts",
   "homepage": "https://github.com/yeochul-jeon/yeocheol-mods/tree/main/eli12",
-  "repository": "https://github.com/yeochul-jeon/yeocheol-mods"
+  "repository": "https://github.com/yeochul-jeon/yeocheol-mods",
+  "license": "MIT"
 }
