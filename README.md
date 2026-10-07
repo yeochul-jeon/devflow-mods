@@ -1,4 +1,4 @@
-# yeocheol-mods
+# devflow-mods
 
 Claude Code **mods** 모음: 어려운 설명을 12살 버전으로 풀어 주는 `eli12`, 여러 세션을 한눈에 보는 팀 상황판 `team-board`.
 
@@ -16,28 +16,41 @@ Claude Code **v2.1.287 이상**이 필요합니다 (`claude --version`).
 ## 설치
 
 ```bash
-claude plugin marketplace add yeochul-jeon/yeocheol-mods
-claude plugin install team-board@yeocheol-mods      # 모든 세션·워크트리에서 보여야 하므로 사용자 범위(기본)
-claude plugin install eli12@yeocheol-mods
+claude plugin marketplace add yeochul-jeon/devflow-mods
+claude plugin install team-board@devflow-mods      # 모든 세션·워크트리에서 보여야 하므로 사용자 범위(기본)
+claude plugin install eli12@devflow-mods
 ```
 설치 중 `1 userConfig option not yet set` 안내가 나오면 색 설정(palette)을 아직 안 골랐다는 뜻이고, 그대로 두면 기본값 `night` 로 동작합니다.
 특정 프로젝트에만 쓰려면 그 프로젝트 폴더에서 `--scope local` 을 붙이세요. 설치 후 열려 있는 Claude Code 는 `/exit` 하고 다시 시작합니다 (`claude --continue` 로 대화를 이어서 열 수 있어요).
 
 설치하지 않고 한 세션만 써보기:
 ```bash
-git clone https://github.com/yeochul-jeon/yeocheol-mods
-claude --plugin-dir yeocheol-mods/team-board --plugin-dir yeocheol-mods/eli12
+git clone https://github.com/yeochul-jeon/devflow-mods
+claude --plugin-dir devflow-mods/team-board --plugin-dir devflow-mods/eli12
 ```
 
 > [!WARNING]
 > mod 는 Claude Code 와 같은 권한으로 내 컴퓨터에서 돌아가는 코드입니다. 설치 전에 코드를 읽어 보세요. `claude plugin validate ./team-board` 로 어떤 이벤트를 받고 무엇을 호출하는지 실행 없이 볼 수 있습니다.
 
+## 예전 이름(yeocheol-mods)으로 설치했다면
+
+마켓플레이스 이름이 `devflow-mods` 로 바뀌었습니다. 한 번만 옮겨 주세요.
+```bash
+claude plugin uninstall team-board@yeocheol-mods
+claude plugin uninstall eli12@yeocheol-mods          # 프로젝트에만 설치했다면 그 폴더에서 --scope local 을 붙여서
+claude plugin marketplace remove yeocheol-mods
+claude plugin marketplace add yeochul-jeon/devflow-mods
+claude plugin install team-board@devflow-mods
+claude plugin install eli12@devflow-mods             # 프로젝트에만 쓰려면 그 폴더에서 --scope local
+```
+상황판 기록(`~/.claude/team-board/`)은 그대로 이어집니다. `/board band off`, `sound off`, `name` 같은 설정은 다시 해야 할 수 있어요.
+
 ## 업데이트
 
 ```bash
-claude plugin marketplace update yeocheol-mods
-claude plugin update team-board@yeocheol-mods
-claude plugin update eli12@yeocheol-mods
+claude plugin marketplace update devflow-mods
+claude plugin update team-board@devflow-mods
+claude plugin update eli12@devflow-mods
 ```
 업데이트한 뒤에는 세션을 다시 열어야 새 버전이 적용됩니다.
 
@@ -134,7 +147,7 @@ claude plugin update eli12@yeocheol-mods
 
 색 바꾸기 (`palette`: `night` 기본 · `aurora` · `theme`). `theme` 은 Claude Code 테마 색을 따르니 밝은 배경이면 이것:
 ```bash
-claude plugin configure team-board@yeocheol-mods      # 또는 /plugin → Installed → team-board → Configure
+claude plugin configure team-board@devflow-mods      # 또는 /plugin → Installed → team-board → Configure
 ```
 
 무엇이 기록되나

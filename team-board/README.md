@@ -10,6 +10,6 @@
 설치, 명령, 화면 설명은 [저장소 README](../README.md#team-board-사용), 바뀐 점은 [CHANGELOG](../CHANGELOG.md) 를 보세요.
 
 ```bash
-claude plugin marketplace add yeochul-jeon/yeocheol-mods
-claude plugin install team-board@yeocheol-mods
+claude plugin marketplace add yeochul-jeon/devflow-mods
+claude plugin install team-board@devflow-mods
 ```

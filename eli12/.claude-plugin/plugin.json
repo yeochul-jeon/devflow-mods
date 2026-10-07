@@ -7,7 +7,7 @@
     "url": "https://github.com/yeochul-jeon"
   },
   "types": "./types/index.d.ts",
-  "homepage": "https://github.com/yeochul-jeon/yeocheol-mods/tree/main/eli12",
-  "repository": "https://github.com/yeochul-jeon/yeocheol-mods",
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/eli12",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
   "license": "MIT"
 }

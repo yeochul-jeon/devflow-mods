@@ -1,5 +1,8 @@
 # 변경 기록
 
+## 마켓플레이스 이름 변경 (2026-10-07)
+- `yeocheol-mods` → `devflow-mods` (저장소 `yeochul-jeon/devflow-mods`). 옮기는 방법은 README 의 "예전 이름으로 설치했다면".
+
 ## team-board
 
 ### 0.7.0 (2026-10-07)
