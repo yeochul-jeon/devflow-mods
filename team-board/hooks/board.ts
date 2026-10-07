@@ -11,7 +11,7 @@ export const MAX_DECISIONS = 20
 export function emptyBeat(id: string, name: string, cwd: string): Beat {
   return {
     id, name, cwd, state: 'idle', step: '', prompt: '', last: '', question: '',
-    contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], updatedAt: 0,
+    contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], fail: null, updatedAt: 0,
   }
 }
 
@@ -212,6 +212,7 @@ export const EVENT_MARK: Record<Event['kind'], string> = {
   ask: '⚑ 질문',
   decide: '◆ 결정',
   abort: '✗ 중단',
+  fail: '⚠ 숨은 실패',
 }
 
 export function explainPrompt(b: Beat): string {

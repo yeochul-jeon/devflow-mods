@@ -33,6 +33,7 @@ import {
   stripMarkdown,
   visible,
 } from './board'
+import { commandKey, formatAlert, judge, noteForClaude, signLine } from './failure'
 import { bar, contextTone, paletteOf } from './palette'
 import { cells as widthOf, flowArt, parseExplain } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
@@ -58,6 +59,7 @@ const BAND_MODE_KEY = 'band-mode'
 /** 세션별로 정한 표시 이름: 다시 켜도(claude --continue) 유지 */
 const nameKey = (sessionId: string) => `name:${sessionId}`
 const SOUND_KEY = 'sound-off'
+const FAIL_KEY = 'fail-off'
 /** 결정을 기다린 지 이만큼 지나도 그대로면 소리로 알린다 (바로 답하면 조용). */
 const ALERT_AFTER_MS = 20_000
 
@@ -75,6 +77,8 @@ const self = {
   /** 지금 결정을 기다리기 시작한 시각, 이미 알린 질문 */
   askingSince: 0,
   alertedFor: '',
+  /** 숨은 실패 감지를 끔 (/board fail off) */
+  failOff: false,
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -199,6 +203,7 @@ export const register: Register = (on, options) => {
     // 세션 id 가 같은 프로세스가 둘일 수 있어(재개, 상위 세션이 띄운 세션) 프로세스마다 꼬리표를 붙인다.
     // 모듈이 다시 로드된 경우(플러그인 갱신, 엔진 작업자 재시작)엔 같은 세션 기록을 이어 쓴다.
     self.sessionId = await $.session.id()
+    self.failOff = (await $.store.get(FAIL_KEY)) === true
     self.transcript = `${home}/.claude/projects/${projectDirName(cwd)}/${self.sessionId}.jsonl`
     const prev = await read($, me)
     self.beat = prev
@@ -254,6 +259,29 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     await save($, { state: 'working', step: '생각 중', question: '' })
     return next(e)
+  })
+
+  // 숨은 실패: exit 0 인데 출력에 실패 흔적. 같은 명령이 깨끗하게 다시 돌면 지운다.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (self.failOff || e.agentId || !self.beat) return ran
+    // 거부됐거나 exit 0 이 아니면 Claude 가 이미 오류로 받는다
+    if (ran.deny !== undefined || ran.isError === true) return ran
+    const out = ran.result
+    if (!out || out.interrupted || out.backgroundTaskId !== undefined) return ran
+    const text = [out.stdout, out.stderr].filter(t => typeof t === 'string' && t.length > 0).join('\n')
+    const at = await $.clock.now()
+    const alert = judge(e.command, text, at)
+    if (!alert) {
+      const prev = self.beat.fail
+      if (prev && text.trim() && prev.key === commandKey(e.command)) await save($, { fail: null }, true)
+      return ran
+    }
+    const timeline = pushCapped(self.beat.timeline, event(at, 'fail', `${alert.key} · ${signLine(alert.signs[0] ?? '')}`), MAX_TIMELINE)
+    await save($, { fail: alert, timeline }, true)
+    await scan($)
+    const memo = noteForClaude(alert)
+    return memo ? { ...ran, context: [...(ran.context ?? []), memo] } : ran
   })
 
   on('tool.call', async ($, e, next) => {
@@ -340,6 +368,24 @@ export const register: Register = (on, options) => {
       await update($, bandMode, (): 'hud' | 'line' => (rest[0] === 'line' ? 'line' : 'hud'))
       return { text: rest[0] === 'hud' ? '입력창 위 팀 띠를 창(HUD) 모양으로 그립니다.' : '입력창 위 팀 띠를 한 줄로 그립니다.' }
     }
+    if (sub === 'fail') {
+      const opt = rest[0] ?? ''
+      if (opt === 'on' || opt === 'off') {
+        self.failOff = opt === 'off'
+        await $.store.set(FAIL_KEY, self.failOff)
+        if (self.failOff) await save($, { fail: null }, true)
+        return { text: self.failOff ? '숨은 실패 감지를 껐어요. 다시 켜려면 /board fail on' : '숨은 실패 감지를 켰어요.' }
+      }
+      if (opt === 'clear') {
+        await save($, { fail: null }, true)
+        await scan($)
+        return { text: '이 세션의 숨은 실패 표시를 지웠어요.' }
+      }
+      const all = visible(await read($, beats), await $.clock.now()).filter(b => b.fail)
+      const picked = opt ? all.filter(b => b.name.includes(rest.join(' '))) : all
+      if (!picked.length) return { text: `숨은 실패가 없어요.${self.failOff ? ' (이 세션은 감지가 꺼져 있어요: /board fail on)' : ''}` }
+      return { text: picked.map(b => formatAlert(b.name, b.fail!)).join('\n\n') + '\n\n같은 명령이 깨끗하게 다시 돌면 저절로 지워져요. 바로 지우려면 그 세션에서 /board fail clear' }
+    }
     if (sub === 'name' && rest.length) {
       await $.store.set(nameKey(self.sessionId), rest.join(' ').slice(0, 24))
       await save($, { name: rest.join(' ').slice(0, 24) }, true)
@@ -401,6 +447,9 @@ export const register: Register = (on, options) => {
     const tone = (b: Beat) => (isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.state === 'working' ? pal.work : pal.dim)
     const markOf = (b: Beat) => (isStale(b, now) ? '·' : b.state === 'asking' ? '⚑' : b.state === 'working' ? '●' : '○')
     const isMe = (b: Beat) => b.id === self.beat?.id
+    // 숨은 실패: 결정 대기가 아니고 아직 풀리지 않은 실패(high)
+    const failed = (b: Beat) => !isStale(b, now) && b.fail?.level === 'high'
+    const fails = list.filter(failed).length
 
     // 한 줄 모양 (예전 띠): /board band line
     if ((await read($, bandMode)) === 'line') {
@@ -411,7 +460,10 @@ export const register: Register = (on, options) => {
         return b.state === 'asking' && !stale ? (
           <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` ${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${prog} `}</Text>
         ) : (
-          <Text color={tone(b)} dimColor={stale}>{`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${prog}`}</Text>
+          <Text dimColor={stale}>
+            <Text color={tone(b)}>{`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${prog}`}</Text>
+            {failed(b) ? <Text color={pal.bad} bold>{' ⚠'}</Text> : null}
+          </Text>
         )
       }
       return (
@@ -421,6 +473,7 @@ export const register: Register = (on, options) => {
             <Text backgroundColor={asking ? pal.ask : pal.accent} color={pal.onBadge} bold>
               {asking ? ` TEAM ${list.length} · 결정 ${asking} ` : ` TEAM ${list.length} `}
             </Text>
+            {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
             {list.map(chip)}
             <Text color={pal.dim}>/board</Text>
           </Box>
@@ -442,10 +495,13 @@ export const register: Register = (on, options) => {
       const stale = isStale(b, now)
       const hot = b.state === 'asking' && !stale
       const fg = hot ? pal.onBadge : pal.text
-      const tag = stale ? 'zz' : hot ? '결정!' : b.state === 'working' ? '작업' : '대기'
+      const bad = !hot && failed(b)
+      const tag = stale ? 'zz' : hot ? '결정!' : bad ? '⚠실패' : b.state === 'working' ? '작업' : '대기'
       const { done, total } = progress(b.tasks)
       const second = hot
         ? <Text color={pal.onBadge} wrap="truncate-end">{questionSummary(b.question)}</Text>
+        : bad
+          ? <Text color={pal.bad} wrap="truncate-end">{signLine(b.fail!.signs[0] ?? b.fail!.key)}</Text>
         : total
           ? (
               <Text wrap="truncate-end">
@@ -466,7 +522,7 @@ export const register: Register = (on, options) => {
             <Text color={hot ? pal.onBadge : tone(b)} bold wrap="truncate-end">
               {`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}`}
             </Text>
-            <Text color={hot ? pal.onBadge : tone(b)} bold={hot}>{` ${tag}`}</Text>
+            <Text color={hot ? pal.onBadge : bad ? pal.bad : tone(b)} bold={hot || bad}>{` ${tag}`}</Text>
           </Box>
           <Box>{second}</Box>
         </Box>
@@ -474,11 +530,12 @@ export const register: Register = (on, options) => {
     }
 
     const hud = (
-      <Box flexDirection="column" borderStyle="double" borderColor={asking ? pal.ask : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
+      <Box flexDirection="column" borderStyle="double" borderColor={asking ? pal.ask : fails ? pal.bad : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
         <Box flexDirection="row" justifyContent="space-between">
           <Box flexDirection="row" columnGap={2} flexShrink={1}>
             <Text color={pal.accent} bold>{`◆ TEAM ${list.length}`}</Text>
             {asking ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 ${asking} `}</Text> : null}
+            {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
             <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
             <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
             {sum.total ? (
@@ -520,7 +577,7 @@ export const register: Register = (on, options) => {
     const noop = () => {}
 
     const stateTone = (b: Beat) =>
-      isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.state === 'working' ? pal.work : pal.frame
+      isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.fail?.level === 'high' ? pal.bad : b.state === 'working' ? pal.work : pal.frame
 
     // 라벨 칸 폭을 맞춘 한 줄
     const row = (labelText: string, body: JSX.Element, key?: string) => (
@@ -534,7 +591,7 @@ export const register: Register = (on, options) => {
 
     const titleRow = (b: Beat) => {
       const tone = stateTone(b)
-      const badge = isStale(b, now) ? '소식없음' : label(b, now)
+      const badge = isStale(b, now) ? '소식없음' : b.state !== 'asking' && b.fail?.level === 'high' ? '숨은 실패' : label(b, now)
       return (
         <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
           <Box flexDirection="row" columnGap={1} flexShrink={1}>
@@ -576,8 +633,9 @@ export const register: Register = (on, options) => {
     const tileOf = (b: Beat) => {
       if (!useTile || !Raster) return null
       const stale = isStale(b, now)
-      const kind = stale ? 'stale' : b.state === 'asking' ? 'asking' : b.state === 'working' ? 'working' : 'idle'
-      const bg = stale || kind === 'idle' ? pal.frame : kind === 'asking' ? pal.ask : pal.work
+      const broke = !stale && b.state !== 'asking' && b.fail?.level === 'high'
+      const kind = stale ? 'stale' : b.state === 'asking' || broke ? 'asking' : b.state === 'working' ? 'working' : 'idle'
+      const bg = stale || kind === 'idle' ? pal.frame : broke ? pal.bad : kind === 'asking' ? pal.ask : pal.work
       const fg = stale ? pal.dim : kind === 'idle' ? pal.ok : pal.onBadge
       return (
         <Box width={8} flexShrink={0} backgroundColor={bg} paddingX={1}>
@@ -588,16 +646,19 @@ export const register: Register = (on, options) => {
 
     // 결정을 기다리는 카드에만 주의 띠
     const stripeOf = (b: Beat) => {
-      if (b.state !== 'asking' || isStale(b, now)) return null
+      if (isStale(b, now)) return null
+      const asks = b.state === 'asking'
+      if (!asks && b.fail?.level !== 'high') return null
       const inner = cols - 6
-      const text = ' 결정을 기다려요 '
+      const text = asks ? ' 결정을 기다려요 ' : ' 출력에 실패가 숨어 있어요 '
+      const hue = asks ? pal.ask : pal.bad
       const left = Math.max(2, Math.floor((inner - widthOf(text)) / 2))
       const right = Math.max(2, inner - left - widthOf(text))
       return (
         <Text wrap="truncate-end">
-          <Text color={pal.ask} backgroundColor={pal.onBadge}>{'▚'.repeat(left)}</Text>
-          <Text color={pal.onBadge} backgroundColor={pal.ask} bold>{text}</Text>
-          <Text color={pal.ask} backgroundColor={pal.onBadge}>{'▚'.repeat(right)}</Text>
+          <Text color={hue} backgroundColor={pal.onBadge}>{'▚'.repeat(left)}</Text>
+          <Text color={pal.onBadge} backgroundColor={hue} bold>{text}</Text>
+          <Text color={hue} backgroundColor={pal.onBadge}>{'▚'.repeat(right)}</Text>
         </Text>
       )
     }
@@ -638,6 +699,21 @@ export const register: Register = (on, options) => {
       paddingX: 1,
       ...(pal.card ? { backgroundColor: pal.card } : {}),
     })
+
+    // 숨은 실패: 명령, 흔적, 가림. full 이면 흔적을 모두.
+    const failRows = (b: Beat, full: boolean) => {
+      const f = b.fail
+      if (!f || isStale(b, now)) return null
+      const hue = f.level === 'high' ? pal.bad : pal.ask
+      const signs = full ? f.signs : f.signs.slice(0, 1)
+      return (
+        <Box flexDirection="column">
+          {row('실패', <Text wrap="truncate-end"><Text color={hue} bold>{f.level === 'high' ? '⚠ exit 0 인데 ' : '△ 확인 필요 '}</Text><Text color={pal.text}>{f.command}</Text></Text>, `fail-cmd-${b.id}`)}
+          {signs.map((sg, i) => row('', <Text color={hue} wrap="truncate-end">{`• ${sg}`}</Text>, `fail-sign-${b.id}-${i}`))}
+          {full ? f.masks.map((m, i) => row('', <Text color={pal.dim} wrap="truncate-end">{`가림  ${m}`}</Text>, `fail-mask-${b.id}-${i}`)) : null}
+        </Box>
+      )
+    }
 
     // 설명 상자 안쪽 폭: 패널 폭에서 패널·카드·상자의 테두리와 여백, 들여쓰기를 뺀다.
     const artWidth = Math.max(20, cols - 18)
@@ -751,6 +827,7 @@ export const register: Register = (on, options) => {
           <Box {...cardProps(b)}>
             {headOf(b)}
             {b.prompt ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>) : null}
+            {failRows(b, true)}
             {b.files.length ? row('편집', <Text color={pal.dim} wrap="truncate-end">{`${b.edits}회 · ${b.files.slice(0, 6).join(', ')}`}</Text>) : null}
             {askBlock(b, 40)}
           </Box>
@@ -844,6 +921,7 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" columnGap={2} flexWrap="wrap" marginBottom={1}>
           <Text color={pal.accent} bold>TEAM BOARD</Text>
           {count('asking') ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 대기 ${count('asking')} `}</Text> : null}
+          {list.some(b => b.fail?.level === 'high' && !isStale(b, now)) ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 숨은 실패 ${list.filter(b => b.fail?.level === 'high' && !isStale(b, now)).length} `}</Text> : null}
           <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
           <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
           {sum.total ? (
@@ -871,6 +949,7 @@ export const register: Register = (on, options) => {
                     </Text>,
                   )
                 : null}
+              {failRows(b, false)}
               {askBlock(b, 6)}
               <Box flexDirection="row" justifyContent="flex-end">
                 <Button key={`detail-${b.id}`} label="자세히 →" onPress={noop} />
@@ -878,7 +957,7 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
-        <Text color={pal.dim}>PgUp/PgDn 스크롤 · Home 처음 · /board 세션이름 → 자세히 · /board name 이름 · /board band|sound off|on</Text>
+        <Text color={pal.dim}>PgUp/PgDn 스크롤 · Home 처음 · /board 세션이름 → 자세히 · /board name 이름 · /board fail · /board band|sound off|on</Text>
       </Box>
     )
   })

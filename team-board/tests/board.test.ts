@@ -20,6 +20,7 @@ import {
 import { bar, contextTone, paletteOf } from '../hooks/palette'
 import { cells, clip, flowArt, parseExplain } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
+import { commandKey, isReadOnly, judge, masksIn, noteForClaude, scanOutput } from '../hooks/failure'
 
 const NOW = 1_800_000_000_000
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -166,6 +167,56 @@ describe('board (순수 함수)', () => {
   })
 })
 
+describe('숨은 실패', () => {
+  const GRADLE = [
+    '> Task :order-api:test',
+    'OrderServiceTest > 취소된 주문은 환불한다() FAILED',
+    '    org.opentest4j.AssertionFailedError at OrderServiceTest.kt:42',
+    '12 tests completed, 1 failed',
+    '> Task :order-api:test FAILED',
+    'BUILD FAILED in 14s',
+  ].join('\n')
+
+  test('Gradle 출력을 tail 로 자르면 exit 0 이어도 실패로 본다', async () => {
+    const a = judge('cd order-api && ./gradlew test --tests "*Order*" 2>&1 | tail -30', GRADLE, 1)!
+    expect(a.level).toBe('high')
+    expect(a.key).toBe('./gradlew test')
+    expect(a.signs[0]).toContain('12 tests completed, 1 failed')
+    expect(a.signs.some(s => s.includes('12 tests completed, 1 failed'))).toBe(true)
+    expect(a.masks[0]).toContain('파이프')
+    expect(noteForClaude(a)).toContain('pipefail')
+  })
+
+  test('Maven, Spring, Kotlin 컴파일 오류', async () => {
+    expect(scanOutput('[ERROR] Tests run: 8, Failures: 2, Errors: 0, Skipped: 0').map(f => f.label)).toContain('실패한 테스트')
+    expect(scanOutput('Tests run: 8, Failures: 0, Errors: 1, Skipped: 0')[0]!.label).toBe('실패한 테스트')
+    expect(scanOutput('***************************\nAPPLICATION FAILED TO START\n***************************')[0]!.label).toBe('Spring 기동 실패')
+    expect(scanOutput('e: file:///w/src/main/kotlin/Order.kt:12:5 Unresolved reference: foo')[0]!.label).toBe('컴파일 오류')
+    expect(scanOutput('Caused by: java.sql.SQLSyntaxErrorException: Table not found')[0]!.label).toBe('예외 발생')
+  })
+
+  test('통과 요약과 0 건은 조용하다', async () => {
+    expect(scanOutput('Tests run: 42, Failures: 0, Errors: 0, Skipped: 0\nBUILD SUCCESSFUL in 9s')).toEqual([])
+    expect(scanOutput('12 tests completed, 0 failed')).toEqual([])
+    expect(judge('./gradlew build', 'BUILD SUCCESSFUL in 3s', 1)).toBeNull()
+  })
+
+  test('건너뛴 테스트·실행 없음은 확인 필요(warn)이고 Claude 메모는 없다', async () => {
+    const a = judge('./gradlew test --tests Nope', 'No tests found for given includes: [Nope]', 1)!
+    expect(a.level).toBe('warn')
+    expect(noteForClaude(a)).toBeNull()
+  })
+
+  test('로그를 읽기만 하는 명령은 판정하지 않는다', async () => {
+    expect(isReadOnly('cd svc && grep -n FAILED build/test.log')).toBe(true)
+    expect(isReadOnly('git log --oneline')).toBe(true)
+    expect(isReadOnly('LANG=C ./gradlew test')).toBe(false)
+    expect(judge('tail -50 build.log', GRADLE, 1)).toBeNull()
+    expect(commandKey('cd a && LANG=C ./gradlew test --info')).toBe('./gradlew test')
+    expect(masksIn('./gradlew test || true')).toHaveLength(1)
+  })
+})
+
 describe('세션 이름', () => {
   test('같은 이름은 ·2, ·3 으로 구분한다', async () => {
     const out = dedupeNames([{ id: 'a', name: 'svc' }, { id: 'c', name: 'svc' }, { id: 'b', name: 'svc' }, { id: 'd', name: 'web' }])
@@ -213,6 +264,10 @@ describe('팀 상황판', () => {
     on('tool.call', ($, e: any) => {
       if (e.tool === 'TaskCreate') return { result: { task: { id: '7', subject: e.subject } }, text: 'ok' }
       if (e.tool === 'TaskUpdate') return { result: { success: true }, text: 'ok' }
+      if (e.tool === 'Bash') {
+        const bad = String(e.command).includes('tail')
+        return { result: { stdout: bad ? '12 tests completed, 1 failed\nBUILD FAILED in 3s' : 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' }
+      }
       if (e.tool === 'AskUserQuestion') return { result: { questions: e.questions, answers: { 'Approval Test 범위는?': '변경 파일만' } }, text: 'ok' }
       return { result: {}, text: 'ok' }
     })
@@ -394,6 +449,19 @@ describe('팀 상황판', () => {
     // /rename 을 따라가고, 다시 로드돼도 그 이름
     await $.command.run({ command: 'rename', args: 'api-fix' } as any)
     expect(mine().name).toBe('api-fix')
+
+    // 숨은 실패: exit 0 인데 실패 출력 → Claude 메모, 띠 표시, 같은 명령 재실행으로 해제
+    const ran: any = await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -20', tool_use_id: 'b1' } as any)
+    expect(ran.context?.join('\n')).toContain('exit 0 으로 끝났지만')
+    expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
+    const fb = await $.ui.mount(BAND)
+    expect(await fb.find({ type: 'Text', text: /⚠ 실패 1/ })).toBeDefined()
+    expect(await fb.find({ type: 'Text', text: /⚠실패/ })).toBeDefined()
+    await fb.unmount()
+    expect((await $.command.run({ command: 'board', args: 'fail' } as any)).text).toContain('12 tests completed, 1 failed')
+    await $.tool.call({ tool: 'Bash', command: './gradlew test --tests Order', tool_use_id: 'b2' } as any)
+    expect(mine().fail).toBeNull()
+    expect(mine().timeline.some((t: any) => t.kind === 'fail')).toBe(true)
 
     const missing = await $.command.run({ command: 'board', args: 'nobody' } as any)
     expect(missing.text).toContain('찾지 못했어요')

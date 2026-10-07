@@ -8,7 +8,7 @@ Claude Code **mods** 모음: 어려운 설명을 12살 버전으로 풀어 주�
 
 | 플러그인 | 하는 일 | 명령 |
 |---|---|---|
-| `team-board` | 같은 저장소(워크트리 포함)에서 돌고 있는 여러 Claude Code 세션의 상황판. 진행 현황(할 일 경로선), 결정 기록(질문 → 답), 결정 대기 알림(주의 띠·음성), 결정 대기 항목의 12살 버전 설명 | `/board` |
+| `team-board` | 같은 저장소(워크트리 포함)에서 돌고 있는 여러 Claude Code 세션의 상황판. 진행 현황(할 일 경로선), 결정 기록(질문 → 답), 결정 대기 알림(주의 띠·음성), **숨은 실패 감지**(exit 0 인데 실패한 빌드·테스트), 결정 대기 항목의 12살 버전 설명 | `/board` |
 | `eli12` | 어려운 설명만 골라 12살 버전으로. 자동 스킬(`explain-simply`) + 직전 답변이나 주제를 옆 패널에 풀어 주는 명령 | `/eli12 [주제]` |
 
 Claude Code **v2.1.287 이상**이 필요합니다 (`claude --version`).
@@ -66,6 +66,7 @@ claude plugin update eli12@yeocheol-mods
 | `/board name sub-1` | 이 세션의 표시 이름 바꾸기 (다음에 다시 열어도 유지) |
 | `/board band off` / `on` | 입력창 위 팀 창 끄기 / 켜기 (다음 세션에도 기억) |
 | `/board band hud` / `line` | 팀 창 모양: 창(기본) / 한 줄 |
+| `/board fail` | 숨은 실패 보고서 (명령, 실패 흔적, 실패 코드를 가린 구문). `on` / `off` 감지 켜기·끄기, `clear` 이 세션 표시 지우기 |
 | `/board sound off` / `on` / `test` | 결정 대기 음성 알림 끄기 / 켜기 (기본 켜짐) / 미리 듣기 |
 
 - `[ 12살 버전으로 설명 ]` 버튼: 결정 항목마다 비유, 선택지별 **ASCII 흐름 그림**, 앞선 결정과의 맥락(◆), 세션 제안(★), 먼저 정할 것을 정리합니다. 그 세션의 **앞선 결정과 진행 상황도 맥락으로** 함께 넘깁니다 (Haiku 1회).
@@ -98,6 +99,19 @@ claude plugin update eli12@yeocheol-mods
 - 경로선: `●` 끝낸 할 일 · `◉` 지금 · `○` 남은 할 일 · `◎` 도착. 할 일이 많으면 지금 근처만 보이고 양 끝은 `…`
 - 데스크톱 앱, `theme` 팔레트, 좁은 패널에서는 아이콘 없이 글자 카드로 그립니다.
 
+숨은 실패 (exit 0 인데 실패)
+
+<img src="docs/images/silent-failure.webp" alt="숨은 실패: 빨간 주의 띠와 함께 명령과 실패 흔적을 보여 주는 카드" width="460">
+
+- `./gradlew test 2>&1 | tail -30` 처럼 파이프로 출력을 자르면 테스트가 실패해도 exit 0 이 됩니다. Claude 가 이 결과를 "통과"로 보고하기 쉬워요.
+- Bash 가 exit 0 으로 끝났는데 출력에 실패 흔적이 있으면:
+  - Claude 에게: "exit 0 이지만 실패 흔적이 있으니 성공으로 보고하기 전에 확인하라"는 메모를 결과에 붙입니다. 파이프·`|| true` 로 실패 코드를 가렸으면 `set -o pipefail` 도 권합니다.
+  - 사람에게: 팀 창의 그 세션 칸에 `⚠실패` 와 실패 줄(`12 tests completed, 1 failed`), 머리줄에 `⚠ 실패 n`, 보드 카드에 빨간 주의 띠. **다른 탭에서도** 보입니다.
+- 잡는 것: Gradle(`BUILD FAILED`, `> Task … FAILED`, `n tests completed, m failed`), Maven(`Tests run: …, Failures: n`, `BUILD FAILURE`), JUnit(`… > 테스트() FAILED`), Kotlin·Java 컴파일 오류, Spring `APPLICATION FAILED TO START`, `Caused by: …Exception`, npm·Python 오류, `command not found` 등. 건너뛴 테스트·실행된 테스트 없음(`No tests found for given includes`)은 "확인 필요"로 보드에만 표시합니다.
+- 오탐 줄이기: `grep`, `cat`, `tail`, `git log/diff` 처럼 로그를 **읽기만 하는** 명령은 판정하지 않고, `0 failed` 같은 통과 요약은 무시합니다.
+- 같은 명령(예: `./gradlew test`)이 깨끗하게 다시 돌면 표시가 저절로 지워집니다.
+- 영어 출력 기준이고 Bash 만 봅니다. 원 아이디어는 [Reasonofmoon/reasonofmoon-mods](https://github.com/Reasonofmoon/reasonofmoon-mods) 의 silent-failure (MIT).
+
 음성 알림 (기본 켜짐, macOS)
 - 어떤 세션이 결정을 **20초 넘게** 기다리면 그 세션이 "띵동" 소리와 함께 "sub-2 세션이 결정을 기다립니다"라고 한 번 말합니다.
 - 질문이 나오자마자 그 탭에서 답하면 조용합니다. 탭이 여러 개여도 기다리는 세션만 말하니 한 번만 들립니다.
@@ -112,7 +126,7 @@ claude plugin configure team-board@yeocheol-mods      # 또는 /plugin → Insta
 무엇이 기록되나
 - 진행 현황: Claude가 쓰는 할 일 도구(TaskCreate/TaskUpdate, TodoWrite)를 그대로 따라갑니다.
 - 결정: ① AskUserQuestion 질문과 고른 답, ② 답변 끝에서 결정을 요청한 뒤("정해 주세요", "할까요?" 등) 사용자가 보낸 다음 요청을 그 결정의 답으로 기록합니다.
-- 흐름: 요청, 질문, 결정, 완료, 중단을 최근 12개까지.
+- 흐름: 요청, 질문, 결정, 완료, 중단, 숨은 실패를 최근 12개까지.
 
 알아둘 것
 - 상태는 `~/.claude/team-board/<레포>/` 에 세션마다 JSON 파일로 저장됩니다. 요청·질문·답 원문이 평문으로 들어가니 동기화되는 폴더가 아닌지 확인하세요. 오래된 파일은 지워도 됩니다.
@@ -136,8 +150,10 @@ claude plugin validate ./team-board     # 무엇을 훅하고 호출하는지
 claude plugin test ./team-board         # 테스트
 claude plugin test ./eli12
 ```
-각 mod 의 화면·문구는 `hooks/` 의 순수 함수(`board.ts`, `diagram.ts`, `prompt.ts`)에 모여 있어 고치기 쉽습니다. README 와 테스트의 `order-svc`, `sub-2`, `PR38` 같은 이름은 예시입니다.
+각 mod 의 화면·문구는 `hooks/` 의 순수 함수(`board.ts`, `diagram.ts`, `failure.ts`, `prompt.ts`)에 모여 있어 고치기 쉽습니다. README 와 테스트의 `order-svc`, `sub-2`, `PR38` 같은 이름은 예시입니다.
 
 ## 라이선스
 
 [MIT](LICENSE)
+
+`team-board/hooks/failure.ts` 의 숨은 실패 규칙 일부는 [reasonofmoon-mods](https://github.com/Reasonofmoon/reasonofmoon-mods) (MIT, © Reason of Moon) 를 바탕으로 고쳐 썼습니다.

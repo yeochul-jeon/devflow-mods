@@ -6,7 +6,10 @@ export type Task = { id: string; subject: string; status: 'pending' | 'in_progre
 export type Decision = { at: number; question: string; answer: string }
 
 /** 세션 흐름의 한 칸. */
-export type Event = { at: number; kind: 'prompt' | 'done' | 'ask' | 'decide' | 'abort'; text: string }
+export type Event = { at: number; kind: 'prompt' | 'done' | 'ask' | 'decide' | 'abort' | 'fail'; text: string }
+
+/** exit 0 인데 출력에 실패 흔적이 있던 Bash 실행. high = 실패, warn = 확인 필요(건너뛴 테스트 등). */
+export type FailAlert = { at: number; command: string; key: string; level: 'high' | 'warn'; signs: string[]; masks: string[] }
 
 /** 세션 하나가 공유 폴더에 쓰는 상태 한 장. */
 export type Beat = {
@@ -25,6 +28,8 @@ export type Beat = {
   timeline: Event[]
   edits: number
   files: string[]
+  /** 아직 풀리지 않은 숨은 실패 (같은 명령이 깨끗하게 다시 돌면 지워짐) */
+  fail: FailAlert | null
   updatedAt: number
 }
 
