@@ -1,0 +1,8 @@
+# Claude Code 가 mod 를 불러올 때 만드는 파일 (빌드마다 다름)
+.claude-plugin/types/
+*/.claude-plugin/types/
+*/tsconfig.json
+tsconfig.json
+node_modules/
+.DS_Store
+*.zip

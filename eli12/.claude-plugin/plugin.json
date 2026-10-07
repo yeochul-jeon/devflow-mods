@@ -1,0 +1,12 @@
+{
+  "name": "eli12",
+  "version": "0.1.3",
+  "description": "어려운 설명만 골라 12살도 이해하게: 자동 규칙(스킬) + /eli12 옆 패널(mod)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/yeochul-jeon/yeocheol-mods/tree/main/eli12",
+  "repository": "https://github.com/yeochul-jeon/yeocheol-mods"
+}
