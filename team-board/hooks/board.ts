@@ -265,3 +265,32 @@ export function routeLine(tasks: readonly Task[], width: number): Seg[] {
   out.push({ text: '◎', tone: allDone ? 'done' : 'end' })
   return out
 }
+
+/** 같은 이름의 세션이 여럿이면 화면용 이름 뒤에 ·2, ·3 을 붙인다 (기록은 그대로). */
+export function dedupeNames<T extends { id: string; name: string }>(list: readonly T[]): T[] {
+  const groups = new Map<string, T[]>()
+  for (const b of list) groups.set(b.name, [...(groups.get(b.name) ?? []), b])
+  const label = new Map<string, string>()
+  for (const [name, same] of groups) {
+    if (same.length < 2) continue
+    ;[...same].sort((a, b) => a.id.localeCompare(b.id)).forEach((b, i) => label.set(b.id, i === 0 ? name : `${name}·${i + 1}`))
+  }
+  return list.map(b => (label.has(b.id) ? { ...b, name: label.get(b.id)! } : b))
+}
+
+/** transcript 안의 마지막 customTitle (claude --name, /rename 이 남기는 이름). */
+export function lastCustomTitle(grepOutput: string): string {
+  const all = [...grepOutput.matchAll(/"customTitle":"((?:[^"\\]|\\.)*)"/g)]
+  const last = all[all.length - 1]?.[1]
+  if (!last) return ''
+  try {
+    return (JSON.parse(`"${last}"`) as string).trim().slice(0, 24)
+  } catch {
+    return last.trim().slice(0, 24)
+  }
+}
+
+/** Claude Code 가 세션 기록을 두는 폴더 이름 (cwd 의 영숫자 외 문자를 - 로). */
+export function projectDirName(cwd: string): string {
+  return cwd.replace(/[^A-Za-z0-9]/g, '-')
+}

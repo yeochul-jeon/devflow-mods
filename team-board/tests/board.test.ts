@@ -3,6 +3,9 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import {
   applyTaskTool,
   askUserText,
+  dedupeNames,
+  lastCustomTitle,
+  projectDirName,
   decisionsFromAnswers,
   describeTool,
   looksLikeQuestion,
@@ -163,6 +166,18 @@ describe('board (순수 함수)', () => {
   })
 })
 
+describe('세션 이름', () => {
+  test('같은 이름은 ·2, ·3 으로 구분한다', async () => {
+    const out = dedupeNames([{ id: 'a', name: 'svc' }, { id: 'c', name: 'svc' }, { id: 'b', name: 'svc' }, { id: 'd', name: 'web' }])
+    expect(out.map(b => b.name)).toEqual(['svc', 'svc·3', 'svc·2', 'web'])
+  })
+  test('대화 기록의 마지막 세션 이름, 폴더 키', async () => {
+    expect(lastCustomTitle('"customTitle":"first"\n"customTitle":"api-fix"\n')).toBe('api-fix')
+    expect(lastCustomTitle('')).toBe('')
+    expect(projectDirName('/Users/me/work/order-svc')).toBe('-Users-me-work-order-svc')
+  })
+})
+
 describe('팀 상황판', () => {
   test('진행 현황과 결정 기록을 쓰고, 띠·전체·자세히 화면에 그린다', async ($, on) => {
     const DIR = '/home/me/.claude/team-board/repo-order-svc'
@@ -190,6 +205,8 @@ describe('팀 상황판', () => {
     }))
     on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1 } }))
+    on('command.run', { command: 'rename' }, () => ({ text: 'renamed' }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('prompt.submit', ($, e: any) => ({ text: e.text }))
     on('turn.complete', () => ({ text: '' }))
@@ -278,9 +295,23 @@ describe('팀 상황판', () => {
       props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 },
     } as any)
     expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined()
-    expect(await band.find({ type: 'Text', text: /TEAM 2 · 결정 1/ })).toBeDefined()
-    expect(await band.find({ type: 'Text', text: /⚑ sub-2 ▰▰▱▱ 1\/2/ })).toBeDefined()
+    // 기본은 HUD 창: 머리줄 + 세션 칸
+    expect(await band.find({ type: 'Text', text: /◆ TEAM 2/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /⚑ sub-2/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /결정!/ })).toBeDefined()
+    expect(await band.find({ key: 'band-board' })).toBeDefined()
     await band.unmount()
+    // 한 줄 모양
+    expect((await $.command.run({ command: 'board', args: 'band line' } as any)).text).toBeTruthy()
+    const line = await $.ui.mount({
+      plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt',
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 },
+    } as any)
+    expect(await line.find({ type: 'Text', text: /TEAM 2 · 결정 1/ })).toBeDefined()
+    expect(await line.find({ type: 'Text', text: /⚑ sub-2 ▰▰▱▱ 1\/2/ })).toBeDefined()
+    await line.unmount()
+    await $.command.run({ command: 'board', args: 'band hud' } as any)
 
     // 전체 보기
     await $.command.run({ command: 'board', args: '' } as any)
@@ -359,6 +390,10 @@ describe('팀 상황판', () => {
     expect([...files.keys()].filter(k => /\/me-[0-9a-f]{8}\.json$/.test(k)).length).toBe(1)
     expect(mine().name).toBe(before.name)
     expect(mine().decisions.length).toBe(before.decisions.length)
+
+    // /rename 을 따라가고, 다시 로드돼도 그 이름
+    await $.command.run({ command: 'rename', args: 'api-fix' } as any)
+    expect(mine().name).toBe('api-fix')
 
     const missing = await $.command.run({ command: 'board', args: 'nobody' } as any)
     expect(missing.text).toContain('찾지 못했어요')

@@ -50,6 +50,8 @@ declare module 'claude-code' {
       collapsed: string[]
       /** 입력창 위 띠를 끔 */
       bandOff: boolean
+      /** 띠 모양: hud (창) 또는 line (한 줄) */
+      bandMode: 'hud' | 'line'
     }
   }
 }
