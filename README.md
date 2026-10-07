@@ -20,6 +20,7 @@ claude plugin marketplace add yeochul-jeon/yeocheol-mods
 claude plugin install team-board@yeocheol-mods      # 모든 세션·워크트리에서 보여야 하므로 사용자 범위(기본)
 claude plugin install eli12@yeocheol-mods
 ```
+설치 중 `1 userConfig option not yet set` 안내가 나오면 색 설정(palette)을 아직 안 골랐다는 뜻이고, 그대로 두면 기본값 `night` 로 동작합니다.
 특정 프로젝트에만 쓰려면 그 프로젝트 폴더에서 `--scope local` 을 붙이세요. 설치 후 열려 있는 Claude Code 는 `/exit` 하고 다시 시작합니다 (`claude --continue` 로 대화를 이어서 열 수 있어요).
 
 설치하지 않고 한 세션만 써보기:
