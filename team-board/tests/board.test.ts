@@ -3,6 +3,9 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import {
   applyTaskTool,
   askUserText,
+  bandLayout,
+  bandOrder,
+  emptyBeat,
   dedupeNames,
   lastCustomTitle,
   projectDirName,
@@ -214,6 +217,32 @@ describe('숨은 실패', () => {
     expect(judge('tail -50 build.log', GRADLE, 1)).toBeNull()
     expect(commandKey('cd a && LANG=C ./gradlew test --info')).toBe('./gradlew test')
     expect(masksIn('./gradlew test || true')).toHaveLength(1)
+  })
+})
+
+describe('팀 창 배치 (세션 수에 따라)', () => {
+  test('혼자면 한 줄, 몇 개면 두 줄 칸, 많으면 한 줄 칸, 넘치면 +k', async () => {
+    expect(bandLayout(1, 150, 10).mode).toBe('solo')
+    const five = bandLayout(5, 150, 10)
+    expect(five).toMatchObject({ mode: 'full', shown: 5 })
+    expect(five.slotW).toBeGreaterThanOrEqual(22)
+    expect(bandLayout(9, 150, 10)).toMatchObject({ mode: 'full', shown: 9 }) // 두 줄로 줄바꿈
+    expect(bandLayout(9, 150, 6)).toMatchObject({ mode: 'compact', shown: 9 }) // 높이가 모자라면 한 줄 칸
+    const many = bandLayout(30, 150, 10)
+    expect(many.mode).toBe('compact')
+    expect(many.shown).toBeLessThan(30)
+    expect(bandLayout(4, 80, 10)).toMatchObject({ mode: 'full', shown: 4 })
+  })
+
+  test('먼저 보일 세션: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기', async () => {
+    const now = 1_000_000
+    const mk = (id: string, patch: object) => ({ ...emptyBeat(id, id, '/r'), updatedAt: now, ...patch })
+    const fail = { at: 1, command: 'x', key: 'x', level: 'high' as const, signs: [], masks: [] }
+    const order = bandOrder([
+      mk('idle', {}), mk('work', { state: 'working' }), mk('me', {}), mk('fail', { fail }), mk('ask', { state: 'asking' }),
+      mk('old', { updatedAt: 0 }),
+    ], now, 'me').map(b => b.id)
+    expect(order).toEqual(['ask', 'fail', 'me', 'work', 'idle', 'old'])
   })
 })
 
@@ -462,6 +491,9 @@ describe('팀 상황판', () => {
     await $.tool.call({ tool: 'Bash', command: './gradlew test --tests Order', tool_use_id: 'b2' } as any)
     expect(mine().fail).toBeNull()
     expect(mine().timeline.some((t: any) => t.kind === 'fail')).toBe(true)
+
+    expect((await $.command.run({ command: 'board', args: 'band solo off' } as any)).text).toContain('숨겨요')
+    expect((await $.command.run({ command: 'board', args: 'band solo on' } as any)).text).toContain('보여요')
 
     const missing = await $.command.run({ command: 'board', args: 'nobody' } as any)
     expect(missing.text).toContain('찾지 못했어요')

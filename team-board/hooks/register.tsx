@@ -7,6 +7,8 @@ import {
   ago,
   applyTaskTool,
   askUserText,
+  bandLayout,
+  bandOrder,
   basename,
   decisionsFromAnswers,
   describeTool,
@@ -54,8 +56,10 @@ const me = atom({ plugin: 'team-board', key: 'me' } as const, null as Beat | nul
 const collapsed = atom({ plugin: 'team-board', key: 'collapsed' } as const, [] as string[])
 const bandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
 const bandMode = atom({ plugin: 'team-board', key: 'bandMode' } as const, 'hud' as 'hud' | 'line')
+const bandSoloOff = atom({ plugin: 'team-board', key: 'bandSoloOff' } as const, false)
 const BAND_KEY = 'band-off'
 const BAND_MODE_KEY = 'band-mode'
+const BAND_SOLO_KEY = 'band-solo-off'
 /** 세션별로 정한 표시 이름: 다시 켜도(claude --continue) 유지 */
 const nameKey = (sessionId: string) => `name:${sessionId}`
 const SOUND_KEY = 'sound-off'
@@ -77,6 +81,8 @@ const self = {
   /** 지금 결정을 기다리기 시작한 시각, 이미 알린 질문 */
   askingSince: 0,
   alertedFor: '',
+  /** 세션 이름을 마지막으로 확인한 시각 */
+  titleCheckedAt: 0,
   /** 숨은 실패 감지를 끔 (/board fail off) */
   failOff: false,
 }
@@ -153,6 +159,26 @@ async function sessionTitle($: EngineInterface): Promise<string> {
   return grep ? lastCustomTitle(grep.stdout) : ''
 }
 
+const TITLE_EVERY_MS = 15_000
+
+/**
+ * claude --name 의 이름은 대화 기록 파일이 생긴 뒤에야 읽을 수 있어서, 직접 정한 이름이 없으면 가끔 다시 본다.
+ * /rename 은 command.run 훅이 바로 따라간다.
+ */
+async function followTitle($: EngineInterface): Promise<void> {
+  if (!self.beat) return
+  const now = await $.clock.now()
+  if (now - self.titleCheckedAt < TITLE_EVERY_MS) return
+  self.titleCheckedAt = now
+  const pinned = await $.store.get(nameKey(self.sessionId))
+  if (typeof pinned === 'string' && pinned) return
+  const title = await sessionTitle($)
+  if (title && title !== self.beat.name) {
+    await save($, { name: title }, true)
+    await scan($)
+  }
+}
+
 /**
  * 기본 표시 이름: 직접 정한 이름(/board name) > 세션 이름(claude --name, /rename) > 워크트리 브랜치 > 폴더 이름.
  */
@@ -215,6 +241,8 @@ export const register: Register = (on, options) => {
     if ((await $.store.get(BAND_KEY)) === true) await update($, bandOff, () => true)
     const mode = await $.store.get(BAND_MODE_KEY)
     await update($, bandMode, (): 'hud' | 'line' => (mode === 'line' ? 'line' : 'hud'))
+    const soloOff = (await $.store.get(BAND_SOLO_KEY)) === true
+    await update($, bandSoloOff, () => soloOff)
 
     $.clock.every(TICK_MS, async () => {
       const stale = (await $.clock.now()) - self.lastWrite > HEARTBEAT_MS
@@ -222,6 +250,7 @@ export const register: Register = (on, options) => {
       await scan($)
       await runExplain($)
       await maybeAlert($)
+      await followTitle($)
     })
 
     await $.command.register({
@@ -363,6 +392,12 @@ export const register: Register = (on, options) => {
       await $.store.set(SOUND_KEY, off)
       return { text: off ? '결정 대기 음성 알림을 껐어요.' : '결정 대기 음성 알림을 켰어요. 결정을 20초 넘게 기다리면 그 세션이 알려 줍니다.' }
     }
+    if (sub === 'band' && rest[0] === 'solo' && (rest[1] === 'on' || rest[1] === 'off')) {
+      const off = rest[1] === 'off'
+      await $.store.set(BAND_SOLO_KEY, off)
+      await update($, bandSoloOff, () => off)
+      return { text: off ? '세션이 하나일 때는 팀 창을 숨겨요. 다시 보려면 /board band solo on' : '세션이 하나여도 팀 창을 보여요.' }
+    }
     if (sub === 'band' && (rest[0] === 'hud' || rest[0] === 'line')) {
       await $.store.set(BAND_MODE_KEY, rest[0])
       await update($, bandMode, (): 'hud' | 'line' => (rest[0] === 'line' ? 'line' : 'hud'))
@@ -440,7 +475,8 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const list = visible(await read($, beats), now)
     const below = await next(e)
-    if (list.length < 2) return below
+    // 세션 하나: /board band solo off 면 숨김 (기본은 보임)
+    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return below
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const asking = list.filter(b => b.state === 'asking' && !isStale(b, now)).length
@@ -482,8 +518,12 @@ export const register: Register = (on, options) => {
     }
 
     // 창(HUD) 모양: 위에 팀 요약, 아래에 세션 칸을 나란히 (세이브 슬롯처럼)
-    const inner = Math.max(30, (e.props.bodyColumns ?? 100) - 4)
-    const slotW = Math.max(22, Math.min(34, Math.floor((inner - (list.length - 1)) / list.length)))
+    // 세션 수·화면 크기에 맞춰 배치: 혼자면 한 줄, 많으면 칸을 한 줄로 줄이고 넘치면 +k
+    const layout = bandLayout(list.length, e.props.bodyColumns ?? 100, e.props.maxRows ?? 10)
+    const slotW = layout.slotW
+    const ordered = bandOrder(list, now, self.beat?.id)
+    const shown = ordered.slice(0, layout.shown)
+    const hidden = ordered.length - shown.length
     const sum = list.reduce((a, b) => {
       const p = progress(b.tasks)
       return { done: a.done + p.done, total: a.total + p.total }
@@ -491,25 +531,29 @@ export const register: Register = (on, options) => {
     const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now)).length
     const SEG = { done: pal.ok, now: pal.work, left: pal.dim, end: pal.text } as const
 
-    const slot = (b: Beat) => {
-      const stale = isStale(b, now)
-      const hot = b.state === 'asking' && !stale
-      const fg = hot ? pal.onBadge : pal.text
+    const secondOf = (b: Beat, width: number) => {
+      const hot = b.state === 'asking' && !isStale(b, now)
       const bad = !hot && failed(b)
-      const tag = stale ? 'zz' : hot ? '결정!' : bad ? '⚠실패' : b.state === 'working' ? '작업' : '대기'
       const { done, total } = progress(b.tasks)
-      const second = hot
+      return hot
         ? <Text color={pal.onBadge} wrap="truncate-end">{questionSummary(b.question)}</Text>
         : bad
           ? <Text color={pal.bad} wrap="truncate-end">{signLine(b.fail!.signs[0] ?? b.fail!.key)}</Text>
         : total
           ? (
               <Text wrap="truncate-end">
-                {routeLine(b.tasks, Math.max(8, slotW - 8)).map(sg => <Text color={SEG[sg.tone]}>{sg.text}</Text>)}
+                {routeLine(b.tasks, Math.max(8, width - 8)).map(sg => <Text color={SEG[sg.tone]}>{sg.text}</Text>)}
                 <Text color={pal.text}>{` ${done}/${total}`}</Text>
               </Text>
             )
           : <Text color={b.state === 'working' ? pal.work : pal.dim} wrap="truncate-end">{b.state === 'working' ? b.step || '생각 중' : b.last || b.prompt || '새 요청 대기'}</Text>
+    }
+
+    const slot = (b: Beat) => {
+      const stale = isStale(b, now)
+      const hot = b.state === 'asking' && !stale
+      const bad = !hot && failed(b)
+      const tag = stale ? 'zz' : hot ? '결정!' : bad ? '⚠실패' : b.state === 'working' ? '작업' : '대기'
       return (
         <Box
           key={`slot-${b.id}`}
@@ -524,7 +568,7 @@ export const register: Register = (on, options) => {
             </Text>
             <Text color={hot ? pal.onBadge : bad ? pal.bad : tone(b)} bold={hot || bad}>{` ${tag}`}</Text>
           </Box>
-          <Box>{second}</Box>
+          {layout.mode === 'full' ? <Box>{secondOf(b, slotW)}</Box> : null}
         </Box>
       )
     }
@@ -548,10 +592,34 @@ export const register: Register = (on, options) => {
           <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
         </Box>
         <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-          {list.map(slot)}
+          {shown.map(slot)}
+          {hidden ? <Text color={pal.dim}>{` +${hidden} 더 · /board `}</Text> : null}
         </Box>
       </Box>
     )
+
+    // 혼자: 머리줄 한 줄에 내 상태를 바로 (창 높이 3줄)
+    if (layout.mode === 'solo') {
+      const b = list[0]!
+      const hot = b.state === 'asking' && !isStale(b, now)
+      const bad = !hot && failed(b)
+      const tag = isStale(b, now) ? 'zz' : hot ? ' 결정! ' : bad ? ' ⚠ 실패 ' : b.state === 'working' ? '작업' : '대기'
+      return (
+        <Box flexDirection="column">
+          {below}
+          <Box flexDirection="row" justifyContent="space-between" columnGap={2} borderStyle="double" borderColor={hot ? pal.ask : bad ? pal.bad : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
+            <Box flexDirection="row" columnGap={2} flexShrink={1}>
+              <Text color={pal.accent} bold>{`◆ ${b.name}`}</Text>
+              {hot || bad
+                ? <Text backgroundColor={hot ? pal.ask : pal.bad} color={pal.onBadge} bold>{tag}</Text>
+                : <Text color={tone(b)}>{`${markOf(b)} ${tag}`}</Text>}
+              <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40))}</Box>
+            </Box>
+            <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
+          </Box>
+        </Box>
+      )
+    }
     return (
       <Box flexDirection="column">
         {below}

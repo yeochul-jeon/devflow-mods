@@ -43,7 +43,7 @@ claude plugin update eli12@yeocheol-mods
 
 ## team-board 사용
 
-입력창 위 팀 창 (같은 레포에 세션이 2개 이상일 때, 다른 mod 의 띠 아래에 붙음):
+입력창 위 팀 창 (같은 레포의 세션 수만큼 칸이 생김, 다른 mod 의 띠 아래에 붙음):
 
 <img src="docs/images/hud.webp" alt="입력창 위 팀 창: 결정 대기 세션은 노란 칸, 할 일은 경로선" width="760">
 
@@ -51,7 +51,20 @@ claude plugin update eli12@yeocheol-mods
 - 세션 칸: 결정 대기 칸은 노랗게 칠해지고 질문을 보여 줍니다. 할 일이 있으면 경로선, 없으면 지금 하는 일. `*` 이 세션 · `zz` 3분 넘게 소식 없음
 - 한 줄로 작게 보고 싶으면 `/board band line` (예전 모양), 다시 창으로 `/board band hud`
 
-세션 이름 (같은 폴더에서 여러 세션을 열어도 구분되게)
+세션 수가 바뀌면 창이 알아서 맞춥니다 (메인만 쓰든, 서브가 몇 개든)
+
+<img src="docs/images/band-sizes.webp" alt="세션 1개: 한 줄 창 / 8개: 두 줄 칸이 두 줄로 / 좁은 화면: 한 줄 칸" width="760">
+
+| 세션 | 모양 |
+|---|---|
+| 1개 (메인만) | 한 줄 창: 이름 · 상태 · 질문/실패/경로선/지금 하는 일. 숨기려면 `/board band solo off` |
+| 여러 개 | 칸마다 두 줄 (이름·상태 / 질문·실패·경로선), 넘치면 두 줄까지 줄바꿈 |
+| 많거나 화면이 좁을 때 | 칸마다 한 줄 (이름·상태) |
+| 그래도 넘칠 때 | 중요한 세션부터 보이고 나머지는 `+k 더 · /board` |
+
+보이는 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기 > 소식 없음.
+
+세션 이름 (같은 폴더에서 여러 세션을 열어도 구분되게. `claude --name` 이름은 시작 후 몇 초 안에 반영)
 1. `/board name 이름` 으로 정한 이름
 2. Claude Code 세션 이름: `claude --name 이름` 으로 시작하거나 `/rename 이름` (보드가 바로 따라감)
 3. 워크트리면 브랜치 이름
@@ -66,6 +79,7 @@ claude plugin update eli12@yeocheol-mods
 | `/board name sub-1` | 이 세션의 표시 이름 바꾸기 (다음에 다시 열어도 유지) |
 | `/board band off` / `on` | 입력창 위 팀 창 끄기 / 켜기 (다음 세션에도 기억) |
 | `/board band hud` / `line` | 팀 창 모양: 창(기본) / 한 줄 |
+| `/board band solo off` / `on` | 세션이 하나일 때 팀 창 숨기기 / 보이기 (기본 보임) |
 | `/board fail` | 숨은 실패 보고서 (명령, 실패 흔적, 실패 코드를 가린 구문). `on` / `off` 감지 켜기·끄기, `clear` 이 세션 표시 지우기 |
 | `/board sound off` / `on` / `test` | 결정 대기 음성 알림 끄기 / 켜기 (기본 켜짐) / 미리 듣기 |
 

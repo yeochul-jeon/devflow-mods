@@ -57,6 +57,8 @@ declare module 'claude-code' {
       bandOff: boolean
       /** 띠 모양: hud (창) 또는 line (한 줄) */
       bandMode: 'hud' | 'line'
+      /** 세션이 하나일 때 팀 창을 숨김 */
+      bandSoloOff: boolean
     }
   }
 }

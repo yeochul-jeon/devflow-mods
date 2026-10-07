@@ -295,3 +295,39 @@ export function lastCustomTitle(grepOutput: string): string {
 export function projectDirName(cwd: string): string {
   return cwd.replace(/[^A-Za-z0-9]/g, '-')
 }
+
+/**
+ * 팀 창 배치. 세션 수와 화면 크기에 맞춰 고른다.
+ * - solo: 세션 하나 → 한 줄짜리 창 (머리줄에 내 상태를 바로)
+ * - full: 칸마다 두 줄 (이름·상태 / 질문·경로선), 2줄까지 줄바꿈
+ * - compact: 세션이 많으면 칸마다 한 줄, 그래도 넘치면 중요한 세션부터 보이고 나머지는 "+k"
+ */
+export type BandLayout = { mode: 'solo' | 'full' | 'compact'; slotW: number; shown: number }
+
+export function bandLayout(n: number, columns: number, maxRows: number): BandLayout {
+  const inner = Math.max(30, columns - 4)
+  if (n <= 1) return { mode: 'solo', slotW: inner, shown: n }
+  const fit = (min: number, max: number) => Math.max(min, Math.min(max, Math.floor((inner - (n - 1)) / n)))
+  const perRow = (w: number) => Math.max(1, Math.floor((inner + 1) / (w + 1)))
+  // 테두리 2줄 + 머리줄 1줄을 뺀 높이
+  const room = Math.max(1, maxRows - 3)
+
+  const fullW = fit(22, 34)
+  const fullRows = Math.ceil(n / perRow(fullW))
+  if (fullRows <= 2 && fullRows * 2 <= room) return { mode: 'full', slotW: fullW, shown: n }
+
+  const compactW = fit(18, 26)
+  const capacity = perRow(compactW) * Math.min(3, room)
+  return { mode: 'compact', slotW: compactW, shown: n <= capacity ? n : Math.max(1, capacity - 1) }
+}
+
+/** 팀 창에 먼저 보일 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기 > 소식 없음. */
+export function bandOrder(beats: readonly Beat[], now: number, meId: string | undefined): Beat[] {
+  const rank = (b: Beat) =>
+    isStale(b, now) ? 5
+      : b.state === 'asking' ? 0
+        : b.fail?.level === 'high' ? 1
+          : b.id === meId ? 2
+            : b.state === 'working' ? 3 : 4
+  return [...beats].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+}
