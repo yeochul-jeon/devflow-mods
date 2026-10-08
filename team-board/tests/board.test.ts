@@ -285,6 +285,7 @@ describe('팀 상황판', () => {
     }))
     on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('session.end', () => ({ sessionId: 'me' }))
     on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1 } }))
     on('command.run', { command: 'rename' }, () => ({ text: 'renamed' }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
@@ -497,5 +498,26 @@ describe('팀 상황판', () => {
 
     const missing = await $.command.run({ command: 'board', args: 'nobody' } as any)
     expect(missing.text).toContain('찾지 못했어요')
+
+    // 명령 안내: /board help, 모르는 옵션은 help 로
+    const help = (await $.command.run({ command: 'board', args: 'help' } as any)).text
+    for (const w of ['/board band hud | line', '/board sound test', '/board fail clear', '/board name <이름>']) expect(help).toContain(w)
+    expect((await $.command.run({ command: 'board', args: 'band blue' } as any)).text).toContain('모르는 옵션')
+
+    // /clear: 숨지 않고 대기로. 결정 기록은 남고 대기 질문·할 일은 비운다
+    await $.turn.complete({ reason: 'answer', answer: '배포를 오늘 할까요?', durationMs: 1, isAborted: false, turnId: 't9' } as any)
+    expect(mine().state).toBe('asking')
+    const kept = mine().decisions.length
+    await $.session.end({ reason: 'clear', sessionId: 'me', resume: {} } as any)
+    expect(mine()).toMatchObject({ state: 'idle', question: '', tasks: [] })
+    expect(mine().decisions.length).toBe(kept)
+    expect(mine().timeline.at(-1).kind).toBe('clear')
+    await clock.advance(3_000)
+    const cb = await $.ui.mount(BAND)
+    expect(await cb.find({ type: 'Text', text: /api-fix\*/ })).toBeDefined()
+    await cb.unmount()
+    // 진짜 종료는 숨김
+    await $.session.end({ reason: 'prompt_input_exit', sessionId: 'me', resume: {} } as any)
+    expect(mine().state).toBe('ended')
   })
 })

@@ -159,7 +159,48 @@ async function sessionTitle($: EngineInterface): Promise<string> {
   return grep ? lastCustomTitle(grep.stdout) : ''
 }
 
+const BOARD_HELP = [
+  '팀 상황판 명령',
+  '',
+  '보기',
+  '  /board                     전체: 세션마다 요청·진행·결정·결정 대기',
+  '  /board <세션>              자세히: 할 일, 결정 기록 전체, 흐름, 편집 파일   예) /board sub-2',
+  '',
+  '이름',
+  '  /board name <이름>         이 세션의 표시 이름 (다시 열어도 유지)          예) /board name api-fix',
+  '  /rename <이름>             Claude Code 세션 이름 = 보드 이름',
+  '',
+  '입력창 위 팀 창',
+  '  /board band off | on       끄기 / 켜기',
+  '  /board band hud | line     창 모양 / 한 줄 모양',
+  '  /board band solo off | on  세션이 하나일 때 숨기기 / 보이기',
+  '',
+  '결정 대기 음성 알림 (macOS)',
+  '  /board sound off | on      끄기 / 켜기 (기본 켜짐)',
+  '  /board sound test          미리 듣기',
+  '',
+  '숨은 실패 (exit 0 인데 실패한 빌드·테스트)',
+  '  /board fail                보고서',
+  '  /board fail clear          이 세션 표시 지우기',
+  '  /board fail off | on       감지 끄기 / 켜기',
+].join('\n')
+
 const TITLE_EVERY_MS = 15_000
+
+/**
+ * /clear·/resume 뒤에는 세션 id 와 대화 기록 파일이 바뀐다. 바뀌었으면 따라가고,
+ * 직접 정한 이름(/board name, /rename)은 새 id 로 옮긴다.
+ */
+async function followSessionId($: EngineInterface): Promise<void> {
+  if (!self.sessionId) return
+  const id = await $.session.id()
+  if (!id || id === self.sessionId) return
+  const pinned = await $.store.get(nameKey(self.sessionId))
+  if (typeof pinned === 'string' && pinned) await $.store.set(nameKey(id), pinned)
+  self.transcript = self.transcript.replace(`${self.sessionId}.jsonl`, `${id}.jsonl`)
+  self.sessionId = id
+  self.titleCheckedAt = 0
+}
 
 /**
  * claude --name 의 이름은 대화 기록 파일이 생긴 뒤에야 읽을 수 있어서, 직접 정한 이름이 없으면 가끔 다시 본다.
@@ -250,19 +291,31 @@ export const register: Register = (on, options) => {
       await scan($)
       await runExplain($)
       await maybeAlert($)
+      await followSessionId($)
       await followTitle($)
     })
 
     await $.command.register({
       name: 'board',
       description: '팀 세션 상황판: 진행 현황, 결정 기록, 결정 대기',
-      argumentHint: '[세션이름 | name <표시이름>]',
+      argumentHint: '[세션 | name | band | sound | fail | help]',
     })
     return result
   })
 
+  // /clear 와 같은 탭의 /resume 은 대화만 바뀌고 탭은 그대로다 (session.start 도 다시 오지 않음).
+  // 그때는 숨기지 않고 대기로 두며, 결정 기록은 남기고 대기 질문과 할 일은 비운다.
   on('session.end', async ($, e, next) => {
-    await save($, { state: 'ended' }, true)
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      const at = await $.clock.now()
+      const timeline = self.beat
+        ? pushCapped(self.beat.timeline, event(at, 'clear', e.reason === 'clear' ? '/clear' : '/resume'), MAX_TIMELINE)
+        : []
+      self.askingSince = 0
+      await save($, { state: 'idle', step: '', question: '', last: '', prompt: '', tasks: [], timeline }, true)
+    } else {
+      await save($, { state: 'ended' }, true)
+    }
     return next(e)
   })
 
@@ -421,6 +474,8 @@ export const register: Register = (on, options) => {
       if (!picked.length) return { text: `숨은 실패가 없어요.${self.failOff ? ' (이 세션은 감지가 꺼져 있어요: /board fail on)' : ''}` }
       return { text: picked.map(b => formatAlert(b.name, b.fail!)).join('\n\n') + '\n\n같은 명령이 깨끗하게 다시 돌면 저절로 지워져요. 바로 지우려면 그 세션에서 /board fail clear' }
     }
+    if (sub === 'help' || sub === '?' || (sub === 'name' && !rest.length)) return { text: BOARD_HELP }
+    if (sub === 'band' || sub === 'sound') return { text: `"/board ${args}" 는 모르는 옵션이에요.\n\n${BOARD_HELP}` }
     if (sub === 'name' && rest.length) {
       await $.store.set(nameKey(self.sessionId), rest.join(' ').slice(0, 24))
       await save($, { name: rest.join(' ').slice(0, 24) }, true)
@@ -431,7 +486,7 @@ export const register: Register = (on, options) => {
     if (args) {
       const list = visible(await read($, beats), await $.clock.now())
       const target = findByName(list, args)
-      if (!target) return { text: `"${args}" 세션을 찾지 못했어요. 지금 세션: ${list.map(b => b.name).join(', ') || '없음'}` }
+      if (!target) return { text: `"${args}" 세션을 찾지 못했어요. 지금 세션: ${list.map(b => b.name).join(', ') || '없음'}\n명령 목록은 /board help` }
       await update($, focus, () => target.id)
     } else {
       await update($, focus, () => null)
@@ -1025,7 +1080,7 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
-        <Text color={pal.dim}>PgUp/PgDn 스크롤 · Home 처음 · /board 세션이름 → 자세히 · /board name 이름 · /board fail · /board band|sound off|on</Text>
+        <Text color={pal.dim}>PgUp/PgDn 스크롤 · Home 처음 · /board 세션이름 → 자세히 · 명령 목록 /board help</Text>
       </Box>
     )
   })

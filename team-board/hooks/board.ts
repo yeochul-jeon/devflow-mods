@@ -213,6 +213,7 @@ export const EVENT_MARK: Record<Event['kind'], string> = {
   decide: '◆ 결정',
   abort: '✗ 중단',
   fail: '⚠ 숨은 실패',
+  clear: '⟲ 대화 지움',
 }
 
 export function explainPrompt(b: Beat): string {
