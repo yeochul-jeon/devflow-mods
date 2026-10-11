@@ -8,6 +8,9 @@ import type { FailAlert } from '../types'
 export type Severity = 'high' | 'warn'
 type Rule = { label: string; pattern: RegExp; severity: Severity }
 
+/** 명령에 skipTests·skipITs·maven.test.skip 이 있으면 일부러 건너뛴 것이라 보지 않는다 (judge). */
+const MAVEN_SKIP = 'Maven 테스트 건너뜀'
+
 /** 숫자는 1 이상만 ([1-9]\d*): "0 failed" 같은 통과 요약은 걸리지 않는다. */
 const RULES: Rule[] = [
   // JVM 빌드·테스트
@@ -22,6 +25,7 @@ const RULES: Rule[] = [
   { label: '예외 발생', pattern: /^Exception in thread "|^Caused by: [\w.$]+(?:Exception|Error)\b/m, severity: 'high' },
   // 일반
   { label: '실패한 테스트', pattern: /\b[1-9]\d*\s+(?:tests?\s+|specs?\s+|suites?\s+)?(?:failed|failing|failures?)\b/i, severity: 'high' },
+  { label: '실패한 테스트', pattern: /^\s*[1-9]\d* fail\s*$/m, severity: 'high' }, // bun: " 2 fail"
   { label: 'FAIL 표시', pattern: /^\s*(?:FAIL|FAILED)\b/m, severity: 'high' },
   { label: 'npm 오류', pattern: /^\s*npm (?:ERR!|error)\s/m, severity: 'high' },
   { label: 'Python 예외', pattern: /Traceback \(most recent call last\)/, severity: 'high' },
@@ -31,6 +35,7 @@ const RULES: Rule[] = [
   // 확인 필요: 검사했다고 하기엔 부족한 실행
   { label: '건너뛴 테스트', pattern: /\b[1-9]\d*\s+(?:tests?\s+)?(?:skipped|pending|ignored)\b|Skipped: [1-9]\d*/i, severity: 'warn' },
   { label: '실행된 테스트 없음', pattern: /No tests found for given includes|\bno tests? (?:found|ran|were found|to run|collected)\b|\bRan 0 tests\b|Tests run: 0,/i, severity: 'warn' },
+  { label: MAVEN_SKIP, pattern: /\bTests are skipped\b/, severity: 'warn' },
 ]
 
 /** 실패 코드를 가리는 셸 구문. */
@@ -41,25 +46,41 @@ const MASKS: { label: string; pattern: RegExp }[] = [
 ]
 
 /** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. */
-const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed -n|awk|echo|printf)\b|^git (?:log|diff|show|blame|grep|status)\b|^gh (?:run|pr) view\b/
+const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed -n|awk|echo|printf|sort|uniq|cut|tr|column|nl)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:log|diff|show|blame|grep|status)\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
 
 const MAX_SCAN = 200_000
 const MAX_LINE = 120
 
-/** 셸 명령의 첫 단계 (cd 와 환경변수 접두는 건너뜀). */
-export function firstStep(command: string): string {
-  const parts = command.split(/&&|;|\n/).map(s => s.trim()).filter(Boolean)
-  const real = parts.find(p => !/^cd\s/.test(p)) ?? parts[0] ?? ''
-  return real.replace(/^(?:[A-Z_][A-Z0-9_]*=\S*\s+)+/, '')
+/** 셸 명령의 단계들 (&&, ||, ;, |, |&, 줄바꿈으로 나눔). cd 단계, 주석 줄, 환경변수 대입은 뺀다. */
+function steps(command: string): string[] {
+  // 따옴표 안의 | ; 는 구분자가 아니다: 같은 길이로 가린 사본에서 자를 자리를 찾고 원문을 자른다
+  const masked = command.replace(/'[^']*'|"[^"]*"/g, m => '_'.repeat(m.length))
+  const parts: string[] = []
+  let from = 0
+  for (const m of masked.matchAll(/&&|\|\||\|&|;|\n|\|/g)) {
+    parts.push(command.slice(from, m.index))
+    from = m.index + m[0].length
+  }
+  parts.push(command.slice(from))
+  return parts
+    .map(s => s.trim().replace(/^(?:[A-Z_][A-Z0-9_]*=\S*(?:\s+|$))+/, ''))
+    .filter(s => s && !/^cd\s/.test(s) && !/^#/.test(s))
 }
 
+/** 모든 단계가 읽기 전용일 때만 true. `echo x && ./gradlew test` 는 판정한다. */
 export function isReadOnly(command: string): boolean {
-  return READ_ONLY.test(firstStep(command))
+  return steps(command).every(s => READ_ONLY.test(s))
 }
 
-/** 같은 명령을 다시 돌렸는지 비교할 키: 첫 단계의 앞 두 낱말. `./gradlew test --tests X` → `./gradlew test` */
+/**
+ * 같은 명령을 다시 돌렸는지 비교할 키: 읽기 전용이 아닌 첫 단계의 앞 두 낱말. `./gradlew test --tests X` → `./gradlew test`
+ * 둘째 낱말이 run·-m·exec 이면 세 낱말: `npm run lint` → `npm run lint`.
+ * 모두 읽기 전용이면 첫 단계를 쓴다. 그런 명령은 판정하지 않으므로 저장된 키와 겹치지 않는다.
+ */
 export function commandKey(command: string): string {
-  return firstStep(command).split(/\s+/).slice(0, 2).join(' ')
+  const all = steps(command)
+  const words = (all.find(s => !READ_ONLY.test(s)) ?? all[0] ?? '').split(/\s+/)
+  return words.slice(0, ['run', '-m', 'exec'].includes(words[1] ?? '') ? 3 : 2).join(' ')
 }
 
 function lineAround(text: string, index: number): string {
@@ -90,7 +111,7 @@ export function masksIn(command: string): string[] {
 /** exit 0 으로 끝난 Bash 한 번을 판정한다. 의심할 게 없으면 null. */
 export function judge(command: string, output: string, at: number): FailAlert | null {
   if (!output.trim() || isReadOnly(command)) return null
-  const findings = scanOutput(output)
+  const findings = scanOutput(output).filter(f => f.label !== MAVEN_SKIP || !/skipTests|skipITs|maven\.test\.skip/.test(command))
   if (!findings.length) return null
   return {
     at,

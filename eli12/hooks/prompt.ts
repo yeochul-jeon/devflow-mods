@@ -61,6 +61,5 @@ export function stripMarkdown(text: string): string {
     .replace(/^```[^\n]*$/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/__(.+?)__/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1')
 }

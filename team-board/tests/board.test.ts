@@ -112,8 +112,50 @@ describe('board (순수 함수)', () => {
     expect(questionSummary('1. push 여부\n설명입니다.\n5. PR38을 지금 시작할지 정해 주십시오.\n참고 사항')).toBe('5. PR38을 지금 시작할지 정해 주십시오.')
   })
 
+  test('끝 1500자의 줄마다 본다. 조건문·확인 부탁·? 로 끝나는 제목은 결정 요청이 아니다', async () => {
+    expect(looksLikeQuestion('1. push 여부\n2. PR38 착수 시점을 정해 주십시오.')).toBe(true)
+    expect(looksLikeQuestion('어느 쪽으로 할까요?\n\n1. A안: 캐시를 둔다\n2. B안: 인덱스를 둔다\n3. C안: 둘 다')).toBe(true)
+    expect(looksLikeQuestion('어떤 DB 를 쓰는지 알려 주세요.')).toBe(true)
+    expect(looksLikeQuestion('문제가 있으면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('## 왜 캐시가 필요할까?\n\n조회가 느려서 캐시를 넣었습니다.\n만료는 5분으로 두었습니다.\n\n적용했습니다.')).toBe(false)
+    expect(looksLikeQuestion('결과를 확인해 주세요.')).toBe(false)
+    expect(questionSummary('어느 쪽으로 할까요?\n1. A안\n2. B안')).toBe('어느 쪽으로 할까요?')
+  })
+
+  test('질문 뒤에 선택지·추천·표·코드 블록·부연이 와도 잡고, 코드 블록 안과 ? 로 끝나는 제목은 뺀다', async () => {
+    const body = '변경 사항을 적용했습니다. 테스트 28개가 통과했습니다.\n\n'
+    const asks = [
+      '어느 쪽으로 할까요?\n\n- A: 빠름\n- B: 안전\n\n제 추천은 A입니다.',
+      '어느 쪽으로 할까요?\n\n1. A안\n   캐시를 둔다\n2. B안\n   인덱스를 둔다',
+      '어느 쪽으로 할까요?\n\n1) A안\n2) B안\n3) C안',
+      '어느 쪽으로 할까요?\n\n**A안**: 캐시\n**B안**: 인덱스\n**C안**: 둘 다',
+      '어느 쪽으로 할까요?\n\n• A안\n• B안\n• C안',
+      '이렇게 바꿀까요?\n\n```ts\nconst a = 1\nconst b = 2\n```',
+      '어느 쪽으로 할까요?\n\n| 안 | 장점 |\n|---|---|\n| A | 빠름 |\n| B | 안전 |',
+      '진행할까요?\n\n참고로 테스트는 모두 통과했습니다.\n변경 파일은 3개입니다.',
+      '확인할 것:\n- 캐시 만료는 5분이 맞나요?\n- 키 이름은 괜찮나요?',
+    ]
+    expect(asks.filter(t => !looksLikeQuestion(body + t))).toEqual([])
+    expect(looksLikeQuestion(body + '## 다음 단계는?\n\n없습니다.')).toBe(false)
+    expect(looksLikeQuestion(body + '```ts\nconst x = a ?\n  b : c\n```')).toBe(false)
+  })
+
+  test('"…면/경우 (한 낱말) 알려 주세요" 는 맺음 인사라 결정 요청이 아니다', async () => {
+    expect(looksLikeQuestion('궁금한 점이 있으면 언제든 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('문제가 있으면 바로 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('문제가 있을 경우 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('어떤 DB 를 쓰는지 알려 주세요.')).toBe(true)
+    expect(looksLikeQuestion('가능하면 어떤 DB 를 쓰는지 알려 주세요.')).toBe(true)
+    expect(questionSummary('어느 쪽으로 할까요?\n1. A\n2. B\n궁금한 점이 있으면 언제든 알려 주세요.')).toBe('어느 쪽으로 할까요?')
+  })
+
   test('마크다운 기호를 걷어낸다', async () => {
     expect(stripMarkdown('**1. 요약**\n```\n# 제목\n`code`')).toBe('1. 요약\n\n제목\ncode')
+  })
+
+  test('Python 식별자의 밑줄 두 개는 그대로 둔다', async () => {
+    expect(stripMarkdown('if __name__ == "__main__":')).toBe('if __name__ == "__main__":')
+    expect(stripMarkdown('`__init__` 를 고쳤습니다')).toBe('__init__ 를 고쳤습니다')
   })
 
   test('도구 호출을 한 줄로', async () => {
@@ -218,6 +260,75 @@ describe('숨은 실패', () => {
     expect(commandKey('cd a && LANG=C ./gradlew test --info')).toBe('./gradlew test')
     expect(masksIn('./gradlew test || true')).toHaveLength(1)
   })
+
+  test('읽기 전용 단계가 앞에 있어도 모든 단계가 읽기 전용일 때만 제외한다', async () => {
+    expect(judge('echo "== build" && ./gradlew test 2>&1 | tail -20', GRADLE, 1)?.level).toBe('high')
+    expect(judge('git status; npm test | tail', '  3 passing\n  2 failing', 1)?.level).toBe('high')
+    expect(judge('ls && ./gradlew test', GRADLE, 1)?.level).toBe('high')
+    expect(isReadOnly('echo y | ./gradlew test')).toBe(false)
+    expect(isReadOnly('ls build || ./gradlew build')).toBe(false)
+    expect(isReadOnly('grep -n FAILED build/test.log | head -20')).toBe(true)
+  })
+
+  test('따옴표 안의 | ; 는 단계 구분자가 아니다', async () => {
+    expect(judge('grep -E "FAILED|ERROR" build.log', GRADLE, 1)).toBeNull()
+    expect(judge("grep -n 'a;b' x", GRADLE, 1)).toBeNull()
+    const a = judge('echo "a|b" && ./gradlew test', GRADLE, 1)
+    expect(a?.level).toBe('high')
+    expect(a?.key).toBe('./gradlew test')
+  })
+
+  test('재실행 비교 키는 읽기 전용이 아닌 첫 단계에서, run·-m·exec 이면 세 낱말', async () => {
+    expect(commandKey('npm run test')).toBe('npm run test')
+    expect(commandKey('npm run lint')).toBe('npm run lint')
+    expect(commandKey('python -m pytest -k foo')).toBe('python -m pytest')
+    expect(commandKey('pnpm exec vitest run')).toBe('pnpm exec vitest')
+    expect(commandKey('echo "== build" && ./gradlew test 2>&1 | tail -20')).toBe('./gradlew test')
+    expect(judge('echo "== build" && ./gradlew test 2>&1 | tail -20', GRADLE, 1)!.key).toBe('./gradlew test')
+  })
+
+  test('파일·컨테이너 로그를 읽기만 하면 판정하지 않는다', async () => {
+    expect(judge('S=/x; cd /y; sed -n 1,40p failure.ts', GRADLE, 1)).toBeNull()
+    expect(judge('docker logs api', GRADLE, 1)).toBeNull()
+    expect(judge('docker compose logs api --tail 50', GRADLE, 1)).toBeNull()
+    expect(judge('kubectl logs pod', GRADLE, 1)).toBeNull()
+  })
+
+  test('bun 형식 요약 "N fail" 줄을 잡고, 비슷한 낱말은 지나친다', async () => {
+    expect(judge('bun test', ' 26 pass\n 2 fail\nRan 28 tests across 3 files.', 1)?.level).toBe('high')
+    expect(scanOutput(' 28 pass\n 0 fail')).toEqual([])
+    expect(scanOutput('retry 3\nfail-safe')).toEqual([])
+    expect(scanOutput('Step 2\nFail fast mode')).toEqual([])
+  })
+
+  test('Maven 테스트 건너뜀은 확인 필요(warn), -DskipTests 처럼 일부러 건너뛰면 조용하다', async () => {
+    const a = judge('./mvnw test', '[INFO] Tests are skipped.\n[INFO] BUILD SUCCESS', 1)!
+    expect(a.level).toBe('warn')
+    expect(noteForClaude(a)).toBeNull()
+    expect(judge('./mvnw package -DskipTests', '[INFO] Tests are skipped.\n[INFO] BUILD SUCCESS', 1)).toBeNull()
+    expect(judge('mvn install -Dmaven.test.skip=true', '[INFO] Tests are skipped.\n[INFO] BUILD SUCCESS', 1)).toBeNull()
+  })
+
+  test('-DskipITs 로 일부러 건너뛴 통합 테스트도 조용하다', async () => {
+    expect(judge('./mvnw verify -DskipITs', '[INFO] Tests are skipped.', 1)).toBeNull()
+  })
+
+  test('sort·uniq·cut, xargs grep 처럼 읽기만 하는 단계로 된 파이프는 판정하지 않는다', async () => {
+    expect(judge('grep -rhoE "(pass|fail)$" logs/ | sort | uniq -c', '      3 fail', 1)).toBeNull()
+    expect(judge(`find . -name '*.md' | xargs grep -n "No such file"`, 'docs/faq.md:12:`No such file or directory`', 1)).toBeNull()
+    expect(judge(`find . -name '*.ts' | xargs grep -l TODO`, 'grep: ./gen/x.ts: No such file or directory', 1)).toBeNull()
+    expect(judge('git log --oneline | cut -c1-60', 'abc123 fix: 3 tests failed on CI', 1)).toBeNull()
+    expect(judge('grep -rn "Traceback" docs | sort', 'docs/a.md:3:Traceback (most recent call last):', 1)).toBeNull()
+    expect(judge('npm test 2>&1 | tee out.log', '  3 passing\n  2 failing', 1)?.level).toBe('high')
+  })
+
+  test('|& 도 파이프로 나눈다', async () => {
+    expect(judge('cat build.log |& grep FAILED', GRADLE, 1)).toBeNull()
+  })
+
+  test('주석 줄은 단계로 보지 않는다', async () => {
+    expect(commandKey('# 테스트 실행\n./gradlew test')).toBe('./gradlew test')
+  })
 })
 
 describe('팀 창 배치 (세션 수에 따라)', () => {
@@ -269,6 +380,11 @@ describe('팀 상황판', () => {
         decisions: [{ at: NOW - 60_000, question: 'push 할까요?', answer: '예, release 만' }],
       }),
     ))
+    // 같은 폴더·이름의 닫힌 탭 잔재: 숨기고, 살아 있는 세션 이름에 ·2 를 붙이지 않는다
+    files.set(`${DIR}/a-ghost.json`, JSON.stringify(beat({ id: 'a-ghost', name: 'sub-2', updatedAt: NOW - 5 * 60_000 })))
+    // 12시간 넘게 그대로인 기록: 읽지 않고 건너뛴다
+    files.set(`${DIR}/old.json`, JSON.stringify(beat({ id: 'old', name: 'gone', updatedAt: NOW - 13 * 3600_000 })))
+    const reads: string[] = []
 
     const clock = mock.clock(on, { now: NOW })
     mock.store(on)
@@ -281,9 +397,10 @@ describe('팀 상황판', () => {
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
-      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop(), kind: 'file' })),
+      // 파일은 모두 updatedAt 에 쓰였으므로 그 시각을 수정 시각으로 둔다
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop(), kind: 'file', mtimeMs: JSON.parse(files.get(k)!).updatedAt })),
     }))
-    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('fs.read', ($, e: any) => { reads.push(e.path); return { value: files.get(e.path) ?? '' } })
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('session.end', () => ({ sessionId: 'me' }))
     on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1 } }))
@@ -295,8 +412,12 @@ describe('팀 상황판', () => {
       if (e.tool === 'TaskCreate') return { result: { task: { id: '7', subject: e.subject } }, text: 'ok' }
       if (e.tool === 'TaskUpdate') return { result: { success: true }, text: 'ok' }
       if (e.tool === 'Bash') {
-        const bad = String(e.command).includes('tail')
-        return { result: { stdout: bad ? '12 tests completed, 1 failed\nBUILD FAILED in 3s' : 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' }
+        const c = String(e.command)
+        const stdout = c.includes('tail') ? '12 tests completed, 1 failed\nBUILD FAILED in 3s'
+          : c.includes('pytest') ? 'no tests ran in 0.01s'
+          : c.includes(' -q') ? ''
+          : 'BUILD SUCCESSFUL in 3s'
+        return { result: { stdout, stderr: '', interrupted: false }, text: 'ok' }
       }
       if (e.tool === 'AskUserQuestion') return { result: { questions: e.questions, answers: { 'Approval Test 범위는?': '변경 파일만' } }, text: 'ok' }
       return { result: {}, text: 'ok' }
@@ -324,6 +445,9 @@ describe('팀 상황판', () => {
     on('model.complete', ($, e: any) => {
       asked = e.prompt
       calls += 1
+      // 세 번째는 던져서 건너뛰고, 그 아래 답할 구현이 없으므로 $.model.complete 가 reject 된다. 네 번째는 답 없음
+      if (calls === 3) throw new Error('blocked model')
+      if (calls === 4) return { value: { isAnswered: false, reason: 'empty-reply', usage: USAGE } }
       // 첫 번째는 형식이 틀린 답 (글로 보여주는지), 그다음부터는 JSON
       const text = calls === 1 ? '**1. PR38 착수**\n비유: 숙제 순서 정하기' : '네, 여기요:\n' + JSON_ANSWER
       return { value: { isAnswered: true, text, usage: USAGE } }
@@ -333,6 +457,8 @@ describe('팀 상황판', () => {
     const myPath = [...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!
     const mine = () => JSON.parse(files.get(myPath)!)
     expect(mine().name).toBe('order-svc')
+    expect(reads).toContain(`${DIR}/peer.json`)
+    expect(reads).not.toContain(`${DIR}/old.json`)
 
     // 작업 진행: 할 일 추가와 진행
     await clock.advance(2_000)
@@ -371,7 +497,16 @@ describe('팀 상황판', () => {
     await clock.advance(30_000)
     expect(spoken.length).toBe(1)
     await $.command.run({ command: 'board', args: 'sound on' } as any)
+    // 사용자가 치지 않은 입력(백그라운드 작업 알림)은 요청으로도, 결정의 답으로도 기록하지 않는다
+    const decided = mine().decisions.length
+    const noticed = await $.prompt.submit({ text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } } as any)
+    expect(noticed).toMatchObject({ text: '<task-notification>done</task-notification>' })
+    expect(mine().decisions.length).toBe(decided)
+    // harness 는 turn.start 를 보내지 않아서 성립한다. 실제로는 알림이 시작한 턴의 turn.start 가 asking 을 지운다 (알려진 한계, 보류)
+    expect(mine().state).toBe('asking')
+    expect(mine().timeline.at(-1).kind).toBe('ask')
     await $.prompt.submit({ text: '변경 파일만', origin: { kind: 'composer' } } as any)
+    expect(mine().decisions.at(-1)).toMatchObject({ question: '테스트 범위는 어느 쪽으로 할까요?', answer: '변경 파일만' })
 
     // 띠
     await clock.advance(3_000)
@@ -384,6 +519,7 @@ describe('팀 상황판', () => {
     expect(await band.find({ type: 'Text', text: /◆ TEAM 2/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /⚑ sub-2/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /sub-2·2/ })).toBeUndefined()
     expect(await band.find({ type: 'Text', text: /결정!/ })).toBeDefined()
     expect(await band.find({ key: 'band-board' })).toBeDefined()
     await band.unmount()
@@ -441,6 +577,14 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeUndefined()
     await pane.press({ key: 'toggle-peer' })
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeDefined()
+
+    // 모델 호출이 거부(reject)되거나 답이 없으면 로딩에 머물지 않고 이유를 보여준다
+    await pane.press({ key: 'explain-peer' })
+    await clock.advance(3_000)
+    expect(await pane.find({ type: 'Text', text: /설명을 만들지 못했어요 \(.*no implementation for model\.complete\)/ })).toBeDefined()
+    await pane.press({ key: 'explain-peer' })
+    await clock.advance(3_000)
+    expect(await pane.find({ type: 'Text', text: /설명을 만들지 못했어요 \(empty-reply\)/ })).toBeDefined()
     await pane.unmount()
 
     // 띠 끄기 / 켜기 (세션이 바뀌어도 기억)
@@ -489,9 +633,24 @@ describe('팀 상황판', () => {
     expect(await fb.find({ type: 'Text', text: /⚠실패/ })).toBeDefined()
     await fb.unmount()
     expect((await $.command.run({ command: 'board', args: 'fail' } as any)).text).toContain('12 tests completed, 1 failed')
+    // 다른 명령의 확인 필요(warn)는 남아 있는 실패(high)를 덮지 않는다. 기록에는 남긴다
+    await $.tool.call({ tool: 'Bash', command: 'pytest -k foo', tool_use_id: 'b1w' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
+    expect(mine().timeline.at(-1)).toMatchObject({ kind: 'fail', text: expect.stringContaining('pytest -k') })
     await $.tool.call({ tool: 'Bash', command: './gradlew test --tests Order', tool_use_id: 'b2' } as any)
     expect(mine().fail).toBeNull()
     expect(mine().timeline.some((t: any) => t.kind === 'fail')).toBe(true)
+    // 출력 없이 성공해도 같은 명령이면 해제한다
+    await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -5', tool_use_id: 'b3' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
+    await $.tool.call({ tool: 'Bash', command: './gradlew test -q', tool_use_id: 'b4' } as any)
+    expect(mine().fail).toBeNull()
+    // 실패 코드를 가리는 명령(|| true)이 출력 없이 끝나면 통과했는지 알 수 없으니 지우지 않는다
+    await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -5', tool_use_id: 'b5' } as any)
+    await $.tool.call({ tool: 'Bash', command: './gradlew test -q > out.log 2>&1 || true', tool_use_id: 'b6' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
+    await $.tool.call({ tool: 'Bash', command: './gradlew test -q', tool_use_id: 'b7' } as any)
+    expect(mine().fail).toBeNull()
 
     expect((await $.command.run({ command: 'board', args: 'band solo off' } as any)).text).toContain('숨겨요')
     expect((await $.command.run({ command: 'board', args: 'band solo on' } as any)).text).toContain('보여요')

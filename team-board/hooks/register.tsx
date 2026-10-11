@@ -16,6 +16,8 @@ import {
   event,
   explainPrompt,
   findByName,
+  HIDE_MS,
+  isAskingLine,
   isStale,
   label,
   looksLikeQuestion,
@@ -35,18 +37,18 @@ import {
   stripMarkdown,
   visible,
 } from './board'
-import { commandKey, formatAlert, judge, noteForClaude, signLine } from './failure'
+import { commandKey, formatAlert, judge, masksIn, noteForClaude, signLine } from './failure'
 import { bar, contextTone, paletteOf } from './palette'
 import { cells as widthOf, flowArt, parseExplain } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
 
 const PANE = 'team-board'
-// 결정을 묻는 줄은 강조한다
-const ASKING_LINE = /정해\s*주|결정해\s*주|골라\s*주|선택해\s*주|어느\s*쪽|할까요\s*\?|하시겠습니까/
 const TICK_MS = 3_000
 const HEARTBEAT_MS = 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
+// 사람이 보낸 입력: 터미널 입력, Remote Control, claude -p·Agent SDK. 작업 알림·다른 세션·플러그인이 넣은 입력은 기록하지 않는다
+const USER_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
 const beats = atom({ plugin: 'team-board', key: 'beats' } as const, [] as Beat[])
 const explain = atom({ plugin: 'team-board', key: 'explain' } as const, null as Explain | null)
@@ -115,16 +117,20 @@ async function note($: EngineInterface, kind: Parameters<typeof event>[1], text:
 async function scan($: EngineInterface): Promise<void> {
   if (!self.dir) return
   const entries = await $.fs.list(self.dir).catch(() => [])
+  const now = await $.clock.now()
   const found: Beat[] = []
   for (const entry of entries) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    // 어차피 숨길 오래된 기록은 읽지 않는다
+    if (now - entry.mtimeMs >= HIDE_MS) continue
     try {
       found.push(normalize(JSON.parse(await $.fs.read(`${self.dir}/${entry.name}`))))
     } catch {
       // 쓰는 도중이거나 깨진 파일은 다음 틱에 다시 읽는다.
     }
   }
-  await update($, beats, () => dedupeNames(found))
+  // 잔재를 먼저 숨겨야 살아 있는 세션 이름에 ·2 가 붙지 않는다
+  await update($, beats, () => dedupeNames(visible(found, now)))
 }
 
 async function runExplain($: EngineInterface): Promise<void> {
@@ -145,6 +151,11 @@ async function runExplain($: EngineInterface): Promise<void> {
           { id, question: target.question, status: 'done', text: stripMarkdown(r.text).trim(), data: parseExplain(r.text) }
         : { id, question: target.question, status: 'error', text: `설명을 만들지 못했어요 (${r.reason})`, data: null },
     )
+  } catch (err) {
+    // 엔진이 보내기를 거부한 요청(막힌 모델 등)은 reject 된다. 로딩에 머물지 않게 이유를 보여준다
+    await update($, explain, (): Explain => ({
+      id, question: target.question, status: 'error', text: `설명을 만들지 못했어요 (${err instanceof Error ? err.message : String(err)})`, data: null,
+    }))
   } finally {
     self.busy = false
   }
@@ -323,7 +334,7 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const text = typeof e.text === 'string' ? e.text.trim() : ''
     // next(e) 안에서 턴이 시작되며 결정 대기 상태가 지워지므로, 넘기기 전에 기록한다.
-    if (text && !text.startsWith('/') && self.beat) {
+    if (text && !text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
       const at = await $.clock.now()
       let { decisions, timeline } = self.beat
       if (self.beat.state === 'asking' && self.beat.question) {
@@ -354,13 +365,16 @@ export const register: Register = (on, options) => {
     const text = [out.stdout, out.stderr].filter(t => typeof t === 'string' && t.length > 0).join('\n')
     const at = await $.clock.now()
     const alert = judge(e.command, text, at)
+    const prev = self.beat.fail
     if (!alert) {
-      const prev = self.beat.fail
-      if (prev && text.trim() && prev.key === commandKey(e.command)) await save($, { fail: null }, true)
+      // 실패 코드를 가리는 명령이 출력 없이 끝나면 통과했는지 알 수 없어 지우지 않는다
+      if (prev && prev.key === commandKey(e.command) && (text.trim() || !masksIn(e.command).length)) await save($, { fail: null }, true)
       return ran
     }
     const timeline = pushCapped(self.beat.timeline, event(at, 'fail', `${alert.key} · ${signLine(alert.signs[0] ?? '')}`), MAX_TIMELINE)
-    await save($, { fail: alert, timeline }, true)
+    // 다른 명령의 확인 필요(warn)로 남아 있는 실패(high)를 덮지 않는다. 기록에는 남긴다
+    const keep = prev?.level === 'high' && alert.level === 'warn' && prev.key !== alert.key
+    await save($, { fail: keep ? prev : alert, timeline }, true)
     await scan($)
     const memo = noteForClaude(alert)
     return memo ? { ...ran, context: [...(ran.context ?? []), memo] } : ran
@@ -921,7 +935,7 @@ export const register: Register = (on, options) => {
                 <Text color={pal.ask}>│</Text>
               </Box>
               <Box flexGrow={1} flexShrink={1}>
-                <Text wrap="wrap" color={ASKING_LINE.test(l) ? pal.ask : pal.text} bold={ASKING_LINE.test(l)}>{l}</Text>
+                <Text wrap="wrap" color={isAskingLine(l) ? pal.ask : pal.text} bold={isAskingLine(l)}>{l}</Text>
               </Box>
             </Box>
           ))}

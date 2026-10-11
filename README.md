@@ -77,7 +77,7 @@ claude plugin update eli12@devflow-mods
 
 보이는 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기 > 소식 없음.
 
-세션 이름 (같은 폴더에서 여러 세션을 열어도 구분되게. `claude --name` 이름은 시작 후 몇 초 안에 반영)
+세션 이름 (같은 폴더에서 여러 세션을 열어도 구분되게. `claude --name` 이름은 15초마다 확인해 반영)
 1. `/board name 이름` 으로 정한 이름
 2. Claude Code 세션 이름: `claude --name 이름` 으로 시작하거나 `/rename 이름` (보드가 바로 따라감)
 3. 워크트리면 브랜치 이름
@@ -135,16 +135,16 @@ claude plugin update eli12@devflow-mods
 - Bash 가 exit 0 으로 끝났는데 출력에 실패 흔적이 있으면:
   - Claude 에게: "exit 0 이지만 실패 흔적이 있으니 성공으로 보고하기 전에 확인하라"는 메모를 결과에 붙입니다. 파이프·`|| true` 로 실패 코드를 가렸으면 `set -o pipefail` 도 권합니다.
   - 사람에게: 팀 창의 그 세션 칸에 `⚠실패` 와 실패 줄(`12 tests completed, 1 failed`), 머리줄에 `⚠ 실패 n`, 보드 카드에 빨간 주의 띠. **다른 탭에서도** 보입니다.
-- 잡는 것: Gradle(`BUILD FAILED`, `> Task … FAILED`, `n tests completed, m failed`), Maven(`Tests run: …, Failures: n`, `BUILD FAILURE`), JUnit(`… > 테스트() FAILED`), Kotlin·Java 컴파일 오류, Spring `APPLICATION FAILED TO START`, `Caused by: …Exception`, npm·Python 오류, `command not found` 등. 건너뛴 테스트·실행된 테스트 없음(`No tests found for given includes`)은 "확인 필요"로 보드에만 표시합니다.
-- 오탐 줄이기: `grep`, `cat`, `tail`, `git log/diff` 처럼 로그를 **읽기만 하는** 명령은 판정하지 않고, `0 failed` 같은 통과 요약은 무시합니다.
-- 같은 명령(예: `./gradlew test`)이 깨끗하게 다시 돌면 표시가 저절로 지워집니다.
+- 잡는 것: Gradle(`BUILD FAILED`, `> Task … FAILED`, `n tests completed, m failed`), Maven(`Tests run: …, Failures: n`, `BUILD FAILURE`), JUnit(`… > 테스트() FAILED`), Kotlin·Java 컴파일 오류, Spring `APPLICATION FAILED TO START`, `Caused by: …Exception`, npm·Python 오류, bun 요약(`2 fail`), `command not found` 등. 건너뛴 테스트·실행된 테스트 없음(`No tests found for given includes`)·Maven `Tests are skipped.`(명령에 `skipTests`·`skipITs` 가 있으면 제외)는 "확인 필요"로 보드에만 표시하고, 다른 명령의 실패 표시를 덮지 않습니다.
+- 오탐 줄이기: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `xargs grep`, `git log/diff`, `docker logs`, `kubectl logs` 처럼 로그를 **읽기만 하는** 단계로만 된 명령은 판정하지 않고 (`echo x && ./gradlew test` 는 판정), `0 failed` 같은 통과 요약은 무시합니다.
+- 같은 명령이 실패 흔적 없이 다시 돌면 (출력이 없어도. 단 `|| true` 처럼 실패 코드를 가리는 명령은 출력이 있어야) 표시가 저절로 지워집니다. 같은 명령인지는 앞의 `cd`·`echo` 같은 단계를 건너뛰고 앞 두 낱말(`./gradlew test --tests X` → `./gradlew test`)로 보고, 둘째 낱말이 `run`·`-m`·`exec` 이면 세 낱말(`npm run lint`, `python -m pytest`)까지 봅니다.
 - 영어 출력 기준이고 Bash 만 봅니다. 원 아이디어는 [Reasonofmoon/reasonofmoon-mods](https://github.com/Reasonofmoon/reasonofmoon-mods) 의 silent-failure (MIT).
 
 음성 알림 (기본 켜짐, macOS)
 - 어떤 세션이 결정을 **20초 넘게** 기다리면 그 세션이 "띵동" 소리와 함께 "sub-2 세션이 결정을 기다립니다"라고 한 번 말합니다.
 - 질문이 나오자마자 그 탭에서 답하면 조용합니다. 탭이 여러 개여도 기다리는 세션만 말하니 한 번만 들립니다.
 - 한국어 목소리(Yuna)를 씁니다. 없으면 기본 목소리로 읽는데 한국어가 어색할 수 있으니, macOS 시스템 설정 → 손쉬운 사용 → 읽기 및 말하기 → 시스템 목소리에서 한국어(Yuna)를 내려받아 두세요. `/board sound test` 로 확인.
-- 카드 테두리 색 = 상태 (노랑 결정 필요 · 파랑 작업중 · 회색 대기), `ctx` 막대 색 = 컨텍스트 여유 (초록 · 노랑 50%+ · 빨강 80%+).
+- 카드 테두리 색 = 상태 (노랑 결정 필요 · 빨강 숨은 실패 · 파랑 작업중 · 회색 대기), `ctx` 막대 색 = 컨텍스트 여유 (초록 · 노랑 50%+ · 빨강 80%+).
 
 색 바꾸기 (`palette`: `night` 기본 · `aurora` · `theme`). `theme` 은 Claude Code 테마 색을 따르니 밝은 배경이면 이것:
 ```bash
@@ -153,8 +153,9 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
 
 무엇이 기록되나
 - 진행 현황: Claude가 쓰는 할 일 도구(TaskCreate/TaskUpdate, TodoWrite)를 그대로 따라갑니다.
-- 결정: ① AskUserQuestion 질문과 고른 답, ② 답변 끝에서 결정을 요청한 뒤("정해 주세요", "할까요?" 등) 사용자가 보낸 다음 요청을 그 결정의 답으로 기록합니다.
+- 결정: ① AskUserQuestion 질문과 고른 답, ② 답변 끝에서 결정을 요청한 뒤("정해 주세요", "할까요?" 등. "문제가 있으면 (바로) 알려 주세요" 같은 조건문, "확인해 주세요", `?` 로 끝나는 제목은 제외) 사용자가 보낸 다음 요청을 그 결정의 답으로 기록합니다.
 - 흐름: 요청, 질문, 결정, 완료, 중단, 숨은 실패를 최근 12개까지.
+- 요청과 결정의 답으로 기록하는 입력: 터미널 입력창, Remote Control, `claude -p`·Agent SDK. 작업 알림, 다른 세션이 보낸 메시지, IDE 등 같은 사용자 소켓으로 들어온 입력, Slack 호출, 플러그인이 보낸 프롬프트는 기록하지 않습니다.
 
 알아둘 것
 - 상태는 `~/.claude/team-board/<레포>/` 에 세션마다 JSON 파일로 저장됩니다. 요청·질문·답 원문이 평문으로 들어가니 동기화되는 폴더가 아닌지 확인하세요. 오래된 파일은 지워도 됩니다.
@@ -162,11 +163,11 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
 - 권한 확인 창(Allow?)에서 멈춘 상태는 mod가 알 수 없어 "작업중"으로 보입니다.
 - Linux·Windows 터미널에서는 소리가 나지 않습니다 (Claude Code 가 그 환경의 재생기를 쓰지 않음).
 - `/clear` 해도 보드에서 사라지지 않고 "대기"로 남습니다. 결정 기록은 유지, 결정 대기 질문과 할 일 진행률은 비우고, 흐름에 `⟲ 대화 지움`을 남깁니다. `/board name`·`/rename` 이름도 유지됩니다.
-- 3초마다 갱신. 탭을 `/exit` 없이 닫으면 3분 뒤 흐리게 표시되고, 그 폴더에 새 세션이 열려 있으면 그때 숨겨집니다. 12시간 뒤엔 모두 숨김.
+- 3초마다 갱신. 탭을 `/exit` 없이 닫으면 3분 뒤 흐리게 표시되고, 그 폴더에 같은 이름의 새 세션이 열려 있으면 그때 숨겨집니다. 12시간 뒤엔 모두 숨김.
 - 플러그인이 갱신되거나 다시 로드돼도 같은 세션의 이름·할 일·결정 기록은 이어집니다.
 - 할 일 진행률은 그 세션에서 만든 할 일만 셉니다 (다른 세션에서 넘어온 할 일 목록은 세지 않음).
 - 숨은 실패는 출력 글자로 판단합니다. 실패를 일부러 출력하는 테스트(예: 실패 메시지를 검증하는 테스트)에서는 잘못 걸릴 수 있으니 `/board fail clear` 로 지우거나 `/board fail off` 로 끄세요.
-- 숨은 실패 표시는 그 세션의 상태 파일에 함께 저장되어 탭을 다시 열어도 남습니다. 같은 명령을 다시 돌리면 지워집니다.
+- 숨은 실패 표시는 그 세션의 상태 파일에 함께 저장되어 탭을 다시 열어도 남습니다. 같은 명령(위의 기준)이 실패 흔적 없이 다시 돌면 지워집니다.
 
 ## eli12 사용
 
@@ -186,6 +187,12 @@ claude plugin test ./team-board         # 테스트
 claude plugin test ./eli12
 ```
 각 mod 의 화면·문구는 `hooks/` 의 순수 함수(`board.ts`, `diagram.ts`, `failure.ts`, `prompt.ts`)에 모여 있어 고치기 쉽습니다. README 와 테스트의 `order-svc`, `sub-2`, `PR38` 같은 이름은 예시입니다.
+
+eli12 스킬 평가 (실제 에이전트를 돌리는 유료 실행. 3케이스 × 3회에 약 $0.7, 2026-10-12 측정):
+```bash
+cd eli12 && claude plugin eval . --trust-plugin --ablation none --runs 3 --no-publish --max-cost-usd 1
+```
+`eli12/evals/` 의 3케이스는 한 줄 답 요청에는 `explain-simply` 가 호출되지 않는지, 개념 설명 요청 2개에는 호출되는지, 그중 Kafka 설명에 그림과 비유·비유의 한계·사실 오류 없음(LLM 판정)이 있는지 봅니다. 결과는 `eli12/evals/results/` 에 저장되고 git 에서 제외됩니다.
 
 ## 라이선스
 

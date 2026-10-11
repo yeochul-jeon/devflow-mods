@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { ModelCompleteResult, Register } from 'claude-code'
 
 import type { Eli12View } from '../types'
 import { buildPrompt, buildTopicPrompt, lastAnswer, stripMarkdown } from './prompt'
@@ -29,12 +29,20 @@ export const register: Register = on => {
     await update($, view, (): Eli12View => ({ status: 'loading', text: '', focus }))
     await $.ui.open({ id: PANE, title: '12살 버전', closeOnEscape: true })
 
-    const r = await $.model.complete({
-      model: 'haiku',
-      prompt,
-      maxTokens: 2000,
-      timeoutMs: 90_000,
-    })
+    let r: ModelCompleteResult
+    try {
+      r = await $.model.complete({
+        model: 'haiku',
+        prompt,
+        maxTokens: 2000,
+        timeoutMs: 90_000,
+      })
+    } catch (err) {
+      // 엔진이 보내기를 거부한 요청(막힌 모델 등)은 reject 된다. 로딩에 머물지 않게 이유를 보여준다
+      const why = `모델 호출 실패 (${err instanceof Error ? err.message : String(err)})`
+      await update($, view, (v): Eli12View => ({ ...v, status: 'error', text: why }))
+      return { text: `/eli12: ${why}` }
+    }
 
     if (!r.isAnswered) {
       const why = r.reason === 'aborted' ? '시간이 초과되었거나 취소됐어요.' : `모델 호출 실패 (${r.reason})`

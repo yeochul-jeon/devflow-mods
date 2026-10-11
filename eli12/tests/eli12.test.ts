@@ -27,6 +27,11 @@ describe('표시용 정리', () => {
   test('마크다운 기호를 걷어낸다', async () => {
     expect(stripMarkdown('**1. 한 줄 요약**\n```\n# 제목')).toBe('1. 한 줄 요약\n\n제목')
   })
+
+  test('Python 식별자의 밑줄 두 개는 그대로 둔다', async () => {
+    expect(stripMarkdown('if __name__ == "__main__":')).toBe('if __name__ == "__main__":')
+    expect(stripMarkdown('`__init__` 를 고쳤습니다')).toBe('__init__ 를 고쳤습니다')
+  })
 })
 
 describe('/eli12', () => {
@@ -107,6 +112,24 @@ describe('/eli12', () => {
 
     const ui = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /시간이 초과/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('모델 호출 자체가 거부되면(reject) 로딩에 머물지 않고 이유를 보여준다', async ($, on) => {
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.messages', () => ({ value: [{ role: 'assistant', text: '긴 설명', toolUses: [] }] }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    // 던진 훅은 건너뛰고 그 아래 답할 구현이 없으므로 $.model.complete 가 reject 된다
+    on('model.complete', () => {
+      throw new Error('blocked model')
+    })
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
+    const { text } = await $.command.run({ command: 'eli12', args: '' } as any)
+    expect(text).toContain('모델 호출 실패')
+
+    const ui = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /모델 호출 실패/ })).toBeDefined()
     await ui.unmount()
   })
 })

@@ -36,7 +36,6 @@ export function stripMarkdown(text: string): string {
     .replace(/^```[^\n]*$/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/__(.+?)__/g, '$1')
     .replace(/`([^`\n]+)`/g, '$1')
 }
 
@@ -45,11 +44,29 @@ export function oneLine(text: string, max: number): string {
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat
 }
 
-const ASKING = /정해\s*주|결정해\s*주|결정\s*사항|골라\s*주|선택해\s*주|어느\s*쪽|할까요\s*\?|하시겠습니까|확인해\s*주|알려\s*주세요|\?\s*$/m
+// 결정을 묻는 낱말. '확인해 주세요'는 결과를 봐 달라는 부탁이라 넣지 않는다.
+const DECIDE = /정해\s*주|결정해\s*주|결정\s*사항|골라\s*주|선택해\s*주|어느\s*쪽|할까요\s*\?|하시겠습니까|알려\s*주세요/
+// '문제가 있으면 (바로) 알려 주세요' 같은 조건문은 결정 요청이 아니다.
+const IF_TELL = /(?:면|경우)\s*(?:\S+\s+)?알려\s*주세요/
+const ENDS_ASKING = /\?\s*$/
+const HEADING = /^#{1,6}\s/
 
-/** 답변 끝부분이 사용자에게 결정을 요청하는지. */
+const decides = (line: string) => DECIDE.test(line.replace(IF_TELL, ''))
+
+/** 한 줄이 결정을 묻는지: 결정을 묻는 낱말이 있거나 ? 로 끝난다 (마크다운 제목은 ? 로 끝나도 아님). 상황판도 이 줄을 강조한다. */
+export function isAskingLine(line: string): boolean {
+  return decides(line) || (ENDS_ASKING.test(line) && !HEADING.test(line))
+}
+
+/** 답변 끝부분이 사용자에게 결정을 요청하는지: 끝 1500자의 줄마다 보되 코드 블록 안은 뺀다. */
 export function looksLikeQuestion(answer: string): boolean {
-  return ASKING.test(answer.slice(-1500))
+  let inCode = false
+  return answer.slice(-1500).split('\n').some(raw => {
+    const line = raw.trim()
+    if (/^```/.test(line)) inCode = !inCode
+    else if (!inCode && line) return isAskingLine(line)
+    return false
+  })
 }
 
 /** 결정 요청 부분만 잘라 보관한다: 끝에서부터 최대 maxChars. */
@@ -61,7 +78,7 @@ export function questionText(answer: string, maxChars = 3000): string {
 /** 긴 결정 요청에서 기록용 한 줄을 뽑는다: 묻는 문장 중 마지막 것. */
 export function questionSummary(question: string): string {
   const lines = question.split('\n').map(l => l.trim()).filter(Boolean)
-  const asking = lines.filter(l => ASKING.test(l))
+  const asking = lines.filter(isAskingLine)
   return oneLine(asking[asking.length - 1] ?? lines[lines.length - 1] ?? '', 90)
 }
 
