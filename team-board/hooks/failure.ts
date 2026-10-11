@@ -51,20 +51,22 @@ const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|j
 const MAX_SCAN = 200_000
 const MAX_LINE = 120
 
-/** 셸 명령의 단계들 (&&, ||, ;, |, |&, 줄바꿈으로 나눔). cd 단계, 주석 줄, 환경변수 대입은 뺀다. */
+/** 셸 명령의 단계들 (&&, ||, ;, |, |&, 줄바꿈으로 나눔). cd 단계, 주석 줄, 따로 선 true·:, 환경변수 대입은 뺀다. */
 function steps(command: string): string[] {
   // 따옴표 안의 | ; 는 구분자가 아니다: 같은 길이로 가린 사본에서 자를 자리를 찾고 원문을 자른다
-  const masked = command.replace(/'[^']*'|"[^"]*"/g, m => '_'.repeat(m.length))
+  // 주석 줄은 가리기 전에 지운다: 주석 안의 ' 가 뒤의 따옴표와 짝지어지지 않게
+  const src = command.replace(/^[ \t]*#.*$/gm, '')
+  const masked = src.replace(/'[^']*'|"[^"]*"/g, m => '_'.repeat(m.length))
   const parts: string[] = []
   let from = 0
   for (const m of masked.matchAll(/&&|\|\||\|&|;|\n|\|/g)) {
-    parts.push(command.slice(from, m.index))
+    parts.push(src.slice(from, m.index))
     from = m.index + m[0].length
   }
-  parts.push(command.slice(from))
+  parts.push(src.slice(from))
   return parts
     .map(s => s.trim().replace(/^(?:[A-Z_][A-Z0-9_]*=\S*(?:\s+|$))+/, ''))
-    .filter(s => s && !/^cd\s/.test(s) && !/^#/.test(s))
+    .filter(s => s && !/^cd\s/.test(s) && !/^(?:true|:)$/.test(s))
 }
 
 /** 모든 단계가 읽기 전용일 때만 true. `echo x && ./gradlew test` 는 판정한다. */
@@ -75,11 +77,11 @@ export function isReadOnly(command: string): boolean {
 /**
  * 같은 명령을 다시 돌렸는지 비교할 키: 읽기 전용이 아닌 첫 단계의 앞 두 낱말. `./gradlew test --tests X` → `./gradlew test`
  * 둘째 낱말이 run·-m·exec 이면 세 낱말: `npm run lint` → `npm run lint`.
- * 모두 읽기 전용이면 첫 단계를 쓴다. 그런 명령은 판정하지 않으므로 저장된 키와 겹치지 않는다.
+ * 모두 읽기 전용이면 '' 를 돌려준다. 저장된 키는 판정한 명령에서만 나와 비지 않으므로, 읽기 전용 명령은 어떤 저장된 키와도 같지 않다.
  */
 export function commandKey(command: string): string {
   const all = steps(command)
-  const words = (all.find(s => !READ_ONLY.test(s)) ?? all[0] ?? '').split(/\s+/)
+  const words = (all.find(s => !READ_ONLY.test(s)) ?? '').split(/\s+/)
   return words.slice(0, ['run', '-m', 'exec'].includes(words[1] ?? '') ? 3 : 2).join(' ')
 }
 

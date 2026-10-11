@@ -149,6 +149,18 @@ describe('board (순수 함수)', () => {
     expect(questionSummary('어느 쪽으로 할까요?\n1. A\n2. B\n궁금한 점이 있으면 언제든 알려 주세요.')).toBe('어느 쪽으로 할까요?')
   })
 
+  test('조건문은 문제·필요·궁금함만 뺀다. "되면/괜찮으시면 알려 주세요" 는 허락을 묻는 결정 요청이다', async () => {
+    expect(looksLikeQuestion('진행해도 되면 알려 주세요.')).toBe(true)
+    expect(looksLikeQuestion('괜찮으시면 알려 주세요, 바로 적용하겠습니다.')).toBe(true)
+    expect(looksLikeQuestion('원하시는 방식을 고르시면 알려 주세요.')).toBe(true)
+    expect(looksLikeQuestion('문제가 있으면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('문제가 있으시면 바로 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('필요하시면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('궁금한 점이 있으면 언제든 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('문제가 있을 경우 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('문제가 있으면 알려 주세요. 궁금한 점이 있으면 알려 주세요.')).toBe(false)
+  })
+
   test('마크다운 기호를 걷어낸다', async () => {
     expect(stripMarkdown('**1. 요약**\n```\n# 제목\n`code`')).toBe('1. 요약\n\n제목\ncode')
   })
@@ -285,6 +297,7 @@ describe('숨은 실패', () => {
     expect(commandKey('pnpm exec vitest run')).toBe('pnpm exec vitest')
     expect(commandKey('echo "== build" && ./gradlew test 2>&1 | tail -20')).toBe('./gradlew test')
     expect(judge('echo "== build" && ./gradlew test 2>&1 | tail -20', GRADLE, 1)!.key).toBe('./gradlew test')
+    expect(commandKey('docker compose logs --no-log-prefix app --tail 30')).toBe('')
   })
 
   test('파일·컨테이너 로그를 읽기만 하면 판정하지 않는다', async () => {
@@ -326,8 +339,23 @@ describe('숨은 실패', () => {
     expect(judge('cat build.log |& grep FAILED', GRADLE, 1)).toBeNull()
   })
 
+  test('따로 선 true · : 단계는 빼고 본다: 읽기 명령에 || true 를 붙여도 판정하지 않는다', async () => {
+    expect(judge('grep -rn "No such file" src/ || true', "src/x.ts:12: throw new Error('No such file or directory')", 1)).toBeNull()
+    expect(judge('cat build/reports/summary.txt 2>&1 || true', 'BUILD FAILED', 1)).toBeNull()
+    expect(judge('cat out.txt 2>/dev/null || :', '> Task :app:test FAILED', 1)).toBeNull()
+    expect(judge('grep -rn FAILED build/ ; true', 'build/log.txt:3:> Task :app:test FAILED', 1)).toBeNull()
+    const a = judge('./gradlew test 2>&1 || true', GRADLE, 1)
+    expect(a?.level).toBe('high')
+    expect(a?.key).toBe('./gradlew test')
+  })
+
   test('주석 줄은 단계로 보지 않는다', async () => {
     expect(commandKey('# 테스트 실행\n./gradlew test')).toBe('./gradlew test')
+    // 주석 안의 ' 가 뒤의 따옴표와 짝지어 줄바꿈·파이프를 가리지 않는다
+    const a = judge("# Let's see the log\n./gradlew test 2>&1 | grep -E 'FAILED'", '> Task :app:test FAILED', 1)
+    expect(a?.level).toBe('high')
+    expect(a?.key).toBe('./gradlew test')
+    expect(commandKey("# Check what's failing\n./gradlew test 2>&1 | grep -E 'FAILED|tests completed'")).toBe('./gradlew test')
   })
 })
 
@@ -413,7 +441,8 @@ describe('팀 상황판', () => {
       if (e.tool === 'TaskUpdate') return { result: { success: true }, text: 'ok' }
       if (e.tool === 'Bash') {
         const c = String(e.command)
-        const stdout = c.includes('tail') ? '12 tests completed, 1 failed\nBUILD FAILED in 3s'
+        const stdout = c.startsWith('docker compose logs') ? 'Caused by: java.lang.IllegalStateException: boom'
+          : c.includes('tail') ? '12 tests completed, 1 failed\nBUILD FAILED in 3s'
           : c.includes('pytest') ? 'no tests ran in 0.01s'
           : c.includes(' -q') ? ''
           : 'BUILD SUCCESSFUL in 3s'
@@ -650,6 +679,13 @@ describe('팀 상황판', () => {
     await $.tool.call({ tool: 'Bash', command: './gradlew test -q > out.log 2>&1 || true', tool_use_id: 'b6' } as any)
     expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
     await $.tool.call({ tool: 'Bash', command: './gradlew test -q', tool_use_id: 'b7' } as any)
+    expect(mine().fail).toBeNull()
+    // 로그를 읽기만 하는 명령은 앞 낱말이 같아도(docker compose) 실패 표시를 지우지 않는다
+    await $.tool.call({ tool: 'Bash', command: 'docker compose run --rm app ./gradlew test 2>&1 | tail -20', tool_use_id: 'b8' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: 'docker compose' })
+    await $.tool.call({ tool: 'Bash', command: 'docker compose logs --no-log-prefix app --tail 30', tool_use_id: 'b9' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: 'docker compose' })
+    await $.tool.call({ tool: 'Bash', command: 'docker compose run --rm app ./gradlew test', tool_use_id: 'b10' } as any)
     expect(mine().fail).toBeNull()
 
     expect((await $.command.run({ command: 'board', args: 'band solo off' } as any)).text).toContain('숨겨요')
