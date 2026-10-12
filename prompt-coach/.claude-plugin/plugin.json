@@ -1,0 +1,13 @@
+{
+  "name": "prompt-coach",
+  "version": "0.1.0",
+  "description": "보내기 전 초안을 목표·맥락·조건·완료 기준 순으로 다듬어 입력창에 다시 채움: /coach <초안> 또는 입력창 위 [다듬기] (Haiku)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/prompt-coach",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT"
+}

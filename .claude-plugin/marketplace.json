@@ -4,7 +4,7 @@
     "name": "yeochul-jeon",
     "url": "https://github.com/yeochul-jeon"
   },
-  "description": "Claude Code mods: 쉬운 설명(eli12), 멀티 세션 팀 상황판(team-board: 진행·결정 기록·숨은 실패 감지), 다음 요청 제안(next-steps)",
+  "description": "Claude Code mods: 쉬운 설명(eli12), 멀티 세션 팀 상황판(team-board: 진행·결정 기록·숨은 실패 감지), 다음 요청 제안(next-steps), 초안 다듬기(prompt-coach)",
   "plugins": [
     {
       "name": "eli12",
@@ -17,6 +17,10 @@
     {
       "name": "next-steps",
       "source": "./next-steps"
+    },
+    {
+      "name": "prompt-coach",
+      "source": "./prompt-coach"
     }
   ]
 }

@@ -11,6 +11,7 @@ Claude Code **mods** 모음: 어려운 설명을 12살 버전으로 풀어 주�
 | `team-board` | 같은 저장소(워크트리 포함)에서 돌고 있는 여러 Claude Code 세션의 상황판. 진행 현황(할 일 경로선), 결정 기록(질문 → 답), 결정 대기 알림(주의 띠·음성), **숨은 실패 감지**(exit 0 인데 실패한 빌드·테스트), 결정 대기 항목의 12살 버전 설명 | `/board` |
 | `eli12` | 어려운 설명만 골라 12살 버전으로. 자동 스킬(`explain-simply`) + 직전 답변이나 주제를 옆 패널에 풀어 주는 명령 | `/eli12 [주제]` |
 | `next-steps` | 답변이 끝나면 다음에 보낼 만한 요청 2~3개를 입력창 위에. 빈 입력창에서 숫자를 누르면 초안으로 들어감 (턴마다 Haiku 1회) | `/next [on\|off]` |
+| `prompt-coach` | 보내기 전 초안을 목표 → 맥락 → 조건 → 완료 기준 순으로 다듬어 입력창에 다시 채움. 누를 때만 Haiku 1회 | `/coach <초안>`, 입력창 위 `[다듬기]` |
 
 Claude Code **v2.1.287 이상**이 필요합니다 (`claude --version`).
 
@@ -21,6 +22,7 @@ claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install team-board@devflow-mods      # 모든 세션·워크트리에서 보여야 하므로 사용자 범위(기본)
 claude plugin install eli12@devflow-mods
 claude plugin install next-steps@devflow-mods     # 필요할 때만 (턴마다 Haiku 호출)
+claude plugin install prompt-coach@devflow-mods   # 필요할 때만 (누를 때 Haiku 호출)
 ```
 설치 중 `1 userConfig option not yet set` 안내가 나오면 색 설정(palette)을 아직 안 골랐다는 뜻이고, 그대로 두면 기본값 `night` 로 동작합니다.
 특정 프로젝트에만 쓰려면 그 프로젝트 폴더에서 `--scope local` 을 붙이세요. 설치 후 열려 있는 Claude Code 는 `/exit` 하고 다시 시작합니다 (`claude --continue` 로 대화를 이어서 열 수 있어요).
@@ -203,6 +205,15 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
 - `/next` 이번 세션 사용량 · `/next off` 끄기 · `/next on` 켜기 (설정은 유지됩니다).
 - 목록이 떠 있는 동안 빈 입력창에서 `1` 로 시작하는 글을 치면 첫 글자가 제안 고르기로 쓰입니다. 그럴 땐 `0` 으로 먼저 닫으세요.
 - 아이디어는 [hamzafer/claude-code-mods](https://github.com/hamzafer/claude-code-mods) 의 next-steps (MIT) 에서 얻었고 코드는 새로 썼습니다.
+
+## prompt-coach 사용
+
+- 입력창에 초안을 쓰면 위에 `[다듬기]` 버튼이 보입니다. 누르면 초안을 목표 → 맥락 → 조건 → 완료 기준 순으로 다듬어 입력창을 바꿉니다. 보내는 것은 직접 합니다. 다듬는 동안 초안을 고쳤으면 덮지 않습니다.
+- 키보드로는 `/coach <초안>` 으로 같은 일을 합니다. `/coach undo` 는 다듬기 전 원문으로 되돌리고, `/coach` 는 이번 세션 사용량을 보여 줍니다.
+- 초안에 있는 파일 이름·경로·숫자·조건은 그대로 두고, 초안에 없는 요구사항은 더하지 않습니다. 대화 기록은 보내지 않으므로 "아까 그 파일" 같은 말은 그대로 남습니다. 결과는 초안의 언어를 따릅니다.
+- 비용: 누를 때마다 Haiku 1회 (초안만 보냄, 출력 1500토큰 이하). 공백을 뺀 12자 미만의 초안은 다듬지 않습니다. 보낼 때 자동으로 검사하지 않습니다.
+- 버튼은 입력창에 포커스가 있으면 단축키로 누를 수 없습니다. 마우스로 누르거나 `/coach` 를 쓰세요.
+- 아이디어는 [yuk7392/prompt-coach](https://github.com/yuk7392/prompt-coach) 의 Refine (MIT) 에서 얻었고 코드는 새로 썼습니다.
 
 ## 변경 기록
 
