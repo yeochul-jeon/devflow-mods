@@ -421,6 +421,13 @@ describe('숨은 실패', () => {
     expect(judge(cmd, 'abc1234\n== C1\ndocs/a.md:7: 실측: `Tests run: 538, Failures: 1, Errors: 0`', 1)).toBeNull()
   })
 
+  test('git -C <경로> 뒤의 읽기 전용 git 명령도 읽기 전용이다', async () => {
+    const cmd = `git -C /repo rev-parse --show-toplevel && rg -n 'Failures: 1' tests | head -3; echo done`
+    expect(judge(cmd, '/repo\ntests/a.test.ts:7: Tests run: 538, Failures: 1\ndone', 1)).toBeNull()
+    expect(judge('git -C /repo log -1', 'BUILD FAILED in 3s', 1)).toBeNull()
+    expect(judge('git -C /repo commit -m x && ./gradlew test', 'BUILD FAILED in 3s', 1)?.level).toBe('high')
+  })
+
   test('소문자 변수 대입 단계도 빼고 본다. $( ) 로 명령을 돌리는 대입은 남긴다', async () => {
     expect(judge('f=docs/a.md; grep -n Failures "$f"', '46: Tests run: 538, Failures: 1', 1)).toBeNull()
     expect(judge('c=$(./gradlew test 2>&1); echo "$c"', 'BUILD FAILED in 3s', 1)?.level).toBe('high')
