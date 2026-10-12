@@ -26,7 +26,7 @@ import {
 import { bar, contextTone, paletteOf } from '../hooks/palette'
 import { cells, clip, flowArt, parseExplain } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
-import { commandKey, isReadOnly, judge, masksIn, noteForClaude, scanOutput } from '../hooks/failure'
+import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
 
 const NOW = 1_800_000_000_000
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -162,6 +162,17 @@ describe('board (순수 함수)', () => {
     expect(looksLikeQuestion('궁금한 점이 있으면 언제든 알려 주세요.')).toBe(false)
     expect(looksLikeQuestion('문제가 있을 경우 알려 주세요.')).toBe(false)
     expect(looksLikeQuestion('문제가 있으면 알려 주세요. 궁금한 점이 있으면 알려 주세요.')).toBe(false)
+  })
+
+  test('"뜻이었다면/다르면/아니라면 알려 주세요" 와 도움 제안 인사는 결정 요청이 아니다', async () => {
+    expect(looksLikeQuestion('다른 뜻이었다면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('제가 잘못 이해했다면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('의도와 다르면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('이 방향이 아니라면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('안녕하세요. 무엇을 도와드릴까요?')).toBe(false)
+    expect(looksLikeQuestion('어떤 작업을 도와드릴까요?')).toBe(false)
+    expect(looksLikeQuestion('어느 작업부터 할까요?')).toBe(true)
+    expect(looksLikeQuestion('진행해도 되면 알려 주세요.')).toBe(true)
   })
 
   test('마크다운 기호를 걷어낸다', async () => {
@@ -359,6 +370,46 @@ describe('숨은 실패', () => {
     expect(a?.level).toBe('high')
     expect(a?.key).toBe('./gradlew test')
     expect(commandKey("# Check what's failing\n./gradlew test 2>&1 | grep -E 'FAILED|tests completed'")).toBe('./gradlew test')
+  })
+
+  test('명령·키·흔적에 든 비밀 값은 *** 로 가린다', async () => {
+    expect(redact('API_TOKEN=abc123 ./gradlew test')).toBe('API_TOKEN=*** ./gradlew test')
+    expect(redact('mysql --password=hunter2 -u me')).toBe('mysql --password=*** -u me')
+    expect(redact('cli login --token abc123')).toBe('cli login --token ***')
+    expect(redact('curl -H "Authorization: Bearer abc.def" https://x')).toBe('curl -H "Authorization: Bearer ***" https://x')
+    expect(redact('git clone https://me:pw123@github.com/a/b')).toBe('git clone https://me:***@github.com/a/b')
+    expect(redact('key sk-ant-api03-AAAA_bbbb-1234 and ghp_abcdefABCDEF123456')).toBe('key *** and ***')
+    expect(redact('AKIAABCDEFGHIJKLMNOP eyJhbGciOi.eyJzdWIiOi.c2lnbmF0dXJl')).toBe('*** ***')
+    expect(redact('./gradlew test --tests OrderTest')).toBe('./gradlew test --tests OrderTest')
+    const a = judge(
+      "export OPENAI_API_KEY=sk-test0000000000000000000000AAAA && python3 run.py",
+      'Traceback (most recent call last):\n  File "run.py", line 3\nRuntimeError: bad key sk-test0000000000000000000000AAAA',
+      1,
+    )!
+    expect(JSON.stringify(a)).not.toContain('sk-test')
+    expect(a.command).toContain('OPENAI_API_KEY=***')
+    // 같은 명령을 다시 돌리면 가린 키끼리 같다
+    expect(commandKey('export OPENAI_API_KEY=sk-test0000000000000000000000AAAA && python3 run.py')).toBe(a.key)
+    expect(describeTool('Bash', { command: 'TOKEN=abc123 ./deploy.sh' })).toBe('Bash TOKEN=*** ./deploy.sh')
+  })
+
+  test('읽기 도구가 알린 "없음" 은 실패가 아니다 (존재 확인)', async () => {
+    expect(judge('ls -la tmp-replay && rm -r tmp-replay && ls tmp-replay 2>&1; git status --short', '"tmp-replay": No such file or directory (os error 2)', 1)).toBeNull()
+    expect(judge('f=$(ls -t Q_* 2>/dev/null | head -1); wc -l "$f"; sed -n 1,40p "$f"', 'wc: : open: No such file or directory', 1)).toBeNull()
+    expect(judge('git log -1; grep -n x raw/a.md', 'grep: raw/a.md: No such file or directory', 1)).toBeNull()
+    // 빌드·실행 도구가 낸 없음과 command not found 는 지금처럼 잡는다
+    expect(judge('./run.sh', './run.sh: line 3: config.yml: No such file or directory', 1)?.level).toBe('high')
+    expect(judge('npm test', 'sh: jest: command not found', 1)?.level).toBe('high')
+  })
+
+  test('Traceback 은 다음 줄에 File 이 와야 Python 예외다', async () => {
+    expect(judge(`python3 -c "print('Traceback (most recent call last):')"`, 'Traceback (most recent call last):', 1)).toBeNull()
+    const a = judge('python3 app.py', 'Traceback (most recent call last):\n  File "app.py", line 1, in <module>\nKeyError: x', 1)
+    expect(a?.signs[0]).toBe('Python 예외: Traceback (most recent call last):')
+  })
+
+  test('team-board 상태 파일을 다시 출력하는 명령은 판정하지 않는다', async () => {
+    expect(judge('python3 -c "import json; print(open(\'/Users/me/.claude/team-board/r/a.json\').read())"', '"signs": ["실패한 테스트: 3 tests completed, 1 failed"]', 1)).toBeNull()
   })
 })
 

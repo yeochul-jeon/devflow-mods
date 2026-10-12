@@ -1,6 +1,7 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
 import type { Beat, Decision, Event, Task } from '../types'
 import { EXPLAIN_JSON_SPEC } from './diagram'
+import { redact } from './failure'
 
 // 살아 있는 세션은 1분마다 기록하므로, 3분 넘게 소식이 없으면 흐리게 표시한다.
 export const STALE_MS = 3 * 60_000
@@ -71,14 +72,18 @@ export function oneLine(text: string, max: number): string {
 const DECIDE = /정해\s*주|결정해\s*주|결정\s*사항|골라\s*주|선택해\s*주|어느\s*쪽|할까요\s*\?|하시겠습니까|알려\s*주세요/
 // '문제가 있으면 (바로) 알려 주세요' 같은 문제·필요·궁금함 조건문은 결정 요청이 아니다. 줄의 모든 곳을 지운다 (g).
 // '진행해도 되면 / 괜찮으시면 알려 주세요' 는 허락을 묻는 것이라 남긴다.
-const IF_TELL = /(?:있으(?:시)?면|있(?:으실|을)\s*경우|생기(?:시)?면|이상하(?:시)?면|필요하(?:시)?면|궁금하(?:시)?면)\s*(?:\S+\s+)?알려\s*주세요/g
+// '다른 뜻이었다면 / 의도와 다르면 / 아니라면 알려 주세요' 도 내가 잘못 이해했을 때를 대비한 맺음말이다.
+const IF_TELL = /(?:있으(?:시)?면|있(?:으실|을)\s*경우|생기(?:시)?면|이상하(?:시)?면|필요하(?:시)?면|궁금하(?:시)?면|(?:었|였|했)다면|다르(?:시)?면|아니(?:라)?면)\s*(?:\S+\s+)?알려\s*주세요/g
+// '무엇을 도와드릴까요?' 같은 도움 제안 인사는 고를 것이 없다.
+const HELP_OFFER = /(?:무엇|뭘|어떤\s+\S+?)\s*(?:을|를)?\s*도와\s*드릴까요\s*\?/g
 const ENDS_ASKING = /\?\s*$/
 const HEADING = /^#{1,6}\s/
 
 const decides = (line: string) => DECIDE.test(line.replace(IF_TELL, ''))
 
 /** 한 줄이 결정을 묻는지: 결정을 묻는 낱말이 있거나 ? 로 끝난다 (마크다운 제목은 ? 로 끝나도 아님). 상황판도 이 줄을 강조한다. */
-export function isAskingLine(line: string): boolean {
+export function isAskingLine(raw: string): boolean {
+  const line = raw.replace(HELP_OFFER, '').trim()
   return decides(line) || (ENDS_ASKING.test(line) && !HEADING.test(line))
 }
 
@@ -110,7 +115,7 @@ export function describeTool(tool: string, input: Record<string, unknown>): stri
   const pick = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
   switch (tool) {
     case 'Bash':
-      return `Bash ${oneLine(pick('command'), 40)}`
+      return `Bash ${oneLine(redact(pick('command')), 40)}`
     case 'Read':
     case 'Edit':
     case 'Write':

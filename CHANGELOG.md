@@ -5,6 +5,14 @@
 
 ## team-board
 
+### 0.10.2 (2026-10-12)
+- 수정: 숨은 실패 기록(`/board fail` 의 명령·흔적)과 보드의 "지금 하는 일"에 비밀 값이 평문으로 남던 문제. 이름에 token·secret·password·api_key·auth 가 든 변수·옵션의 값, `Authorization: Bearer …`, URL 의 비밀번호, `sk-`·`ghp_`·`github_pat_`·`xox?-`·`AKIA…`·JWT 꼴 토큰을 `***` 로 가려 저장합니다.
+- 수정: 숨은 실패 오탐.
+  - `ls x 2>&1`·`wc`·`grep` 같은 읽기 도구가 파일이 없다고 알린 줄(`"x": No such file or directory (os error 2)`, `grep: x: No such file …`)은 존재 확인의 답이라 실패로 보지 않습니다. 빌드·실행 도구가 낸 없음과 `command not found` 는 지금처럼 잡습니다.
+  - Python 예외는 `Traceback (most recent call last):` 다음 줄에 `File "…"` 이 와야 잡습니다. print 로 찍은 한 줄은 잡지 않습니다.
+  - 명령에 `.claude/team-board/` 가 들어 있으면(상태 파일을 다시 출력) 판정하지 않습니다.
+- 수정: 결정 대기 오탐. "다른 뜻이었다면 / 의도와 다르면 / 아니라면 알려 주세요" 같은 맺음말과 "무엇을 도와드릴까요?" 같은 도움 제안 인사를 결정 요청으로 보지 않습니다.
+
 ### 0.10.1 (2026-10-12)
 - 수정: 세션이 하나일 때의 띠에서 태그가 `캐시 n분` 으로 길어지면 이름과 태그가 두 줄로 쪼개지던 문제. 이제 설명 글만 잘립니다.
 

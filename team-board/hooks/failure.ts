@@ -28,7 +28,7 @@ const RULES: Rule[] = [
   { label: '실패한 테스트', pattern: /^\s*[1-9]\d* fail\s*$/m, severity: 'high' }, // bun: " 2 fail"
   { label: 'FAIL 표시', pattern: /^\s*(?:FAIL|FAILED)\b/m, severity: 'high' },
   { label: 'npm 오류', pattern: /^\s*npm (?:ERR!|error)\s/m, severity: 'high' },
-  { label: 'Python 예외', pattern: /Traceback \(most recent call last\)/, severity: 'high' },
+  { label: 'Python 예외', pattern: /Traceback \(most recent call last\):?[ \t]*\n\s+File "/, severity: 'high' }, // print 로 찍은 한 줄은 뺀다
   { label: '오류 줄', pattern: /^\s*(?:Error|TypeError|ReferenceError|SyntaxError|ModuleNotFoundError|ImportError|AssertionError)\b[:\s]/m, severity: 'high' },
   { label: '명령·파일 없음', pattern: /\bcommand not found\b|\bNo such file or directory\b|\bPermission denied\b/i, severity: 'high' },
   { label: '비정상 종료', pattern: /\bsegmentation fault\b|\bcore dumped\b|\bpanicked at\b|\bOutOfMemoryError\b/i, severity: 'high' },
@@ -47,6 +47,28 @@ const MASKS: { label: string; pattern: RegExp }[] = [
 
 /** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. */
 const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed -n|awk|echo|printf|sort|uniq|cut|tr|column|nl)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:log|diff|show|blame|grep|status)\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
+
+/** 읽기 도구가 파일이 없다고 알린 줄: 존재 확인의 답이지 실패가 아니다. 빌드·실행 도구가 낸 없음은 남긴다. */
+const READ_MISSING = /^(?:(?:ls|stat|cat|head|tail|grep|rg|wc|du|file|find|readlink|realpath|diff|bat|eza|jq|sed|awk): .*No such file or directory.*|"[^"\n]*": No such file or directory \(os error 2\))$/gm
+
+/** team-board 상태 파일을 읽는 명령: 지난 실패 기록을 다시 출력할 뿐이다. */
+const OWN_STATE = /\.claude\/team-board\//
+
+// 비밀 값: 이름에 token·secret·password 등이 든 변수·옵션의 값, 인증 헤더, URL 의 비밀번호, 알려진 토큰 꼴
+const SECRET_NAME = String.raw`[\w-]*(?:token|secret|passw(?:or)?d|pwd|api[_-]?key|auth(?!or)|credential)[\w-]*`
+const SECRET_VALUE = String.raw`(?:"[^"]*"|'[^']*'|[^\s'"]+)`
+const SECRETS: [RegExp, string][] = [
+  [/\b(?:sk-[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_\w{20,}|xox[abpr]-[\w-]{10,}|AKIA[0-9A-Z]{16}|eyJ[\w-]+\.eyJ[\w-]+\.[\w-]+)/g, '***'],
+  [new RegExp(String.raw`(${SECRET_NAME}=)${SECRET_VALUE}`, 'gi'), '$1***'],
+  [new RegExp(String.raw`(--?${SECRET_NAME}\s+)(?!-)${SECRET_VALUE}`, 'gi'), '$1***'],
+  [/(Authorization:\s*(?:Bearer|Basic|Token)\s+)[^\s'"]+/gi, '$1***'],
+  [/(\/\/[^\s:/@]+:)[^\s@/]+(@)/g, '$1***$2'],
+]
+
+/** 상태 파일에 남기기 전에 비밀 값을 *** 로 가린다. */
+export function redact(text: string): string {
+  return SECRETS.reduce((t, [re, to]) => t.replace(re, to), text)
+}
 
 const MAX_SCAN = 200_000
 const MAX_LINE = 120
@@ -82,7 +104,7 @@ export function isReadOnly(command: string): boolean {
 export function commandKey(command: string): string {
   const all = steps(command)
   const words = (all.find(s => !READ_ONLY.test(s)) ?? '').split(/\s+/)
-  return words.slice(0, ['run', '-m', 'exec'].includes(words[1] ?? '') ? 3 : 2).join(' ')
+  return redact(words.slice(0, ['run', '-m', 'exec'].includes(words[1] ?? '') ? 3 : 2).join(' '))
 }
 
 function lineAround(text: string, index: number): string {
@@ -112,15 +134,15 @@ export function masksIn(command: string): string[] {
 
 /** exit 0 으로 끝난 Bash 한 번을 판정한다. 의심할 게 없으면 null. */
 export function judge(command: string, output: string, at: number): FailAlert | null {
-  if (!output.trim() || isReadOnly(command)) return null
-  const findings = scanOutput(output).filter(f => f.label !== MAVEN_SKIP || !/skipTests|skipITs|maven\.test\.skip/.test(command))
+  if (!output.trim() || isReadOnly(command) || OWN_STATE.test(command)) return null
+  const findings = scanOutput(output.replace(READ_MISSING, '')).filter(f => f.label !== MAVEN_SKIP || !/skipTests|skipITs|maven\.test\.skip/.test(command))
   if (!findings.length) return null
   return {
     at,
-    command: command.replace(/\s+/g, ' ').trim().slice(0, 200),
+    command: redact(command.replace(/\s+/g, ' ').trim()).slice(0, 200),
     key: commandKey(command),
     level: findings.some(f => f.severity === 'high') ? 'high' : 'warn',
-    signs: findings.slice(0, 4).map(f => `${f.label}: ${f.line}`),
+    signs: findings.slice(0, 4).map(f => redact(`${f.label}: ${f.line}`)),
     masks: masksIn(command),
   }
 }

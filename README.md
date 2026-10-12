@@ -140,7 +140,8 @@ claude plugin update eli12@devflow-mods
   - Claude 에게: "exit 0 이지만 실패 흔적이 있으니 성공으로 보고하기 전에 확인하라"는 메모를 결과에 붙입니다. 파이프·`|| true` 로 실패 코드를 가렸으면 `set -o pipefail` 도 권합니다.
   - 사람에게: 팀 창의 그 세션 칸에 `⚠실패` 와 실패 줄(`12 tests completed, 1 failed`), 머리줄에 `⚠ 실패 n`, 보드 카드에 빨간 주의 띠. **다른 탭에서도** 보입니다.
 - 잡는 것: Gradle(`BUILD FAILED`, `> Task … FAILED`, `n tests completed, m failed`), Maven(`Tests run: …, Failures: n`, `BUILD FAILURE`), JUnit(`… > 테스트() FAILED`), Kotlin·Java 컴파일 오류, Spring `APPLICATION FAILED TO START`, `Caused by: …Exception`, npm·Python 오류, bun 요약(`2 fail`), `command not found` 등. 건너뛴 테스트·실행된 테스트 없음(`No tests found for given includes`)·Maven `Tests are skipped.`(명령에 `skipTests`·`skipITs` 가 있으면 제외)는 "확인 필요"로 보드에만 표시하고, 다른 명령의 실패 표시를 덮지 않습니다.
-- 오탐 줄이기: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `xargs grep`, `git log/diff`, `docker logs`, `kubectl logs` 처럼 로그를 **읽기만 하는** 단계로만 된 명령은 판정하지 않고 (`echo x && ./gradlew test` 는 판정), `0 failed` 같은 통과 요약은 무시합니다.
+- 오탐 줄이기: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `xargs grep`, `git log/diff`, `docker logs`, `kubectl logs` 처럼 로그를 **읽기만 하는** 단계로만 된 명령은 판정하지 않고 (`echo x && ./gradlew test` 는 판정), `0 failed` 같은 통과 요약, 읽기 도구가 파일이 없다고 알린 줄(`ls x 2>&1` 의 `No such file or directory`), `File "…"` 줄이 뒤따르지 않는 `Traceback` 한 줄, team-board 상태 파일(`.claude/team-board/`)을 다시 출력하는 명령은 무시합니다.
+- 저장하는 명령·흔적의 비밀 값(token·password 변수, `Authorization` 헤더, URL 비밀번호, `sk-`·`ghp_` 같은 토큰)은 `***` 로 가립니다.
 - 같은 명령이 실패 흔적 없이 다시 돌면 (출력이 없어도. 단 `|| true` 처럼 실패 코드를 가리는 명령은 출력이 있어야) 표시가 저절로 지워집니다. 같은 명령인지는 앞의 `cd`·`echo` 같은 단계를 건너뛰고 앞 두 낱말(`./gradlew test --tests X` → `./gradlew test`)로 보고, 둘째 낱말이 `run`·`-m`·`exec` 이면 세 낱말(`npm run lint`, `python -m pytest`)까지 봅니다.
 - 영어 출력 기준이고 Bash 만 봅니다. 원 아이디어는 [Reasonofmoon/reasonofmoon-mods](https://github.com/Reasonofmoon/reasonofmoon-mods) 의 silent-failure (MIT).
 
@@ -162,7 +163,7 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
 
 무엇이 기록되나
 - 진행 현황: Claude가 쓰는 할 일 도구(TaskCreate/TaskUpdate, TodoWrite)를 그대로 따라갑니다.
-- 결정: ① AskUserQuestion 질문과 고른 답, ② 답변 끝에서 결정을 요청한 뒤("정해 주세요", "할까요?" 등. "문제가 있으면 (바로) 알려 주세요" 같은 문제·필요·궁금함 조건문, "확인해 주세요", `?` 로 끝나는 제목은 제외. "진행해도 되면 알려 주세요" 는 포함) 사용자가 보낸 다음 요청을 그 결정의 답으로 기록합니다.
+- 결정: ① AskUserQuestion 질문과 고른 답, ② 답변 끝에서 결정을 요청한 뒤("정해 주세요", "할까요?" 등. "문제가 있으면 (바로) 알려 주세요" 같은 문제·필요·궁금함 조건문, "다른 뜻이었다면 알려 주세요" 같은 맺음말, "무엇을 도와드릴까요?" 같은 인사, "확인해 주세요", `?` 로 끝나는 제목은 제외. "진행해도 되면 알려 주세요" 는 포함) 사용자가 보낸 다음 요청을 그 결정의 답으로 기록합니다.
 - 흐름: 요청, 질문, 결정, 완료, 중단, 숨은 실패를 최근 12개까지.
 - 요청과 결정의 답으로 기록하는 입력: 터미널 입력창, Remote Control, `claude -p`·Agent SDK. 작업 알림, 다른 세션이 보낸 메시지, IDE 등 같은 사용자 소켓으로 들어온 입력, Slack 호출, 플러그인이 보낸 프롬프트는 기록하지 않습니다.
 
