@@ -704,10 +704,15 @@ export const register: Register = (on, options) => {
           {below}
           <Box flexDirection="row" justifyContent="space-between" columnGap={2} borderStyle="double" borderColor={hot ? pal.ask : bad ? pal.bad : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
-              <Text color={pal.accent} bold>{`◆ ${b.name}`}</Text>
-              {hot || bad
-                ? <Text backgroundColor={hot ? pal.ask : pal.bad} color={pal.onBadge} bold>{tag}</Text>
-                : <Text color={cool ? pal.ask : tone(b)}>{`${markOf(b)} ${tag}`}</Text>}
+              {/* 이름과 태그는 줄이지 않는다. 설명이 길어도 설명만 잘린다 (태그 "캐시 n분" 이 길어 줄이 쪼개지던 문제) */}
+              <Box flexShrink={0}>
+                <Text color={pal.accent} bold>{`◆ ${b.name}`}</Text>
+              </Box>
+              <Box flexShrink={0}>
+                {hot || bad
+                  ? <Text backgroundColor={hot ? pal.ask : pal.bad} color={pal.onBadge} bold>{tag}</Text>
+                  : <Text color={cool ? pal.ask : tone(b)}>{`${markOf(b)} ${tag}`}</Text>}
+              </Box>
               <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40))}</Box>
             </Box>
             <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
