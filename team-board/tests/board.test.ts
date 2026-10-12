@@ -421,7 +421,8 @@ describe('팀 상황판', () => {
     on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
-    on('session.id', () => ({ value: 'me' }))
+    let sid = 'me'
+    on('session.id', () => ({ value: sid }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
@@ -431,7 +432,13 @@ describe('팀 상황판', () => {
     on('fs.read', ($, e: any) => { reads.push(e.path); return { value: files.get(e.path) ?? '' } })
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('session.end', () => ({ sessionId: 'me' }))
-    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1 } }))
+    // 대화 기록 grep 이 돌려줄 세션 이름 줄 (비어 있으면 이름 없음)
+    let titleLine = ''
+    let greps = 0
+    on('process.run', ($, e: any) => {
+      if (e.argv[0] === 'grep') greps += 1
+      return { value: { stdout: e.argv[0] === 'grep' ? titleLine : '', stderr: '', exitCode: e.argv[0] === 'grep' && titleLine ? 0 : 1 } }
+    })
     on('command.run', { command: 'rename' }, () => ({ text: 'renamed' }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('prompt.submit', ($, e: any) => ({ text: e.text }))
@@ -648,6 +655,31 @@ describe('팀 상황판', () => {
     expect([...files.keys()].filter(k => /\/me-[0-9a-f]{8}\.json$/.test(k)).length).toBe(1)
     expect(mine().name).toBe(before.name)
     expect(mine().decisions.length).toBe(before.decisions.length)
+
+    // 인자 없는 /rename: 이름이 기록 파일에 늦게 쓰여도 다음 확인에서 잡는다
+    await $.command.run({ command: 'rename', args: '' } as any)
+    expect(mine().name).toBe('order-svc')
+    titleLine = '"customTitle":"cache-design"\n'
+    await clock.advance(15_000)
+    expect(mine().name).toBe('cache-design')
+    // 이름을 찾았으면 더 찾지 않는다
+    const found = greps
+    await clock.advance(15_000)
+    expect(greps).toBe(found)
+    // /clear·/resume 로 세션 id 가 바뀌면 새 기록 파일에서 한 번 더 찾는다
+    sid = 'me-2'
+    await clock.advance(3_000)
+    expect(greps).toBe(found + 1)
+    sid = 'me'
+    await clock.advance(3_000)
+    expect(greps).toBe(found + 2)
+    // session.start 가 다른 id 로 다시 와도 (모듈은 그대로) 새 기록 파일에서 한 번 더 찾는다
+    sid = 'me-3'
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await clock.advance(15_000)
+    expect(greps).toBe(found + 3)
+    sid = 'me'
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
 
     // /rename 을 따라가고, 다시 로드돼도 그 이름
     await $.command.run({ command: 'rename', args: 'api-fix' } as any)

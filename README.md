@@ -77,7 +77,7 @@ claude plugin update eli12@devflow-mods
 
 보이는 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기 > 소식 없음.
 
-세션 이름 (같은 폴더에서 여러 세션을 열어도 구분되게. `claude --name` 이름은 15초마다 확인해 반영)
+세션 이름 (같은 폴더에서 여러 세션을 열어도 구분되게. `claude --name` 이름은 찾을 때까지 15초마다 확인해 반영)
 1. `/board name 이름` 으로 정한 이름
 2. Claude Code 세션 이름: `claude --name 이름` 으로 시작하거나 `/rename 이름` (보드가 바로 따라감)
 3. 워크트리면 브랜치 이름

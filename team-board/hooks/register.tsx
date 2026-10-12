@@ -83,8 +83,9 @@ const self = {
   /** 지금 결정을 기다리기 시작한 시각, 이미 알린 질문 */
   askingSince: 0,
   alertedFor: '',
-  /** 세션 이름을 마지막으로 확인한 시각 */
+  /** 세션 이름을 마지막으로 확인한 시각, 대화 기록 파일에서 이름을 찾았는지 */
   titleCheckedAt: 0,
+  titleDone: false,
   /** 숨은 실패 감지를 끔 (/board fail off) */
   failOff: false,
 }
@@ -211,21 +212,25 @@ async function followSessionId($: EngineInterface): Promise<void> {
   self.transcript = self.transcript.replace(`${self.sessionId}.jsonl`, `${id}.jsonl`)
   self.sessionId = id
   self.titleCheckedAt = 0
+  self.titleDone = false
 }
 
 /**
  * claude --name 의 이름은 대화 기록 파일이 생긴 뒤에야 읽을 수 있어서, 직접 정한 이름이 없으면 가끔 다시 본다.
- * /rename 은 command.run 훅이 바로 따라간다.
+ * 이름을 찾으면 그만 본다 (이름은 파일 첫 줄에 쓰이고, 바뀜은 /rename 이 따라간다). 이름이 없으면
+ * 인자 없는 /rename 이 기록 파일에 늦게 쓰는 이름도 잡도록 계속 본다.
  */
 async function followTitle($: EngineInterface): Promise<void> {
-  if (!self.beat) return
+  if (!self.beat || self.titleDone) return
   const now = await $.clock.now()
   if (now - self.titleCheckedAt < TITLE_EVERY_MS) return
   self.titleCheckedAt = now
   const pinned = await $.store.get(nameKey(self.sessionId))
   if (typeof pinned === 'string' && pinned) return
   const title = await sessionTitle($)
-  if (title && title !== self.beat.name) {
+  if (!title) return
+  self.titleDone = true
+  if (title !== self.beat.name) {
     await save($, { name: title }, true)
     await scan($)
   }
@@ -281,6 +286,7 @@ export const register: Register = (on, options) => {
     // 세션 id 가 같은 프로세스가 둘일 수 있어(재개, 상위 세션이 띄운 세션) 프로세스마다 꼬리표를 붙인다.
     // 모듈이 다시 로드된 경우(플러그인 갱신, 엔진 작업자 재시작)엔 같은 세션 기록을 이어 쓴다.
     self.sessionId = await $.session.id()
+    self.titleDone = false
     self.failOff = (await $.store.get(FAIL_KEY)) === true
     self.transcript = `${home}/.claude/projects/${projectDirName(cwd)}/${self.sessionId}.jsonl`
     const prev = await read($, me)
