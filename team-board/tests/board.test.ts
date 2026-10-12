@@ -408,6 +408,25 @@ describe('숨은 실패', () => {
     expect(a?.signs[0]).toBe('Python 예외: Traceback (most recent call last):')
   })
 
+  test('ok=1 skipped=0 처럼 앞 항목의 값인 숫자는 개수로 읽지 않는다', async () => {
+    expect(judge('codeviz build-global', '== summary == ok=1 skipped=0 failed=0', 1)).toBeNull()
+    expect(judge('codeviz build-global', 'ok=1 failed=0', 1)).toBeNull()
+    expect(judge('./gradlew test', '12 tests completed, 1 failed', 1)?.level).toBe('high')
+    expect(judge('npm test', 'Tests: 2 failed, 10 passed', 1)?.level).toBe('high')
+    expect(judge('bash -c run', '1 test skipped', 1)?.level).toBe('warn')
+  })
+
+  test('git rev-parse 같은 출력만 하는 git 명령과 pwd 는 읽기 전용이다', async () => {
+    const cmd = `git rev-parse --short HEAD; echo "== C1"; rg -n 'or-ars-svc\\.log' docs --glob '!docs/HANDOFF.md' | cut -c1-300; pwd`
+    expect(judge(cmd, 'abc1234\n== C1\ndocs/a.md:7: 실측: `Tests run: 538, Failures: 1, Errors: 0`', 1)).toBeNull()
+  })
+
+  test('소문자 변수 대입 단계도 빼고 본다. $( ) 로 명령을 돌리는 대입은 남긴다', async () => {
+    expect(judge('f=docs/a.md; grep -n Failures "$f"', '46: Tests run: 538, Failures: 1', 1)).toBeNull()
+    expect(judge('c=$(./gradlew test 2>&1); echo "$c"', 'BUILD FAILED in 3s', 1)?.level).toBe('high')
+    expect(commandKey('f=x; ./gradlew test')).toBe('./gradlew test')
+  })
+
   test('team-board 상태 파일을 다시 출력하는 명령은 판정하지 않는다', async () => {
     expect(judge('python3 -c "import json; print(open(\'/Users/me/.claude/team-board/r/a.json\').read())"', '"signs": ["실패한 테스트: 3 tests completed, 1 failed"]', 1)).toBeNull()
   })

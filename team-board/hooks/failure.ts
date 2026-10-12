@@ -11,7 +11,7 @@ type Rule = { label: string; pattern: RegExp; severity: Severity }
 /** 명령에 skipTests·skipITs·maven.test.skip 이 있으면 일부러 건너뛴 것이라 보지 않는다 (judge). */
 const MAVEN_SKIP = 'Maven 테스트 건너뜀'
 
-/** 숫자는 1 이상만 ([1-9]\d*): "0 failed" 같은 통과 요약은 걸리지 않는다. */
+/** 숫자는 1 이상만 ([1-9]\d*): "0 failed" 같은 통과 요약은 걸리지 않는다. 앞에 = : 가 붙은 숫자(`ok=1 skipped=0`)는 앞 항목의 값이라 세지 않는다. */
 const RULES: Rule[] = [
   // JVM 빌드·테스트
   { label: '실패한 테스트', pattern: /\b\d+ tests? completed, [1-9]\d* failed\b/, severity: 'high' },
@@ -24,7 +24,7 @@ const RULES: Rule[] = [
   { label: 'Spring 기동 실패', pattern: /APPLICATION FAILED TO START|Application run failed/, severity: 'high' },
   { label: '예외 발생', pattern: /^Exception in thread "|^Caused by: [\w.$]+(?:Exception|Error)\b/m, severity: 'high' },
   // 일반
-  { label: '실패한 테스트', pattern: /\b[1-9]\d*\s+(?:tests?\s+|specs?\s+|suites?\s+)?(?:failed|failing|failures?)\b/i, severity: 'high' },
+  { label: '실패한 테스트', pattern: /(?<![=:])\b[1-9]\d*\s+(?:tests?\s+|specs?\s+|suites?\s+)?(?:failed|failing|failures?)\b/i, severity: 'high' },
   { label: '실패한 테스트', pattern: /^\s*[1-9]\d* fail\s*$/m, severity: 'high' }, // bun: " 2 fail"
   { label: 'FAIL 표시', pattern: /^\s*(?:FAIL|FAILED)\b/m, severity: 'high' },
   { label: 'npm 오류', pattern: /^\s*npm (?:ERR!|error)\s/m, severity: 'high' },
@@ -33,7 +33,7 @@ const RULES: Rule[] = [
   { label: '명령·파일 없음', pattern: /\bcommand not found\b|\bNo such file or directory\b|\bPermission denied\b/i, severity: 'high' },
   { label: '비정상 종료', pattern: /\bsegmentation fault\b|\bcore dumped\b|\bpanicked at\b|\bOutOfMemoryError\b/i, severity: 'high' },
   // 확인 필요: 검사했다고 하기엔 부족한 실행
-  { label: '건너뛴 테스트', pattern: /\b[1-9]\d*\s+(?:tests?\s+)?(?:skipped|pending|ignored)\b|Skipped: [1-9]\d*/i, severity: 'warn' },
+  { label: '건너뛴 테스트', pattern: /(?<![=:])\b[1-9]\d*\s+(?:tests?\s+)?(?:skipped|pending|ignored)\b|Skipped: [1-9]\d*/i, severity: 'warn' },
   { label: '실행된 테스트 없음', pattern: /No tests found for given includes|\bno tests? (?:found|ran|were found|to run|collected)\b|\bRan 0 tests\b|Tests run: 0,/i, severity: 'warn' },
   { label: MAVEN_SKIP, pattern: /\bTests are skipped\b/, severity: 'warn' },
 ]
@@ -46,7 +46,7 @@ const MASKS: { label: string; pattern: RegExp }[] = [
 ]
 
 /** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. */
-const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed -n|awk|echo|printf|sort|uniq|cut|tr|column|nl)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:log|diff|show|blame|grep|status)\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
+const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed -n|awk|echo|printf|sort|uniq|cut|tr|column|nl)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:log|diff|show|blame|grep|status|rev-parse|ls-files|ls-tree|rev-list|describe|cat-file|show-ref)\b|^pwd\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
 
 /** 읽기 도구가 파일이 없다고 알린 줄: 존재 확인의 답이지 실패가 아니다. 빌드·실행 도구가 낸 없음은 남긴다. */
 const READ_MISSING = /^(?:(?:ls|stat|cat|head|tail|grep|rg|wc|du|file|find|readlink|realpath|diff|bat|eza|jq|sed|awk): .*No such file or directory.*|"[^"\n]*": No such file or directory \(os error 2\))$/gm
@@ -73,7 +73,7 @@ export function redact(text: string): string {
 const MAX_SCAN = 200_000
 const MAX_LINE = 120
 
-/** 셸 명령의 단계들 (&&, ||, ;, |, |&, 줄바꿈으로 나눔). cd 단계, 주석 줄, 따로 선 true·:, 환경변수 대입은 뺀다. */
+/** 셸 명령의 단계들 (&&, ||, ;, |, |&, 줄바꿈으로 나눔). cd 단계, 주석 줄, 따로 선 true·:, 변수 대입은 뺀다 ($( ) · ` ` 로 명령을 돌리는 대입은 남김). */
 function steps(command: string): string[] {
   // 따옴표 안의 | ; 는 구분자가 아니다: 같은 길이로 가린 사본에서 자를 자리를 찾고 원문을 자른다
   // 주석 줄은 가리기 전에 지운다: 주석 안의 ' 가 뒤의 따옴표와 짝지어지지 않게
@@ -87,7 +87,7 @@ function steps(command: string): string[] {
   }
   parts.push(src.slice(from))
   return parts
-    .map(s => s.trim().replace(/^(?:[A-Z_][A-Z0-9_]*=\S*(?:\s+|$))+/, ''))
+    .map(s => s.trim().replace(/^(?:[A-Za-z_]\w*=(?!\S*(?:\$\(|`))\S*(?:\s+|$))+/, ''))
     .filter(s => s && !/^cd\s/.test(s) && !/^(?:true|:)$/.test(s))
 }
 

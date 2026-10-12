@@ -5,6 +5,12 @@
 
 ## team-board
 
+### 0.10.3 (2026-10-12)
+- 수정: 숨은 실패 오탐.
+  - `ok=1 skipped=0 failed=0` 처럼 `=`·`:` 뒤의 숫자(앞 항목의 값)를 테스트 개수로 읽던 문제. `ok=1 failed=0` 이 실패로 잡히던 것도 함께 고쳤습니다.
+  - `git rev-parse`·`ls-files`·`ls-tree`·`rev-list`·`describe`·`cat-file`·`show-ref` 와 `pwd` 를 읽기 전용으로 봅니다. 이 단계와 `rg`·`grep` 만으로 된 문서 검색 출력은 판정하지 않습니다.
+  - 소문자 변수 대입(`f=docs/a.md; grep … "$f"`)도 단계에서 뺍니다. `c=$(./gradlew test)` 처럼 명령을 돌리는 대입은 그대로 판정합니다. 같은 명령 비교 키도 대입 뒤 첫 명령에서 잡습니다.
+
 ### 0.10.2 (2026-10-12)
 - 수정: 숨은 실패 기록(`/board fail` 의 명령·흔적)과 보드의 "지금 하는 일"에 비밀 값이 평문으로 남던 문제. 이름에 token·secret·password·api_key·auth 가 든 변수·옵션의 값, `Authorization: Bearer …`, URL 의 비밀번호, `sk-`·`ghp_`·`github_pat_`·`xox?-`·`AKIA…`·JWT 꼴 토큰을 `***` 로 가려 저장합니다.
 - 수정: 숨은 실패 오탐.
