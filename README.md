@@ -175,6 +175,19 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
 - `/eli12` (직전 답변) 또는 `/eli12 바운디드 컨텍스트` (그 부분, 답변이 없으면 주제 자체) → 옆 패널, Esc로 닫기.
 - 실행마다 Haiku 호출 1회분 사용량.
 
+## 다른 mod와 함께 쓰기
+
+- 입력창 위 띠(`AbovePrompt`)를 `next(e)` 없이 그리는 mod가 체인에서 team-board보다 앞에 오면 팀 창이 보이지 않습니다. team-board 자체는 계속 기록합니다. 예: Anthropic 샘플 `token-weather`, `replay-theater`.
+- 해결: `~/.claude/settings.json`에 아래를 넣어 team-board를 맨 앞에 둡니다. managed settings가 없는 기기에서, Team·Enterprise 로그인이 아닐 때만 적용됩니다.
+
+  ```json
+  "prependPlugins": ["team-board@devflow-mods"]
+  ```
+
+  적용 여부는 `claude --debug-file <파일>` 로그의 `hooks module team-board@devflow-mods loaded (… tier prepend)` 줄로 확인합니다.
+- 이 설정으로 함께 시험한 mod (2026-10-12, Claude Code 2.1.296): `replay-theater`(claude-code-playground), `agent-flow`(davila7/claude-code-templates), `mermaid-draw`(galElmalah/claude-mods). 팀 창, 결정 기록, 숨은 실패 표시가 그대로 동작했습니다.
+- 비밀 값을 가리는 mod(예: `secret-redactor`)는 도구 결과만 가립니다. team-board가 저장하는 실패 명령 원문은 가려지지 않습니다.
+
 ## 변경 기록
 
 [CHANGELOG.md](CHANGELOG.md)
