@@ -368,9 +368,10 @@ export function bandLayout(n: number, columns: number, maxRows: number): BandLay
   const fullRows = Math.ceil(n / perRow(fullW))
   if (fullRows <= 2 && fullRows * 2 <= room) return { mode: 'full', slotW: fullW, shown: n }
 
-  // 배지 6칸 + 공백 + 이름 11칸 + 좌우 여백 2칸
-  const compactW = fit(20, 26)
-  const capacity = perRow(compactW) * Math.min(3, room)
+  // 배지 6칸 + 공백 + 이름 11칸 + 좌우 여백 2칸. 다 안 보이면 이름을 2칸 줄여(18) 세션을 더 보인다
+  const capacityOf = (w: number) => perRow(w) * Math.min(3, room)
+  const compactW = n <= capacityOf(fit(20, 26)) ? fit(20, 26) : fit(18, 26)
+  const capacity = capacityOf(compactW)
   return { mode: 'compact', slotW: compactW, shown: n <= capacity ? n : Math.max(1, capacity - 1) }
 }
 

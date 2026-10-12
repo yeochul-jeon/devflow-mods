@@ -460,6 +460,8 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
     expect(bandLayout(4, 80, 10)).toMatchObject({ mode: 'full', shown: 4 })
     // 한 줄 칸은 배지(6칸) + 이름이 들어가도록 20칸 이상: 'order-svc*' 가 잘리지 않는다
     expect(bandLayout(8, 76, 10)).toMatchObject({ mode: 'compact', slotW: 20, shown: 8 })
+    // 20칸으로 다 안 보이면 18칸으로 줄여 모두 보인다 (칸 영역 58칸, 높이 2줄: 20칸이면 2칸씩 4자리라 +k)
+    expect(bandLayout(5, 62, 5)).toMatchObject({ mode: 'compact', slotW: 18, shown: 5 })
   })
 
   test('먼저 보일 세션: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기', async () => {
