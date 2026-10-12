@@ -462,6 +462,12 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
     expect(bandLayout(8, 76, 10)).toMatchObject({ mode: 'compact', slotW: 20, shown: 8 })
     // 20칸으로 다 안 보이면 18칸으로 줄여 모두 보인다 (칸 영역 58칸, 높이 2줄: 20칸이면 2칸씩 4자리라 +k)
     expect(bandLayout(5, 62, 5)).toMatchObject({ mode: 'compact', slotW: 18, shown: 5 })
+    // 같은 폭이라도 높이가 넉넉해 20칸으로 다 들어가면 줄이지 않는다
+    expect(bandLayout(5, 62, 6)).toMatchObject({ mode: 'compact', slotW: 20, shown: 5 })
+    // 다 안 들어가도 18칸이 더 많이 보이면 줄인다 (20칸이면 1개 +4, 18칸이면 2개 +3)
+    expect(bandLayout(5, 62, 4)).toMatchObject({ mode: 'compact', slotW: 18, shown: 2 })
+    // 18칸으로 줄여도 더 보이지 않으면 줄이지 않는다 (20칸·18칸 모두 한 줄 7칸)
+    expect(bandLayout(30, 150, 10)).toMatchObject({ mode: 'compact', slotW: 20, shown: 20 })
   })
 
   test('먼저 보일 세션: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기', async () => {
@@ -629,6 +635,14 @@ describe('팀 창 배지', () => {
     expect(await narrow.find({ type: 'Text', text: /^ 작업 $/ })).toBeDefined()
     expect(await narrow.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
     await narrow.unmount()
+
+    // 좁고 낮은 창: 20칸이면 한 줄 2칸씩 4자리라 +1 이 되므로 18칸으로 줄여 모두 보인다
+    const low = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns: 62 } } as any)
+    for (const name of [/^order-svc\*$/, /^sub-w$/, /^sub-c$/, /^sub-i$/, /^sub-z$/]) expect(await low.find({ type: 'Text', text: name })).toBeDefined()
+    expect(await low.find({ type: 'Text', text: /더 · \/board/ })).toBeUndefined()
+    const slots = (await low.findAll({ type: 'Box' })).filter(x => x.key?.startsWith('slot-'))
+    expect(slots.map(x => x.props.width)).toEqual([18, 18, 18, 18, 18])
+    await low.unmount()
   })
 })
 
