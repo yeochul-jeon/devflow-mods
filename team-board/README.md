@@ -7,7 +7,7 @@
 - **숨은 실패 감지**: exit 0 인데 실패한 빌드·테스트를 Claude 와 모든 탭에 알림
 - 결정 대기 음성 알림 (macOS)
 
-설치, 명령, 화면 설명은 [저장소 README](../README.md#team-board-사용), 바뀐 점은 [CHANGELOG](../CHANGELOG.md) 를 보세요.
+설치와 주요 명령은 [저장소 README](../README.md#-team-board-팀-상황판), 세부 내용은 [docs/team-board.md](../docs/team-board.md), 바뀐 점은 [CHANGELOG](../CHANGELOG.md) 를 보세요.
 
 ```bash
 claude plugin marketplace add yeochul-jeon/devflow-mods
