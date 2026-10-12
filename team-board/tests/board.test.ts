@@ -6,6 +6,7 @@ import {
   bandLayout,
   bandOrder,
   cacheLeft,
+  cacheMinutes,
   cacheText,
   cacheWarn,
   emptyBeat,
@@ -101,6 +102,12 @@ describe('palette', () => {
     expect(paletteOf('nope').ask).toBe(paletteOf('night').ask)
     expect(bar(3, 4, 4)).toBe('▰▰▰▱')
     expect(contextTone(85, paletteOf('night'))).toBe(paletteOf('night').bad)
+  })
+  test('theme 팔레트의 색은 모두 Claude Code 테마 색 이름 (없는 이름은 엉뚱한 색으로 그려진다)', async () => {
+    const KEYS = ['text', 'inverseText', 'inactive', 'subtle', 'suggestion', 'remember', 'success', 'error', 'warning', 'merged', 'claude', 'permission', 'planMode', 'autoAccept', 'promptBorder', 'bashBorder', 'ide']
+    const { card, isRaw, ...colors } = paletteOf('theme')
+    expect(card).toBe('')
+    expect(Object.values(colors).filter(c => !KEYS.includes(c))).toEqual([])
   })
 })
 
@@ -451,6 +458,8 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
     expect(many.mode).toBe('compact')
     expect(many.shown).toBeLessThan(30)
     expect(bandLayout(4, 80, 10)).toMatchObject({ mode: 'full', shown: 4 })
+    // 한 줄 칸은 배지(6칸) + 이름이 들어가도록 20칸 이상: 'order-svc*' 가 잘리지 않는다
+    expect(bandLayout(8, 76, 10)).toMatchObject({ mode: 'compact', slotW: 20, shown: 8 })
   })
 
   test('먼저 보일 세션: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기', async () => {
@@ -476,6 +485,7 @@ describe('프롬프트 캐시', () => {
     expect(cacheText(30_000)).toBe('캐시 1분')
     expect(cacheText(0)).toBe('캐시 만료')
     expect(cacheText(null)).toBe('')
+    expect(cacheMinutes(9 * 60_000 - 1)).toBe('9분')
   })
   test('작업 중이 아니고 10분 이하로 남았을 때만 띠에서 알린다', async () => {
     const at = (min: number, patch: object = {}) => beat({ cacheAt: NOW - (60 - min) * 60_000, ...patch })
@@ -539,7 +549,9 @@ describe('프롬프트 캐시', () => {
     // 메인 요청 51분 뒤: 띠에 9분 남음, 보드에도 같은 값
     await clock.advance(51 * 60_000 - (5 * 60_000 + 6_000))
     const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
-    expect(await band.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
+    // 세션 하나(solo): 캐시 배지 + 남은 분
+    expect((await band.find({ type: 'Text', text: /^ 캐시 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
+    expect(await band.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
     await band.unmount()
     await $.command.run({ command: 'board', args: 'band line' } as any)
     const line = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
@@ -561,6 +573,60 @@ describe('프롬프트 캐시', () => {
     // /clear 도 새 대화다
     await $.session.end({ reason: 'clear' } as any)
     expect(mine().cacheAt).toBeNull()
+  })
+})
+
+describe('팀 창 배지', () => {
+  test('칸마다 이름 앞에 상태 배지, 머리줄은 개수 있는 상태만 블록', async ($, on) => {
+    const pal = paletteOf('night')
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    const files = new Map<string, string>()
+    const put = (over: Record<string, unknown>) => files.set(`${DIR}/${over.id}.json`, JSON.stringify(beat(over)))
+    put({ id: 'w', name: 'sub-w', state: 'working', step: 'Bash ls' })
+    put({ id: 'c', name: 'sub-c', state: 'idle', cacheAt: NOW - 51 * 60_000 })
+    put({ id: 'i', name: 'sub-i', state: 'idle' })
+    put({ id: 'z', name: 'sub-z', state: 'idle', updatedAt: NOW - 5 * 60_000 })
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: JSON.parse(files.get(k)!).updatedAt, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+
+    const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+    const badges = await band.findAll({ type: 'Text', text: /^ (작업|캐시|대기) $|^  zz  $/ })
+    expect(badges.map(t => [t.text, t.props.backgroundColor])).toEqual(expect.arrayContaining([
+      [' 작업 ', pal.work], [' 캐시 ', pal.ask], [' 대기 ', pal.dim], ['  zz  ', pal.frame],
+    ]))
+    // 이름은 배지 뒤에 그대로, 이 세션엔 *, 캐시 경고 칸엔 남은 분
+    expect(await band.find({ type: 'Text', text: /^sub-w$/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /^order-svc\*$/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
+    // 오른쪽 끝 태그와 ●○ 표시는 없다
+    expect(await band.find({ type: 'Text', text: /^ ?(작업|대기)$|[●○]/ })).toBeUndefined()
+    // 머리줄: 작업 1, 대기 3 (나·sub-c·sub-i). 결정·실패는 0 이라 없다
+    expect((await band.find({ type: 'Text', text: /^ 작업 1 $/ }))?.props.backgroundColor).toBe(pal.work)
+    expect((await band.find({ type: 'Text', text: /^ 대기 3 $/ }))?.props.backgroundColor).toBe(pal.dim)
+    expect(await band.find({ type: 'Text', text: /결정|실패/ })).toBeUndefined()
+    await band.unmount()
+
+    // 좁은 화면(compact)도 같은 배지
+    const narrow = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns: 160 } } as any)
+    expect(await narrow.find({ type: 'Text', text: /^ 작업 $/ })).toBeDefined()
+    expect(await narrow.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
+    await narrow.unmount()
   })
 })
 
@@ -733,9 +799,12 @@ describe('팀 상황판', () => {
     // 기본은 HUD 창: 머리줄 + 세션 칸
     expect(await band.find({ type: 'Text', text: /◆ TEAM 2/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
-    expect(await band.find({ type: 'Text', text: /⚑ sub-2/ })).toBeDefined()
+    // 결정 대기 칸: 칸이 노랗게 칠해져 있어 배지는 반전색. 이름 앞 표시(⚑)는 배지로 바뀌었다
+    const askBadge = await band.find({ type: 'Text', text: /^ 결정 $/ })
+    expect(askBadge?.props).toMatchObject({ color: paletteOf('night').ask, backgroundColor: paletteOf('night').onBadge })
+    expect(await band.find({ type: 'Text', text: /^sub-2$/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /⚑/ })).toBeUndefined()
     expect(await band.find({ type: 'Text', text: /sub-2·2/ })).toBeUndefined()
-    expect(await band.find({ type: 'Text', text: /결정!/ })).toBeDefined()
     expect(await band.find({ key: 'band-board' })).toBeDefined()
     await band.unmount()
     // 한 줄 모양
@@ -870,7 +939,7 @@ describe('팀 상황판', () => {
     expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
     const fb = await $.ui.mount(BAND)
     expect(await fb.find({ type: 'Text', text: /⚠ 실패 1/ })).toBeDefined()
-    expect(await fb.find({ type: 'Text', text: /⚠실패/ })).toBeDefined()
+    expect((await fb.find({ type: 'Text', text: /^ 실패 $/ }))?.props.backgroundColor).toBe(paletteOf('night').bad)
     await fb.unmount()
     expect((await $.command.run({ command: 'board', args: 'fail' } as any)).text).toContain('12 tests completed, 1 failed')
     // 다른 명령의 확인 필요(warn)는 남아 있는 실패(high)를 덮지 않는다. 기록에는 남긴다

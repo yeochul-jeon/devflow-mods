@@ -30,7 +30,12 @@ export function cacheLeft(cacheAt: number | null, now: number): number | null {
 /** 보드에 쓰는 글: 분은 올림 (1분 미만도 1분). */
 export function cacheText(left: number | null): string {
   if (left === null) return ''
-  return left <= 0 ? '캐시 만료' : `캐시 ${Math.ceil(left / 60_000)}분`
+  return left <= 0 ? '캐시 만료' : `캐시 ${cacheMinutes(left)}`
+}
+
+/** 남은 분만: 팀 창 칸은 배지가 "캐시" 를 맡으므로 분만 쓴다. */
+export function cacheMinutes(left: number): string {
+  return `${Math.ceil(left / 60_000)}분`
 }
 
 /** 띠에서 알릴지: 쉬는 세션의 캐시가 곧 만료될 때만. 일하는 중이면 곧 갱신되고, 이미 만료된 건 보드에만 둔다. */
@@ -363,7 +368,8 @@ export function bandLayout(n: number, columns: number, maxRows: number): BandLay
   const fullRows = Math.ceil(n / perRow(fullW))
   if (fullRows <= 2 && fullRows * 2 <= room) return { mode: 'full', slotW: fullW, shown: n }
 
-  const compactW = fit(18, 26)
+  // 배지 6칸 + 공백 + 이름 11칸 + 좌우 여백 2칸
+  const compactW = fit(20, 26)
   const capacity = perRow(compactW) * Math.min(3, room)
   return { mode: 'compact', slotW: compactW, shown: n <= capacity ? n : Math.max(1, capacity - 1) }
 }

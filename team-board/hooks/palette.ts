@@ -60,7 +60,7 @@ const PALETTES: Record<PaletteName, Palette> = {
     dim: 'subtle',
     text: 'text',
     frame: 'promptBorder',
-    onBadge: 'background',
+    onBadge: 'inverseText',
     card: '',
     isRaw: false,
   },

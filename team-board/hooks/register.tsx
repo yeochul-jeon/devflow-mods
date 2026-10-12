@@ -11,6 +11,7 @@ import {
   bandOrder,
   basename,
   cacheLeft,
+  cacheMinutes,
   cacheText,
   cacheWarn,
   decisionsFromAnswers,
@@ -624,6 +625,26 @@ export const register: Register = (on, options) => {
     const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now)).length
     const SEG = { done: pal.ok, now: pal.work, left: pal.dim, end: pal.text } as const
 
+    const stateOf = (b: Beat) => {
+      const stale = isStale(b, now)
+      const hot = b.state === 'asking' && !stale
+      const bad = !hot && failed(b)
+      const cool = !stale && !hot && !bad && cacheWarn(b, now)
+      return { stale, hot, bad, cool }
+    }
+    // 이름 앞 상태 배지: 폭 6칸으로 같아서 칸마다 이름 시작 위치가 맞는다. filled = 칸이 노랗게 칠해짐(반전색)
+    const badgeOf = (b: Beat, filled = false) => {
+      const s = stateOf(b)
+      const [text, bg, fg] = s.stale ? ['  zz  ', pal.frame, pal.dim]
+        : s.hot ? [' 결정 ', filled ? pal.onBadge : pal.ask, filled ? pal.ask : pal.onBadge]
+          : s.bad ? [' 실패 ', pal.bad, pal.onBadge]
+            : b.state === 'working' ? [' 작업 ', pal.work, pal.onBadge]
+              : s.cool ? [' 캐시 ', pal.ask, pal.onBadge]
+                : [' 대기 ', pal.dim, pal.onBadge]
+      return <Text backgroundColor={bg} color={fg} bold>{text}</Text>
+    }
+    const minutesOf = (b: Beat) => <Text color={pal.ask}>{cacheMinutes(cacheLeft(b.cacheAt, now)!)}</Text>
+
     const secondOf = (b: Beat, width: number) => {
       const hot = b.state === 'asking' && !isStale(b, now)
       const bad = !hot && failed(b)
@@ -643,11 +664,7 @@ export const register: Register = (on, options) => {
     }
 
     const slot = (b: Beat) => {
-      const stale = isStale(b, now)
-      const hot = b.state === 'asking' && !stale
-      const bad = !hot && failed(b)
-      const cool = !stale && !hot && !bad && cacheWarn(b, now)
-      const tag = stale ? 'zz' : hot ? '결정!' : bad ? '⚠실패' : b.state === 'working' ? '작업' : cool ? cacheText(cacheLeft(b.cacheAt, now)) : '대기'
+      const { hot, cool } = stateOf(b)
       return (
         <Box
           key={`slot-${b.id}`}
@@ -656,11 +673,12 @@ export const register: Register = (on, options) => {
           paddingX={1}
           {...(hot ? { backgroundColor: pal.ask } : pal.card ? { backgroundColor: isMe(b) ? pal.frame : pal.card } : {})}
         >
-          <Box flexDirection="row" justifyContent="space-between">
+          <Box flexDirection="row" columnGap={1}>
+            <Box flexShrink={0}>{badgeOf(b, hot)}</Box>
             <Text color={hot ? pal.onBadge : tone(b)} bold wrap="truncate-end">
-              {`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}`}
+              {`${b.name}${isMe(b) ? '*' : ''}`}
             </Text>
-            <Text color={hot ? pal.onBadge : bad ? pal.bad : cool ? pal.ask : tone(b)} bold={hot || bad}>{` ${tag}`}</Text>
+            {cool ? <Box flexShrink={0}>{minutesOf(b)}</Box> : null}
           </Box>
           {layout.mode === 'full' ? <Box>{secondOf(b, slotW)}</Box> : null}
         </Box>
@@ -674,8 +692,8 @@ export const register: Register = (on, options) => {
             <Text color={pal.accent} bold>{`◆ TEAM ${list.length}`}</Text>
             {asking ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 ${asking} `}</Text> : null}
             {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
-            <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
-            <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
+            {count('working') ? <Text backgroundColor={pal.work} color={pal.onBadge} bold>{` 작업 ${count('working')} `}</Text> : null}
+            {count('idle') ? <Text backgroundColor={pal.dim} color={pal.onBadge} bold>{` 대기 ${count('idle')} `}</Text> : null}
             {sum.total ? (
               <Text>
                 <Text color={pal.ok}>{bar(sum.done, sum.total, 8)}</Text>
@@ -695,23 +713,19 @@ export const register: Register = (on, options) => {
     // 혼자: 머리줄 한 줄에 내 상태를 바로 (창 높이 3줄)
     if (layout.mode === 'solo') {
       const b = list[0]!
-      const hot = b.state === 'asking' && !isStale(b, now)
-      const bad = !hot && failed(b)
-      const cool = !isStale(b, now) && !hot && !bad && cacheWarn(b, now)
-      const tag = isStale(b, now) ? 'zz' : hot ? ' 결정! ' : bad ? ' ⚠ 실패 ' : b.state === 'working' ? '작업' : cool ? cacheText(cacheLeft(b.cacheAt, now)) : '대기'
+      const { hot, bad, cool } = stateOf(b)
       return (
         <Box flexDirection="column">
           {below}
           <Box flexDirection="row" justifyContent="space-between" columnGap={2} borderStyle="double" borderColor={hot ? pal.ask : bad ? pal.bad : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
-              {/* 이름과 태그는 줄이지 않는다. 설명이 길어도 설명만 잘린다 (태그 "캐시 n분" 이 길어 줄이 쪼개지던 문제) */}
+              {/* 이름과 배지는 줄이지 않는다. 설명이 길어도 설명만 잘린다 (태그 "캐시 n분" 이 길어 줄이 쪼개지던 문제) */}
               <Box flexShrink={0}>
                 <Text color={pal.accent} bold>{`◆ ${b.name}`}</Text>
               </Box>
-              <Box flexShrink={0}>
-                {hot || bad
-                  ? <Text backgroundColor={hot ? pal.ask : pal.bad} color={pal.onBadge} bold>{tag}</Text>
-                  : <Text color={cool ? pal.ask : tone(b)}>{`${markOf(b)} ${tag}`}</Text>}
+              <Box flexShrink={0} flexDirection="row" columnGap={1}>
+                {badgeOf(b)}
+                {cool ? minutesOf(b) : null}
               </Box>
               <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40))}</Box>
             </Box>
