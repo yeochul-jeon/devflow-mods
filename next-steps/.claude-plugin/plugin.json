@@ -1,0 +1,13 @@
+{
+  "name": "next-steps",
+  "version": "0.1.0",
+  "description": "답변이 끝나면 다음에 보낼 만한 요청 2~3개를 입력창 위에: 빈 입력창에서 숫자를 누르면 초안으로 (Haiku)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/next-steps",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT"
+}

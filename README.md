@@ -10,6 +10,7 @@ Claude Code **mods** 모음: 어려운 설명을 12살 버전으로 풀어 주�
 |---|---|---|
 | `team-board` | 같은 저장소(워크트리 포함)에서 돌고 있는 여러 Claude Code 세션의 상황판. 진행 현황(할 일 경로선), 결정 기록(질문 → 답), 결정 대기 알림(주의 띠·음성), **숨은 실패 감지**(exit 0 인데 실패한 빌드·테스트), 결정 대기 항목의 12살 버전 설명 | `/board` |
 | `eli12` | 어려운 설명만 골라 12살 버전으로. 자동 스킬(`explain-simply`) + 직전 답변이나 주제를 옆 패널에 풀어 주는 명령 | `/eli12 [주제]` |
+| `next-steps` | 답변이 끝나면 다음에 보낼 만한 요청 2~3개를 입력창 위에. 빈 입력창에서 숫자를 누르면 초안으로 들어감 (턴마다 Haiku 1회) | `/next [on\|off]` |
 
 Claude Code **v2.1.287 이상**이 필요합니다 (`claude --version`).
 
@@ -19,6 +20,7 @@ Claude Code **v2.1.287 이상**이 필요합니다 (`claude --version`).
 claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install team-board@devflow-mods      # 모든 세션·워크트리에서 보여야 하므로 사용자 범위(기본)
 claude plugin install eli12@devflow-mods
+claude plugin install next-steps@devflow-mods     # 필요할 때만 (턴마다 Haiku 호출)
 ```
 설치 중 `1 userConfig option not yet set` 안내가 나오면 색 설정(palette)을 아직 안 골랐다는 뜻이고, 그대로 두면 기본값 `night` 로 동작합니다.
 특정 프로젝트에만 쓰려면 그 프로젝트 폴더에서 `--scope local` 을 붙이세요. 설치 후 열려 있는 Claude Code 는 `/exit` 하고 다시 시작합니다 (`claude --continue` 로 대화를 이어서 열 수 있어요).
@@ -192,6 +194,15 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
   적용 여부는 `claude --debug-file <파일>` 로그의 `hooks module team-board@devflow-mods loaded (… tier prepend)` 줄로 확인합니다.
 - 이 설정으로 함께 시험한 mod (2026-10-12, Claude Code 2.1.296): `replay-theater`(claude-code-playground), `agent-flow`(davila7/claude-code-templates), `mermaid-draw`(galElmalah/claude-mods). 팀 창, 결정 기록, 숨은 실패 표시가 그대로 동작했습니다.
 - 비밀 값을 가리는 mod(예: `secret-redactor`)는 도구 결과만 가립니다. team-board가 저장하는 실패 명령 원문은 가려지지 않습니다.
+
+## next-steps 사용
+
+- 답변이 끝나면 입력창 위에 `다음: 1 … 2 … 3 …` 이 뜹니다. **빈 입력창**에서 숫자를 누르면 그 요청이 초안으로 들어가고, 고치거나 Enter 로 보냅니다. 저절로 보내지 않습니다. `0` 은 닫기.
+- 제안은 대화 언어를 따릅니다 (파일 이름·명령·식별자는 그대로).
+- 비용: 메인 스레드의 답이 끝날 때마다 Haiku 1회 (최근 대화 6개를 800자씩 + 최신 답 2000자, 출력 200토큰 이하). 20자 미만의 답, 서브에이전트의 턴, 백그라운드 에이전트가 도는 중에는 부르지 않습니다.
+- `/next` 이번 세션 사용량 · `/next off` 끄기 · `/next on` 켜기 (설정은 유지됩니다).
+- 목록이 떠 있는 동안 빈 입력창에서 `1` 로 시작하는 글을 치면 첫 글자가 제안 고르기로 쓰입니다. 그럴 땐 `0` 으로 먼저 닫으세요.
+- 아이디어는 [hamzafer/claude-code-mods](https://github.com/hamzafer/claude-code-mods) 의 next-steps (MIT) 에서 얻었고 코드는 새로 썼습니다.
 
 ## 변경 기록
 
