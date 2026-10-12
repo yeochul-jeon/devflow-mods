@@ -422,10 +422,10 @@ describe('프롬프트 캐시', () => {
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
-      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop(), kind: 'file', mtimeMs: NOW })),
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
     }))
     on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
-    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1 } }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('turn.complete', () => ({ text: '' }))
     on('session.end', () => ({ sessionId: 'me' }))
@@ -529,7 +529,7 @@ describe('팀 상황판', () => {
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
       // 파일은 모두 updatedAt 에 쓰였으므로 그 시각을 수정 시각으로 둔다
-      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop(), kind: 'file', mtimeMs: JSON.parse(files.get(k)!).updatedAt })),
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: JSON.parse(files.get(k)!).updatedAt, size: 0, isLink: false })),
     }))
     on('fs.read', ($, e: any) => { reads.push(e.path); return { value: files.get(e.path) ?? '' } })
     on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -539,7 +539,7 @@ describe('팀 상황판', () => {
     let greps = 0
     on('process.run', ($, e: any) => {
       if (e.argv[0] === 'grep') greps += 1
-      return { value: { stdout: e.argv[0] === 'grep' ? titleLine : '', stderr: '', exitCode: e.argv[0] === 'grep' && titleLine ? 0 : 1 } }
+      return { value: { stdout: e.argv[0] === 'grep' ? titleLine : '', stderr: '', exitCode: e.argv[0] === 'grep' && titleLine ? 0 : 1, isStdoutTruncated: false, isStderrTruncated: false } }
     })
     on('command.run', { command: 'rename' }, () => ({ text: 'renamed' }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
@@ -567,7 +567,7 @@ describe('팀 상황판', () => {
     })
     const spoken: string[] = []
     on('audio.play', () => ({ value: undefined }))
-    on('audio.speak', ($, e: any) => { spoken.push(e.text); return { value: { engine: 'say' } } })
+    on('audio.speak', ($, e: any) => { spoken.push(e.text); return { value: { via: 'system' as const } } })
     let calls = 0
     const JSON_ANSWER = JSON.stringify({
       items: [{
