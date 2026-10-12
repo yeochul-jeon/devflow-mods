@@ -30,6 +30,8 @@ export type Beat = {
   files: string[]
   /** 아직 풀리지 않은 숨은 실패 (같은 명령이 깨끗하게 다시 돌면 지워짐) */
   fail: FailAlert | null
+  /** 마지막 메인 스레드 모델 요청 시각. 프롬프트 캐시 남은 시간의 기준 (compact·/clear 뒤엔 null) */
+  cacheAt: number | null
   updatedAt: number
 }
 

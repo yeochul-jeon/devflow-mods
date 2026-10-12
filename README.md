@@ -146,6 +146,11 @@ claude plugin update eli12@devflow-mods
 - 한국어 목소리(Yuna)를 씁니다. 없으면 기본 목소리로 읽는데 한국어가 어색할 수 있으니, macOS 시스템 설정 → 손쉬운 사용 → 읽기 및 말하기 → 시스템 목소리에서 한국어(Yuna)를 내려받아 두세요. `/board sound test` 로 확인.
 - 카드 테두리 색 = 상태 (노랑 결정 필요 · 빨강 숨은 실패 · 파랑 작업중 · 회색 대기), `ctx` 막대 색 = 컨텍스트 여유 (초록 · 노랑 50%+ · 빨강 80%+).
 
+프롬프트 캐시 남은 시간
+- 보드의 세션 줄 `ctx` 옆에 `캐시 42분` 처럼 보입니다. 쉬는 세션이 10분 이하로 남으면 입력창 위 칸 태그가 노란 `캐시 n분` 으로 바뀝니다. 이 안에 다시 말을 걸면 대화 앞부분을 캐시에서 싸게 읽습니다.
+- 마지막 메인 스레드 모델 요청부터 1시간으로 셉니다 (Claude Code 구독 세션의 캐시 수명). 서브에이전트 요청은 세지 않고, compact·`/clear` 뒤에는 다음 요청까지 비웁니다.
+- 알 수 없는 경우: CLAUDE.md·도구 목록·effort 가 바뀌어 캐시가 깨진 경우, 5분 캐시를 쓰는 환경(API 키 등). 아이디어는 [cache-watch](https://github.com/ishuagrawal/cache-watch)·[cache-tax](https://github.com/karanb192/cache-tax) 에서 얻었고 코드는 새로 썼습니다.
+
 색 바꾸기 (`palette`: `night` 기본 · `aurora` · `theme`). `theme` 은 Claude Code 테마 색을 따르니 밝은 배경이면 이것:
 ```bash
 claude plugin configure team-board@devflow-mods      # 또는 /plugin → Installed → team-board → Configure

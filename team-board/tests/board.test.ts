@@ -5,6 +5,9 @@ import {
   askUserText,
   bandLayout,
   bandOrder,
+  cacheLeft,
+  cacheText,
+  cacheWarn,
   emptyBeat,
   dedupeNames,
   lastCustomTitle,
@@ -382,6 +385,105 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
       mk('old', { updatedAt: 0 }),
     ], now, 'me').map(b => b.id)
     expect(order).toEqual(['ask', 'fail', 'me', 'work', 'idle', 'old'])
+  })
+})
+
+describe('프롬프트 캐시', () => {
+  test('마지막 메인 요청에서 1시간. 기록이 없으면 null, 지나면 0 이하', async () => {
+    expect(cacheLeft(null, NOW)).toBeNull()
+    expect(cacheLeft(NOW - 18 * 60_000, NOW)).toBe(42 * 60_000)
+    expect(cacheLeft(NOW - 61 * 60_000, NOW)!).toBeLessThanOrEqual(0)
+  })
+  test('분은 올려서, 지나면 만료, 기록이 없으면 빈 글', async () => {
+    expect(cacheText(42 * 60_000 - 1)).toBe('캐시 42분')
+    expect(cacheText(30_000)).toBe('캐시 1분')
+    expect(cacheText(0)).toBe('캐시 만료')
+    expect(cacheText(null)).toBe('')
+  })
+  test('작업 중이 아니고 10분 이하로 남았을 때만 띠에서 알린다', async () => {
+    const at = (min: number, patch: object = {}) => beat({ cacheAt: NOW - (60 - min) * 60_000, ...patch })
+    expect(cacheWarn(at(8), NOW)).toBe(true)
+    expect(cacheWarn(at(10), NOW)).toBe(true)
+    expect(cacheWarn(at(11), NOW)).toBe(false)
+    expect(cacheWarn(at(0), NOW)).toBe(false) // 만료는 띠에 남기지 않는다 (보드에만)
+    expect(cacheWarn(at(8, { state: 'working' }), NOW)).toBe(false) // 일하는 중이면 곧 갱신된다
+    expect(cacheWarn(beat({}), NOW)).toBe(false) // 예전 파일: cacheAt 없음
+  })
+
+  test('메인 요청 시각을 기록하고, 서브에이전트는 빼고, /clear·compact 에서 비운다', async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop(), kind: 'file', mtimeMs: NOW })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1 } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.complete', () => ({ text: '' }))
+    on('session.end', () => ({ sessionId: 'me' }))
+    on('session.compact', ($, e: any) => ({ messages: e.messages }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    on('turn.step', async function* ($, e: any) {
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...USAGE, model: 'm' } }
+    })
+    const step = async (agentId?: string) => {
+      const s = $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 3, ...(agentId ? { agentId } : {}) } as any)
+      for await (const _ of s) { /* 조각 없음 */ }
+    }
+    // 직전 기록과 1.5초 안이면 미뤄져 다음 틱(3초)에 써진다
+    const answer = async (turnId: string) => {
+      await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId } as any)
+      await clock.advance(3_000)
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    expect(mine().cacheAt).toBeNull()
+
+    await step()
+    await answer('t1')
+    expect(mine().cacheAt).toBe(NOW)
+
+    // 서브에이전트 요청은 메인 캐시를 갱신하지 않는다
+    await clock.advance(5 * 60_000)
+    await step('sub-1')
+    await answer('t2')
+    expect(mine().cacheAt).toBe(NOW)
+
+    // 메인 요청 51분 뒤: 띠에 9분 남음, 보드에도 같은 값
+    await clock.advance(51 * 60_000 - (5 * 60_000 + 6_000))
+    const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+    expect(await band.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
+    await band.unmount()
+    await $.command.run({ command: 'board', args: 'band line' } as any)
+    const line = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+    expect(await line.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
+    await line.unmount()
+    await $.command.run({ command: 'board', args: 'band hud' } as any)
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    expect(await pane.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
+    await pane.unmount()
+
+    // compact 뒤에는 새 prefix 라 캐시가 없다. 다음 메인 요청에서 다시 잰다
+    await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '요약', toolUses: [] }] } as any)
+    expect(mine().cacheAt).toBeNull()
+    await step()
+    await answer('t3')
+    expect(mine().cacheAt).toBe(NOW + 51 * 60_000)
+
+    // /clear 도 새 대화다
+    await $.session.end({ reason: 'clear' } as any)
+    expect(mine().cacheAt).toBeNull()
   })
 })
 

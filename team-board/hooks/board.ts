@@ -11,8 +11,31 @@ export const MAX_DECISIONS = 20
 export function emptyBeat(id: string, name: string, cwd: string): Beat {
   return {
     id, name, cwd, state: 'idle', step: '', prompt: '', last: '', question: '',
-    contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], fail: null, updatedAt: 0,
+    contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], fail: null, cacheAt: null, updatedAt: 0,
   }
+}
+
+// 프롬프트 캐시는 쓸 때마다 수명이 다시 시작된다. Claude Code 메인 세션은 1시간 캐시를 쓴다
+// (2026-10-12 대화 기록 실측: 캐시 쓰기 1h 678건, 5m 6건). mods API 는 캐시 수명을 알려 주지 않는다.
+export const CACHE_TTL_MS = 60 * 60_000
+/** 남은 시간이 이 이하면 띠에서 알린다. */
+export const CACHE_WARN_MS = 10 * 60_000
+
+/** 캐시가 남은 시간(ms). 기록이 없으면 null, 만료됐으면 0 이하. */
+export function cacheLeft(cacheAt: number | null, now: number): number | null {
+  return cacheAt === null ? null : CACHE_TTL_MS - (now - cacheAt)
+}
+
+/** 보드에 쓰는 글: 분은 올림 (1분 미만도 1분). */
+export function cacheText(left: number | null): string {
+  if (left === null) return ''
+  return left <= 0 ? '캐시 만료' : `캐시 ${Math.ceil(left / 60_000)}분`
+}
+
+/** 띠에서 알릴지: 쉬는 세션의 캐시가 곧 만료될 때만. 일하는 중이면 곧 갱신되고, 이미 만료된 건 보드에만 둔다. */
+export function cacheWarn(b: Beat, now: number): boolean {
+  const left = cacheLeft(b.cacheAt, now)
+  return b.state !== 'working' && left !== null && left > 0 && left <= CACHE_WARN_MS
 }
 
 /** 예전 버전이 쓴 파일도 읽을 수 있게 빈 칸을 채운다. */

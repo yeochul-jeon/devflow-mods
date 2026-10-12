@@ -10,6 +10,9 @@ import {
   bandLayout,
   bandOrder,
   basename,
+  cacheLeft,
+  cacheText,
+  cacheWarn,
   decisionsFromAnswers,
   describeTool,
   emptyBeat,
@@ -329,7 +332,7 @@ export const register: Register = (on, options) => {
         ? pushCapped(self.beat.timeline, event(at, 'clear', e.reason === 'clear' ? '/clear' : '/resume'), MAX_TIMELINE)
         : []
       self.askingSince = 0
-      await save($, { state: 'idle', step: '', question: '', last: '', prompt: '', tasks: [], timeline }, true)
+      await save($, { state: 'idle', step: '', question: '', last: '', prompt: '', tasks: [], timeline, cacheAt: null }, true)
     } else {
       await save($, { state: 'ended' }, true)
     }
@@ -358,6 +361,20 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     await save($, { state: 'working', step: '생각 중', question: '' })
     return next(e)
+  })
+
+  // 메인 스레드의 모델 요청마다 프롬프트 캐시 수명이 다시 시작된다. 서브에이전트 요청은 다른 prefix 다.
+  // 도구 호출 기록처럼 1.5초에 한 번까지만 쓰고, 미룬 것은 다음 틱에 쓴다.
+  on('turn.step', async function* ($, e, next) {
+    if (!e.agentId) await save($, { cacheAt: await $.clock.now() })
+    return yield* next(e)
+  })
+
+  // compact 뒤에는 대화 앞부분이 바뀌어 캐시가 없다. 다음 메인 요청에서 다시 잰다.
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    if (!e.agentId) await save($, { cacheAt: null }, true)
+    return r
   })
 
   // 숨은 실패: exit 0 인데 출력에 실패 흔적. 같은 명령이 깨끗하게 다시 돌면 지운다.
@@ -574,6 +591,7 @@ export const register: Register = (on, options) => {
           <Text dimColor={stale}>
             <Text color={tone(b)}>{`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${prog}`}</Text>
             {failed(b) ? <Text color={pal.bad} bold>{' ⚠'}</Text> : null}
+            {!stale && cacheWarn(b, now) ? <Text color={pal.ask}>{` ${cacheText(cacheLeft(b.cacheAt, now))}`}</Text> : null}
           </Text>
         )
       }
@@ -628,7 +646,8 @@ export const register: Register = (on, options) => {
       const stale = isStale(b, now)
       const hot = b.state === 'asking' && !stale
       const bad = !hot && failed(b)
-      const tag = stale ? 'zz' : hot ? '결정!' : bad ? '⚠실패' : b.state === 'working' ? '작업' : '대기'
+      const cool = !stale && !hot && !bad && cacheWarn(b, now)
+      const tag = stale ? 'zz' : hot ? '결정!' : bad ? '⚠실패' : b.state === 'working' ? '작업' : cool ? cacheText(cacheLeft(b.cacheAt, now)) : '대기'
       return (
         <Box
           key={`slot-${b.id}`}
@@ -641,7 +660,7 @@ export const register: Register = (on, options) => {
             <Text color={hot ? pal.onBadge : tone(b)} bold wrap="truncate-end">
               {`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}`}
             </Text>
-            <Text color={hot ? pal.onBadge : bad ? pal.bad : tone(b)} bold={hot || bad}>{` ${tag}`}</Text>
+            <Text color={hot ? pal.onBadge : bad ? pal.bad : cool ? pal.ask : tone(b)} bold={hot || bad}>{` ${tag}`}</Text>
           </Box>
           {layout.mode === 'full' ? <Box>{secondOf(b, slotW)}</Box> : null}
         </Box>
@@ -678,7 +697,8 @@ export const register: Register = (on, options) => {
       const b = list[0]!
       const hot = b.state === 'asking' && !isStale(b, now)
       const bad = !hot && failed(b)
-      const tag = isStale(b, now) ? 'zz' : hot ? ' 결정! ' : bad ? ' ⚠ 실패 ' : b.state === 'working' ? '작업' : '대기'
+      const cool = !isStale(b, now) && !hot && !bad && cacheWarn(b, now)
+      const tag = isStale(b, now) ? 'zz' : hot ? ' 결정! ' : bad ? ' ⚠ 실패 ' : b.state === 'working' ? '작업' : cool ? cacheText(cacheLeft(b.cacheAt, now)) : '대기'
       return (
         <Box flexDirection="column">
           {below}
@@ -687,7 +707,7 @@ export const register: Register = (on, options) => {
               <Text color={pal.accent} bold>{`◆ ${b.name}`}</Text>
               {hot || bad
                 ? <Text backgroundColor={hot ? pal.ask : pal.bad} color={pal.onBadge} bold>{tag}</Text>
-                : <Text color={tone(b)}>{`${markOf(b)} ${tag}`}</Text>}
+                : <Text color={cool ? pal.ask : tone(b)}>{`${markOf(b)} ${tag}`}</Text>}
               <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40))}</Box>
             </Box>
             <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
@@ -746,6 +766,9 @@ export const register: Register = (on, options) => {
             <Text color={contextTone(b.contextPct, pal)}>
               {b.contextPct === null ? 'ctx --' : `ctx ${bar(b.contextPct, 100, 5)} ${b.contextPct}%`}
             </Text>
+            {b.cacheAt != null ? (
+              <Text color={cacheWarn(b, now) ? pal.ask : pal.dim}>{`· ${cacheText(cacheLeft(b.cacheAt, now))}`}</Text>
+            ) : null}
             <Text color={pal.dim}>{`· ${ago(now - b.updatedAt)}`}</Text>
           </Box>
         </Box>
