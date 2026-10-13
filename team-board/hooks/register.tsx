@@ -1045,7 +1045,7 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // 탭 줄: [ 12살 ▴ ][ ↻ ] │ [ ASD-STE100 ][ ↻ ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
+    // 탭 줄: [ 12살 ▴ ][ 🔄 ] │ [ ASD-STE100 ][ 🔄 ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
     // (초점 반전이 걸린 고른 탭이 안 고른 탭처럼 보일 수 있어 기호로 구분한다).
     const tabRow = (b: Beat) => {
       const shown = hasAny(b)
@@ -1062,7 +1062,8 @@ export const register: Register = (on, options) => {
                 )}
               </Button>,
             ]
-            if (partOf(b, t.kind)) out.push(<Button key={`regen-${t.kind}-${b.id}`} variant="secondary" label="↻" onPress={noop} />)
+            // 재생성은 만든 탭에만, 만드는 중에는 숨긴다 (눌러도 무시되므로)
+            if (partOf(b, t.kind) && !makingOf(b, t.kind)) out.push(<Button key={`regen-${t.kind}-${b.id}`} variant="secondary" label="🔄" onPress={noop} />)
             if (i < TABS.length - 1) out.push(<Text color={pal.dim}>│</Text>)
             return out
           })}

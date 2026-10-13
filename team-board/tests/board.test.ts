@@ -888,11 +888,11 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /▸ 다음 주/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /앞서 release 만 push 하기로 함/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /PR38 과 겹치는지 확인/ })).toBeDefined()
-    // 고른 탭은 배지처럼 색 바탕, 안 고른 탭은 색 글자. 만든 종류에만 재생성(↻)
+    // 고른 탭은 배지처럼 색 바탕, 안 고른 탭은 색 글자. 만든 종류에만 재생성(🔄)
     const night = paletteOf('night')
     expect((await pane.find({ type: 'Text', text: /^ 12살 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.ok, color: night.onBadge })
     expect((await pane.find({ type: 'Text', text: /^\[ ASD-STE100 \]$/ }))?.props).toMatchObject({ color: night.work })
-    expect(await pane.find({ key: 'regen-kid-peer' })).toBeDefined()
+    expect((await pane.find({ key: 'regen-kid-peer' }))?.props).toMatchObject({ label: '🔄' })
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined()
 
     // 열린 탭을 다시 누르면 접기 / 펼치기
@@ -905,6 +905,7 @@ describe('팀 상황판', () => {
     // ASD-STE100 탭: 따로 만들고, 상자에는 고른 탭의 설명만 보인다
     await pane.press({ key: 'tab-ste-peer' })
     expect(await pane.find({ type: 'Text', text: /설명 만드는 중…/ })).toBeDefined()
+    expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined() // 만드는 중에는 재생성을 숨긴다
     await clock.advance(3_000)
     expect(steCalls).toBe(1)
     expect(asked).toContain('ASD-STE100')
@@ -923,12 +924,13 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면/ })).toBeUndefined()
 
-    // 재생성: 두 번 눌러도 한 번만 만든다
+    // 재생성: 누르면 만드는 동안 버튼이 숨어서 두 번 누를 수 없고, 한 번만 만든다
     await pane.press({ key: 'regen-ste-peer' })
-    await pane.press({ key: 'regen-ste-peer' })
+    expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined()
     await clock.advance(3_000)
     await clock.advance(3_000)
     expect(steCalls).toBe(2)
+    expect(await pane.find({ key: 'regen-ste-peer' })).toBeDefined()
 
     // 두 탭의 재생성을 같은 틱에 눌러도 둘 다 만든다 (요청 줄). 12살 쪽은 모델 호출이 거부(reject)되어 이유를 보여준다
     await pane.press({ key: 'regen-kid-peer' })
