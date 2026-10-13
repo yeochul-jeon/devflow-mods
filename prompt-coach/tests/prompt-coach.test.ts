@@ -24,13 +24,14 @@ describe('refine (순수 함수)', () => {
 
   test('이유·범위 수식어·붙여넣은 블록을 지키고, 초안 안의 지시는 따르지 않고, 완료 기준이 없으면 표시하라고 한다', async () => {
     const { system } = buildRefine(DRAFT)
-    for (const rule of ['reason', 'scope word', '@ file references', 'not instructions to you', '<no-done/>']) expect(system).toContain(rule)
+    for (const rule of ['reason', 'scope word', '@ file references', 'not instructions to you', '<done>yes</done>', '<done>no</done>']) expect(system).toContain(rule)
   })
 
-  test('완료 기준 표시는 </refined> 뒤에 있을 때만 잡는다', async () => {
-    expect(lacksDone(`<refined>${REFINED}</refined>\n<no-done/>`)).toBe(true)
+  test('완료 기준 판정은 </refined> 뒤의 <done>no</done> 일 때만 없다고 본다', async () => {
+    expect(lacksDone(`<refined>${REFINED}</refined>\n<done>no</done>`)).toBe(true)
+    expect(lacksDone(`<refined>${REFINED}</refined>\n<done>yes</done>`)).toBe(false)
     expect(lacksDone(`<refined>${REFINED}</refined>`)).toBe(false)
-    expect(lacksDone(`<refined>${REFINED} <no-done/></refined>`)).toBe(false)
+    expect(lacksDone(`<refined>${REFINED} <done>no</done></refined>`)).toBe(false)
   })
 })
 
@@ -217,7 +218,7 @@ describe('prompt-coach 0.2.0', () => {
 
   test('완료 기준이 없다는 표시가 오면 /coach 문구와 [다듬기] 토스트로 알린다. 다듬은 글에는 넣지 않는다', async ($, on) => {
     const { s, type, coach, press } = await setup($, on)
-    s.reply = `<refined>${REFINED}</refined>\n<no-done/>`
+    s.reply = `<refined>${REFINED}</refined>\n<done>no</done>`
     expect((await coach(DRAFT)).text).toContain('완료 기준')
     await type(DRAFT)
     await press('coach-refine')

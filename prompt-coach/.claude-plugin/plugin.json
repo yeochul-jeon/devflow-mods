@@ -1,6 +1,6 @@
 {
   "name": "prompt-coach",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "보내기 전 초안을 목표·맥락·조건·완료 기준 순으로 다듬어 입력창에 다시 채움: /coach <초안> 또는 입력창 위 [다듬기] (Haiku), [되돌리기], /coach template",
   "author": {
     "name": "yeochul-jeon",

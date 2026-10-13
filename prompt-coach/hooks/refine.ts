@@ -17,7 +17,7 @@ export function buildRefine(draft: string): { system: string; prompt: string } {
     'Order it so the agent learns the goal first: goal, then context, then constraints, then what counts as done (only if the draft says it).',
     'One instruction per sentence. Short, plain sentences in the active voice. Use one term for one thing. Say what to do rather than what not to do, when that keeps the meaning.',
     'Write in the language the draft is written in.',
-    'Put the result between <refined> and </refined>. If the draft does not say how to tell the work is done, write <no-done/> after </refined>. Write nothing else outside the tags.',
+    'Put the result between <refined> and </refined>. After it, write <done>yes</done> if the draft says how to tell the work is done (for example a test, build or command that must pass), or <done>no</done> if it does not. Write nothing else outside the tags.',
   ].join('\n')
   return { system, prompt: `<draft>\n${draft}\n</draft>` }
 }
@@ -33,7 +33,7 @@ export function tooShort(draft: string): boolean {
   return draft.replace(/\s/g, '').length < MIN_DRAFT
 }
 
-/** 완료 기준이 없다는 표시. </refined> 뒤에 있을 때만 센다. */
+/** 완료 기준이 없다는 판정(<done>no</done>). </refined> 뒤에 있을 때만 센다. */
 export function lacksDone(text: string): boolean {
-  return /<\/refined>[\s\S]*<no-done\s*\/>/.test(text)
+  return /<\/refined>[\s\S]*<done>\s*no\s*<\/done>/.test(text)
 }
