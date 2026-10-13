@@ -27,6 +27,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'coach' }, async ($, e) => {
+    // 이 핸들러는 next 를 부르지 않아 아래 일반 command.run 훅이 오지 않는다. 같은 일을 여기서도 한다.
+    await sent($, e)
     const arg = e.args.trim()
     if (arg === '') {
       const s = await read($, spent)
@@ -36,9 +38,8 @@ export const register: Register = on => {
     }
     // 명령을 보냈으니 입력창은 비어 있다. 그대로 채운다.
     if (arg === 'template') {
-      const filled = await $.prompt.fill({ text: TEMPLATE, mode: 'replace' })
+      const filled = await fillBox($, TEMPLATE)
       if (!filled.isFilled) return { text: `입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})` }
-      await update($, band, b => ({ ...b, hasDraft: true }))
       // 새 초안을 시작했으니 이전에 다듬은 원문은 되돌릴 대상이 아니다.
       if (await read($, original)) await forget($)
       return { text: '틀을 입력창에 넣었어요. 채운 뒤 [다듬기]를 누르거나 그대로 보내세요.' }
@@ -55,6 +56,12 @@ export const register: Register = on => {
     const filled = await fillRefined($, arg, r.text)
     if (!filled.isFilled) return { text: `입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})` }
     return { text: `다듬은 초안을 입력창에 넣었어요. 고치거나 그대로 보내세요. (/coach undo 로 원문)${r.lacksDone ? `\n${NO_DONE}` : ''}` }
+  })
+
+  // 사람이 Enter 로 보낸 명령은 입력창을 비우지만 prompt.submit 을 거치지 않는다. 플러그인이 부른 명령은 입력창을 그대로 둔다.
+  on('command.run', async ($, e, next) => {
+    await sent($, e)
+    return next(e)
   })
 
   // 초안이 있는지만 따라간다. 바뀔 때만 써서 띠를 다시 그리게 한다.
@@ -130,20 +137,31 @@ async function undoBox($: EngineInterface): Promise<void> {
   if (!filled.isFilled) $.ui.toast(`prompt-coach: 입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})`)
 }
 
-/** 다듬은 글을 입력창에 넣고, 넣었을 때만 되돌릴 원문을 남긴다. prompt.edit 는 사람이 칠 때만 오므로 띠도 직접 켠다. */
-async function fillRefined($: EngineInterface, draft: string, text: string) {
+/** 사람이 Enter 로 보낸 명령이면 입력창이 비었으니 띠를 끈다. */
+async function sent($: EngineInterface, e: { origin: { kind: string } }): Promise<void> {
+  if (e.origin.kind === 'composer' && (await read($, band)).hasDraft) await update($, band, b => ({ ...b, hasDraft: false }))
+}
+
+/** 입력창을 채운다. prompt.edit 는 사람이 칠 때만 오므로 띠는 직접 켠다. */
+async function fillBox($: EngineInterface, text: string) {
   const filled = await $.prompt.fill({ text, mode: 'replace' })
+  if (filled.isFilled) await update($, band, b => ({ ...b, hasDraft: true }))
+  return filled
+}
+
+/** 다듬은 글을 입력창에 넣고, 넣었을 때만 되돌릴 원문을 남긴다. */
+async function fillRefined($: EngineInterface, draft: string, text: string) {
+  const filled = await fillBox($, text)
   if (filled.isFilled) {
     await update($, original, () => draft)
     await update($, refined, () => text)
-    await update($, band, b => ({ ...b, hasDraft: true }))
   }
   return filled
 }
 
 /** 원문은 한 번만 되돌린다. */
 async function restore($: EngineInterface, before: string) {
-  const filled = await $.prompt.fill({ text: before, mode: 'replace' })
+  const filled = await fillBox($, before)
   if (filled.isFilled) await forget($)
   return filled
 }

@@ -46,21 +46,21 @@ describe('prompt-coach', () => {
     on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
 
-    const r = await $.command.run({ command: 'coach', args: DRAFT } as any)
+    const r = await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: DRAFT } as any)
     expect(asked.model).toBe('haiku')
     expect(asked.prompt).toContain(DRAFT)
     expect(fills).toEqual([REFINED])
     expect(r.text).toContain('입력창')
 
-    await $.command.run({ command: 'coach', args: 'undo' } as any)
+    await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: 'undo' } as any)
     expect(fills.at(-1)).toBe(DRAFT)
 
-    const status = await $.command.run({ command: 'coach', args: '' } as any)
+    const status = await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: '' } as any)
     expect(status.text).toContain('1회')
     expect(status.text).toContain('500')
 
     // 너무 짧으면 부르지 않는다
-    const short = await $.command.run({ command: 'coach', args: '고쳐' } as any)
+    const short = await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: '고쳐' } as any)
     expect(short.text).toContain('짧')
     expect(fills).toHaveLength(2)
   })
@@ -126,9 +126,9 @@ describe('prompt-coach', () => {
     on('prompt.fill', ($, e: any) => { fills.push(e.text); return { isFilled: true } })
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
 
-    expect((await $.command.run({ command: 'coach', args: DRAFT } as any)).text).toContain('다듬지 못했')
+    expect((await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: DRAFT } as any)).text).toContain('다듬지 못했')
     reply = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: USAGE }
-    expect((await $.command.run({ command: 'coach', args: DRAFT } as any)).text).toContain('api-error')
+    expect((await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: DRAFT } as any)).text).toContain('api-error')
     expect(fills).toEqual([])
   })
 })
@@ -151,13 +151,47 @@ describe('prompt-coach 0.2.0', () => {
     on('prompt.submit', ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', ($: any, e: any) => { s.toasts.push(e.text); return { value: undefined } })
     on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
     const type = (text: string) => { s.box = text; return $.prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: text }) }
-    const coach = (args: string) => $.command.run({ command: 'coach', args } as any)
+    // 사람이 입력창에서 Enter 로 보낸 명령. 보내면 입력창은 빈다.
+    const run = (command: string, args = '', origin: any = { kind: 'composer' }) => { if (origin.kind === 'composer') s.box = ''; return $.command.run({ command, args, origin } as any) }
+    const coach = (args: string) => run('coach', args)
     const press = async (key: string) => { const band = await $.ui.mount(BAND); await band.press({ key }); await band.unmount() }
     const shows = async (key: string) => { const band = await $.ui.mount(BAND); const found = await band.find({ key }); await band.unmount(); return found !== undefined }
-    return { s, type, coach, press, shows }
+    return { s, type, run, coach, press, shows }
   }
+
+  test('사람이 보낸 다른 명령 뒤에는 띠가 숨는다 (명령은 prompt.submit 을 거치지 않는다)', async ($, on) => {
+    const { type, run, shows } = await setup($, on)
+    await type(DRAFT)
+    expect(await shows('coach-refine')).toBe(true)
+    await run('help')
+    expect(await shows('coach-refine')).toBe(false)
+  })
+
+  test('/coach (사용법) 뒤에도 띠가 숨는다', async ($, on) => {
+    const { type, coach, shows } = await setup($, on)
+    await type(DRAFT)
+    await coach('')
+    expect(await shows('coach-refine')).toBe(false)
+  })
+
+  test('/coach undo 뒤에는 띠가 보인다', async ($, on) => {
+    const { s, type, coach, shows } = await setup($, on)
+    await coach(DRAFT)
+    await type('') // 명령을 치려고 입력창을 비운다
+    await coach('undo')
+    expect(s.fills.at(-1)).toBe(DRAFT)
+    expect(await shows('coach-refine')).toBe(true)
+  })
+
+  test('플러그인이 실행한 명령은 입력창을 비우지 않으므로 띠를 그대로 둔다', async ($, on) => {
+    const { type, run, shows } = await setup($, on)
+    await type(DRAFT)
+    await run('help', '', { kind: 'plugin', name: 'other' })
+    expect(await shows('coach-refine')).toBe(true)
+  })
 
   test('/coach template: 모델을 부르지 않고 틀을 채운다', async ($, on) => {
     const { s, coach, shows } = await setup($, on)
