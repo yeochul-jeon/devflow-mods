@@ -267,7 +267,8 @@ export const EVENT_MARK: Record<Event['kind'], string> = {
   clear: '⟲ 대화 지움',
 }
 
-export function explainPrompt(b: Beat, kind: ExplainKind = 'kid'): string {
+/** 결정을 설명할 때 넘기는 그 세션의 맥락: 이름, 받은 요청, 진행, 지난 결정 */
+function contextLines(b: Beat): string[] {
   const { done, total, current } = progress(b.tasks)
   const history = b.decisions.slice(-6).map(d => `- ${d.question} → ${d.answer}`).join('\n')
   return [
@@ -275,11 +276,33 @@ export function explainPrompt(b: Beat, kind: ExplainKind = 'kid'): string {
     `이 세션이 받은 요청: ${b.prompt || '(알 수 없음)'}`,
     total ? `작업 진행: ${done}/${total}${current ? `, 지금 "${current.subject}"` : ''}` : '',
     history ? `지금까지 이 세션에서 내려진 결정:\n${history}` : '',
+  ]
+}
+
+export function explainPrompt(b: Beat, kind: ExplainKind = 'kid'): string {
+  return [
+    ...contextLines(b),
     '',
     kind === 'ste'
       ? '결정 항목마다 ASD-STE100 기준 문장으로 정리해줘. 읽는 사람은 현업 개발자라 정확한 용어를 그대로 살려 줘.'
       : '결정 항목마다 12살도 직관적으로 이해하게 정리해줘. 읽는 사람은 현업 개발자라 정확한 용어도 살려 줘.',
     kind === 'ste' ? STE_JSON_SPEC : EXPLAIN_JSON_SPEC,
+    '',
+    '--- 결정 요청 원문 ---',
+    b.question,
+  ]
+    .filter(l => l !== '')
+    .join('\n')
+}
+
+/** HTML 버튼: 보드를 연 세션의 Claude 에게 결정 설명 페이지를 만들어 Artifact 로 발행해 달라고 보내는 글 */
+export function htmlPrompt(b: Beat): string {
+  return [
+    '팀 상황판에서 아래 결정의 HTML 설명을 요청했어. 결정을 설명하는 HTML 페이지를 만들어 Artifact 도구로 발행하고 링크를 답해줘.',
+    '읽는 사람은 현업 개발자야. 결정 항목마다 선택지, 고르면 생기는 일, 추천을 담아줘.',
+    '결정은 내리지 말고, 이 요청을 작업을 이어 가라는 신호로 받지 마.',
+    '',
+    ...contextLines(b),
     '',
     '--- 결정 요청 원문 ---',
     b.question,

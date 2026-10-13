@@ -19,6 +19,7 @@ import {
   emptyBeat,
   event,
   explainPrompt,
+  htmlPrompt,
   findByName,
   HIDE_MS,
   isAskingLine,
@@ -59,6 +60,7 @@ const explain = atom({ plugin: 'team-board', key: 'explain' } as const, null as 
 const steExplain = atom({ plugin: 'team-board', key: 'steExplain' } as const, null as SteExplain | null)
 const tab = atom({ plugin: 'team-board', key: 'tab' } as const, 'kid' as ExplainKind)
 const queue = atom({ plugin: 'team-board', key: 'queue' } as const, [] as string[])
+const html = atom({ plugin: 'team-board', key: 'html' } as const, null as { id: string; question: string } | null)
 const focus = atom({ plugin: 'team-board', key: 'focus' } as const, null as string | null)
 const me = atom({ plugin: 'team-board', key: 'me' } as const, null as Beat | null)
 const collapsed = atom({ plugin: 'team-board', key: 'collapsed' } as const, [] as string[])
@@ -94,6 +96,8 @@ const self = {
   titleDone: false,
   /** 숨은 실패 감지를 끔 (/board fail off) */
   failOff: false,
+  /** HTML 요청 턴이 끝나면 되돌릴 이 세션의 결정 질문 (요청 턴이 결정 대기를 지우지 않게) */
+  htmlKeep: '',
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -199,6 +203,16 @@ async function pressExplain($: EngineInterface, action: 'tab' | 'regen', kind: E
   } else {
     await open()
   }
+}
+
+/** HTML 버튼: 보드를 연 이 세션에 요청을 보낸다 (질문 하나에 한 번). 끝날 때까지 기다리지 않는다 (await 하면 멈춘다). */
+async function pressHtml($: EngineInterface, id: string): Promise<void> {
+  const target = (await read($, beats)).find(b => b.id === id)
+  if (!target?.question) return
+  const sent = await read($, html)
+  if (sent && sent.id === id && sent.question === target.question) return
+  await update($, html, () => ({ id, question: target.question }))
+  void $.prompt.submit({ text: htmlPrompt(target) })
 }
 
 /** claude --name, /rename 으로 정한 세션 이름. 대화 기록 파일의 마지막 customTitle. */
@@ -389,7 +403,11 @@ export const register: Register = (on, options) => {
       }
       timeline = pushCapped(timeline, event(at, 'prompt', text), MAX_TIMELINE)
       // 결정과 새 요청을 한 번에 쓴다. 답을 보냈으니 더 이상 결정 대기가 아니다.
+      self.htmlKeep = ''
       await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), state: 'working', step: '생각 중' }, true)
+    } else if (e.origin.kind === 'plugin' && e.origin.name === 'team-board' && self.beat?.state === 'asking' && self.beat.question) {
+      // HTML 버튼이 보낸 요청: 결정은 아직 남아 있다
+      self.htmlKeep = self.beat.question
     }
     return next(e)
   })
@@ -489,6 +507,13 @@ export const register: Register = (on, options) => {
     const contextPct = usage?.context?.percent ?? null
     const answer = 'answer' in e && typeof e.answer === 'string' ? e.answer : ''
 
+    // HTML 요청 턴(중단 포함)이 끝나면 결정 대기로 되돌린다. 답(링크)은 질문으로 보지 않는다
+    if (self.htmlKeep) {
+      const question = self.htmlKeep
+      self.htmlKeep = ''
+      await save($, { state: 'asking', step: '', contextPct, question }, true)
+      return r
+    }
     if (e.isAborted || !answer) {
       await note($, 'abort', '중단됨', { state: 'idle', step: '', contextPct, last: '중단됨' })
     } else if (looksLikeQuestion(answer)) {
@@ -588,6 +613,7 @@ export const register: Register = (on, options) => {
     const key = String(e.element ?? '')
     const tabKey = /^(tab|regen)-(kid|ste)-(.+)$/.exec(key)
     if (tabKey) await pressExplain($, tabKey[1] as 'tab' | 'regen', tabKey[2] as ExplainKind, tabKey[3]!)
+    else if (key.startsWith('html-')) await pressHtml($, key.slice('html-'.length))
     else if (key.startsWith('detail-')) await update($, focus, () => key.slice('detail-'.length))
     else if (key === 'back') await update($, focus, () => null)
     else if (key === 'band-board') await $.command.run({ command: 'board', args: '' })
@@ -786,6 +812,7 @@ export const register: Register = (on, options) => {
     const steEx = await read($, steExplain)
     const tabNow = await read($, tab)
     const jobs = await read($, queue)
+    const htmlSent = await read($, html)
     const focusId = await read($, focus)
     const folded = await read($, collapsed)
     const focused = focusId ? list.find(b => b.id === focusId) : undefined
@@ -1045,7 +1072,7 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // 탭 줄: [ 12살 ▴ ][ 🔄 ] │ [ ASD-STE100 ][ 🔄 ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
+    // 탭 줄: [ 12살 ▴ ][ 🔄 ] │ [ ASD-STE100 ][ 🔄 ] │ [ HTML ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
     // (초점 반전이 걸린 고른 탭이 안 고른 탭처럼 보일 수 있어 기호로 구분한다).
     const tabRow = (b: Beat) => {
       const shown = hasAny(b)
@@ -1067,6 +1094,12 @@ export const register: Register = (on, options) => {
             if (i < TABS.length - 1) out.push(<Text color={pal.dim}>│</Text>)
             return out
           })}
+          <Text color={pal.dim}>│</Text>
+          {htmlSent && htmlSent.id === b.id && htmlSent.question === b.question ? (
+            <Text color={pal.dim}>HTML 요청함</Text>
+          ) : (
+            <Button key={`html-${b.id}`} variant="secondary" label="HTML" onPress={noop} />
+          )}
         </Box>
       )
     }

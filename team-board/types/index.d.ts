@@ -61,6 +61,8 @@ declare module 'claude-code' {
       tab: ExplainKind
       /** 만들 설명 요청 줄: `kid:<세션 id>` / `ste:<세션 id>` */
       queue: string[]
+      /** HTML 설명을 요청한 질문 (질문 하나에 한 번) */
+      html: { id: string; question: string } | null
       /** 자세히 보는 세션 id, null 이면 전체 보기 */
       focus: string | null
       /** 이 세션 자신의 기록. 모듈이 다시 로드돼도 같은 세션으로 이어진다. */

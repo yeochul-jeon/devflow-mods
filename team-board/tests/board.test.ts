@@ -709,8 +709,10 @@ describe('팀 상황판', () => {
     })
     on('command.run', { command: 'rename' }, () => ({ text: 'renamed' }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
-    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    const submitted: any[] = []
+    on('prompt.submit', ($, e: any) => { submitted.push(e); return { text: e.text } })
     on('turn.complete', () => ({ text: '' }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
     on('tool.call', ($, e: any) => {
       if (e.tool === 'TaskCreate') return { result: { task: { id: '7', subject: e.subject } }, text: 'ok' }
       if (e.tool === 'TaskUpdate') return { result: { success: true }, text: 'ok' }
@@ -944,6 +946,28 @@ describe('팀 상황판', () => {
     await pane.press({ key: 'regen-kid-peer' })
     await clock.advance(3_000)
     expect(await pane.find({ type: 'Text', text: /설명을 만들지 못했어요 \(empty-reply\)/ })).toBeDefined()
+
+    // HTML: 보드를 연 이 세션에 Artifact 발행을 요청한다. 질문 하나에 한 번
+    await $.turn.complete({ reason: 'answer', answer: 'release 태그도 달까요?', durationMs: 1, isAborted: false, turnId: 't-ask' } as any)
+    expect(mine()).toMatchObject({ state: 'asking', question: 'release 태그도 달까요?' })
+    const sentBefore = submitted.length
+    await pane.press({ key: 'html-peer' })
+    expect(submitted.length).toBe(sentBefore + 1)
+    const req = submitted.at(-1)
+    expect(req.origin).toMatchObject({ kind: 'plugin', name: 'team-board' })
+    expect(req.text).toContain('Artifact')
+    expect(req.text).toContain('PR11 은 이번 주에 할까요?')
+    expect(req.text).toContain('push 할까요? → 예, release 만')
+    // 보낸 뒤에는 버튼 대신 글자라 다시 누를 수 없다
+    expect(await pane.find({ key: 'html-peer' })).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: /^HTML 요청함$/ })).toBeDefined()
+    // 이 세션도 결정 대기 중이었으니, 요청 턴(중단 포함)이 끝난 뒤 그 결정 대기로 돌아간다
+    await $.turn.start({ text: req.text, turnId: 't-html' } as any)
+    expect(mine().state).toBe('working')
+    await $.turn.complete({ reason: 'answer', answer: '발행했어요: https://claude.ai/artifact/x 어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't-html' } as any)
+    expect(mine()).toMatchObject({ state: 'asking', question: 'release 태그도 달까요?' })
+    expect(mine().timeline.at(-1).text).not.toContain('artifact')
+    await $.turn.start({ text: '', turnId: 't-next' } as any) // 뒤 시나리오는 작업 중인 이 세션에서 이어진다
     await pane.unmount()
 
     // 띠 끄기 / 켜기 (세션이 바뀌어도 기억)
