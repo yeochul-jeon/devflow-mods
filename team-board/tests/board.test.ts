@@ -129,6 +129,26 @@ describe('board (순수 함수)', () => {
     expect(questionSummary('1. push 여부\n설명입니다.\n5. PR38을 지금 시작할지 정해 주십시오.\n참고 사항')).toBe('5. PR38을 지금 시작할지 정해 주십시오.')
   })
 
+  test('묻는 줄이 대상 없이 일반적이면 그 앞의 번호 항목 제목으로 줄인다', async () => {
+    const q = [
+      '1. 캐시 만료 시간',
+      '   - 5분: 주문 상태 변경이 빨리 반영됨',
+      '   - 추천: 5분.',
+      '2. 배포 시점',
+      '   - 내일 오전: 팀 전원이 근무 중',
+      '',
+      '어느 쪽으로 할까요?',
+    ].join('\n')
+    expect(questionSummary(q)).toBe('캐시 만료 시간 · 배포 시점')
+    // 제목은 : 앞까지. 선택지만 번호로 나열해도 무엇 중에서 고르는지 보인다
+    expect(questionSummary('1. 5분: 빠르게 반영\n2. 1시간: 부하가 적음\n어떻게 진행할까요?')).toBe('5분 · 1시간')
+    expect(questionSummary('1) 온라인 마이그레이션\n2) 점검 시간 마이그레이션\n결정해 주세요.')).toBe('온라인 마이그레이션 · 점검 시간 마이그레이션')
+    // 대상이 있는 질문, 앞에 번호 항목이 없는 질문, 들여쓴 번호는 그대로
+    expect(questionSummary('1번은 5분으로 정했습니다.\n2번 배포 시점이 남았습니다.\n배포는 어느 쪽으로 할까요?')).toBe('배포는 어느 쪽으로 할까요?')
+    expect(questionSummary('검토를 마쳤습니다.\n어느 쪽으로 할까요?')).toBe('어느 쪽으로 할까요?')
+    expect(questionSummary('캐시 만료\n   1. 5분\n   2. 1시간\n어느 쪽으로 할까요?')).toBe('어느 쪽으로 할까요?')
+  })
+
   test('끝 1500자의 줄마다 본다. 조건문·확인 부탁·? 로 끝나는 제목은 결정 요청이 아니다', async () => {
     expect(looksLikeQuestion('1. push 여부\n2. PR38 착수 시점을 정해 주십시오.')).toBe(true)
     expect(looksLikeQuestion('어느 쪽으로 할까요?\n\n1. A안: 캐시를 둔다\n2. B안: 인덱스를 둔다\n3. C안: 둘 다')).toBe(true)

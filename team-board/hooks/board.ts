@@ -109,11 +109,29 @@ export function questionText(answer: string, maxChars = 3000): string {
   return text.length > maxChars ? '…' + text.slice(-maxChars) : text
 }
 
-/** 긴 결정 요청에서 기록용 한 줄을 뽑는다: 묻는 문장 중 마지막 것. */
+// 대상 없이 결정만 묻는 줄: '어느 쪽으로 할까요?', '어떻게 진행할까요?', '결정해 주세요.'
+const GENERIC_ASK = /^(?:그럼|그러면|그렇다면)?\s*(?:어느\s*쪽(?:으로)?|어떤\s*(?:쪽|것|안)(?:으로)?|어떻게|무엇으로|뭘로)?\s*(?:진행)?\s*(?:할까요|하시겠어요|하시겠습니까|정해\s*주(?:세요|십시오)|골라\s*주세요|결정해\s*주(?:세요|십시오))\s*[?.!]?$/
+// 들여쓰지 않은 번호 항목 '1. 제목: 설명' / '1) 제목'
+const NUMBERED = /^\d+[.)]\s+(.+)$/
+
+/**
+ * 긴 결정 요청에서 기록용 한 줄을 뽑는다: 묻는 문장 중 마지막 것.
+ * 그 줄이 대상 없이 일반적이면('어느 쪽으로 할까요?') 그 앞의 번호 항목 제목을 · 로 잇는다.
+ */
 export function questionSummary(question: string): string {
-  const lines = question.split('\n').map(l => l.trim()).filter(Boolean)
+  const raw = question.split('\n')
+  const lines = raw.map(l => l.trim()).filter(Boolean)
   const asking = lines.filter(isAskingLine)
-  return oneLine(asking[asking.length - 1] ?? lines[lines.length - 1] ?? '', 90)
+  const last = asking[asking.length - 1] ?? lines[lines.length - 1] ?? ''
+  if (GENERIC_ASK.test(last)) {
+    const at = raw.map(l => l.trim()).lastIndexOf(last)
+    const titles = raw
+      .slice(0, at)
+      .map(l => NUMBERED.exec(l.trimEnd())?.[1]?.split(/[:：]/)[0]?.trim())
+      .filter((t): t is string => !!t)
+    if (titles.length) return oneLine(titles.join(' · '), 90)
+  }
+  return oneLine(last, 90)
 }
 
 export function describeTool(tool: string, input: Record<string, unknown>): string {
