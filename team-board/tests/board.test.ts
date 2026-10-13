@@ -847,8 +847,22 @@ describe('팀 상황판', () => {
     // harness 는 turn.start 를 보내지 않아서 성립한다. 실제로는 알림이 시작한 턴의 turn.start 가 asking 을 지운다 (알려진 한계, 보류)
     expect(mine().state).toBe('asking')
     expect(mine().timeline.at(-1).kind).toBe('ask')
+    // 답으로 보낸 요청을 답도 도구 호출도 없이 중단하면, 그 결정 기록을 지우고 같은 질문의 결정 대기로 돌아간다
+    await $.prompt.submit({ text: '다른 걸 먼저 물어볼게', origin: { kind: 'composer' } } as any)
+    expect(mine().decisions.length).toBe(decided + 1)
+    await $.turn.complete({ reason: 'aborted', answer: '', durationMs: 1, isAborted: true, turnId: 't-undo' } as any)
+    expect(mine()).toMatchObject({ state: 'asking', question: '테스트 범위는 어느 쪽으로 할까요?' })
+    expect(mine().decisions.length).toBe(decided)
+    expect(mine().timeline.filter((t: any) => t.kind === 'decide' && t.text.includes('다른 걸 먼저'))).toEqual([])
+    expect(mine().timeline.at(-1)).toMatchObject({ kind: 'abort' })
     await $.prompt.submit({ text: '변경 파일만', origin: { kind: 'composer' } } as any)
     expect(mine().decisions.at(-1)).toMatchObject({ question: '테스트 범위는 어느 쪽으로 할까요?', answer: '변경 파일만' })
+    // 도구를 쓴 뒤의 중단은 답을 받아 일하던 중이라 결정 기록을 그대로 둔다
+    await $.tool.call({ tool: 'Read', file_path: '/repo/order-svc/a.ts', tool_use_id: 'r-undo' } as any)
+    await $.turn.complete({ reason: 'aborted', answer: '', durationMs: 1, isAborted: true, turnId: 't-keep' } as any)
+    expect(mine().decisions.at(-1)).toMatchObject({ answer: '변경 파일만' })
+    expect(mine().state).toBe('idle')
+    await $.turn.start({ text: '', turnId: 't-after' } as any) // 뒤 시나리오는 작업 중인 이 세션에서 이어진다
 
     // 띠
     await clock.advance(3_000)

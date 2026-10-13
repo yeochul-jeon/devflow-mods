@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Beat, Explain, ExplainItem, ExplainKind, SteExplain } from '../types'
+import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, SteExplain } from '../types'
 import {
   EVENT_MARK,
   ago,
@@ -98,6 +98,8 @@ const self = {
   failOff: false,
   /** HTML 요청 턴이 끝나면 되돌릴 이 세션의 결정 질문 (요청 턴이 결정 대기를 지우지 않게) */
   htmlKeep: '',
+  /** 결정의 답으로 기록한 요청. 그 턴이 답도 도구 호출도 없이 중단되면 이것으로 되돌린다 */
+  undo: null as { question: string; decisions: Decision[]; decide: Event } | null,
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -396,10 +398,13 @@ export const register: Register = (on, options) => {
     if (text && !text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
       const at = await $.clock.now()
       let { decisions, timeline } = self.beat
+      self.undo = null
       if (self.beat.state === 'asking' && self.beat.question) {
         const d = { at, question: questionSummary(self.beat.question), answer: oneLine(text, 120) }
+        const decide = event(at, 'decide', `${d.question} → ${d.answer}`)
+        self.undo = { question: self.beat.question, decisions, decide }
         decisions = pushCapped(decisions, d, MAX_DECISIONS)
-        timeline = pushCapped(timeline, event(at, 'decide', `${d.question} → ${d.answer}`), MAX_TIMELINE)
+        timeline = pushCapped(timeline, decide, MAX_TIMELINE)
       }
       timeline = pushCapped(timeline, event(at, 'prompt', text), MAX_TIMELINE)
       // 결정과 새 요청을 한 번에 쓴다. 답을 보냈으니 더 이상 결정 대기가 아니다.
@@ -460,6 +465,8 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as Record<string, unknown>
     const main = !e.agentId
+    // 도구를 썼으면 답을 받아 일하는 중이다. 이제 중단해도 결정은 되돌리지 않는다
+    self.undo = null
 
     if (e.tool === 'AskUserQuestion' && main) {
       const asked = askUserText(input)
@@ -506,7 +513,17 @@ export const register: Register = (on, options) => {
     const usage = await $.session.usage().catch(() => null)
     const contextPct = usage?.context?.percent ?? null
     const answer = 'answer' in e && typeof e.answer === 'string' ? e.answer : ''
+    const undo = self.undo
+    self.undo = null
 
+    // 결정의 답으로 보낸 요청을 아무 진행 없이 중단했다: 그 결정을 지우고 같은 질문의 결정 대기로 돌아간다
+    if (undo && e.isAborted && !answer && self.beat) {
+      const at = await $.clock.now()
+      const kept = self.beat.timeline.filter(t => !(t.kind === 'decide' && t.at === undo.decide.at && t.text === undo.decide.text))
+      const timeline = pushCapped(kept, event(at, 'abort', '중단됨'), MAX_TIMELINE)
+      await save($, { state: 'asking', step: '', contextPct, question: undo.question, decisions: undo.decisions, timeline }, true)
+      return r
+    }
     // HTML 요청 턴(중단 포함)이 끝나면 결정 대기로 되돌린다. 답(링크)은 질문으로 보지 않는다
     if (self.htmlKeep) {
       const question = self.htmlKeep
