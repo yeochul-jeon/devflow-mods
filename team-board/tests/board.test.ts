@@ -725,7 +725,9 @@ describe('팀 상황판', () => {
       value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: JSON.parse(files.get(k)!).updatedAt, size: 0, isLink: false })),
     }))
     on('fs.read', ($, e: any) => { reads.push(e.path); return { value: files.get(e.path) ?? '' } })
-    on('ui.open', () => ({ value: { isPlaced: true } }))
+    // 패널이 그려졌는지: 엔진이 { isPlaced: false, reason } 을 돌려주는 경우도 시험한다
+    let placed: any = { isPlaced: true }
+    on('ui.open', () => ({ value: placed }))
     on('session.end', () => ({ sessionId: 'me' }))
     // 대화 기록 grep 이 돌려줄 세션 이름 줄 (비어 있으면 이름 없음)
     let titleLine = ''
@@ -894,6 +896,14 @@ describe('팀 상황판', () => {
     expect(await line.find({ type: 'Text', text: /⚑ sub-2 ▰▰▱▱ 1\/2/ })).toBeDefined()
     await line.unmount()
     await $.command.run({ command: 'board', args: 'band hud' } as any)
+
+    // 패널이 그려지지 않으면 열었다고 하지 않고 엔진이 준 이유를 그대로 보여 준다
+    placed = { isPlaced: false, reason: 'the attached surfaces place no panes' }
+    const notShown = await $.command.run({ command: 'board', args: '' } as any)
+    expect(notShown.text).toContain('그리지 못했어요')
+    expect(notShown.text).toContain('the attached surfaces place no panes')
+    expect(notShown.text).not.toContain('열었어요')
+    placed = { isPlaced: true }
 
     // 전체 보기
     await $.command.run({ command: 'board', args: '' } as any)

@@ -607,7 +607,9 @@ export const register: Register = (on, options) => {
       await update($, focus, () => null)
     }
     // 직접 연 패널이니 키보드를 가져온다: Tab 으로 버튼 이동, Enter 로 누름, Esc 로 닫기.
-    await $.ui.open({ id: PANE, title: '팀 상황판', focus: true, closeOnEscape: true })
+    const opened = await $.ui.open({ id: PANE, title: '팀 상황판', focus: true, closeOnEscape: true })
+    // 열렸지만 그려지지 않으면 엔진이 준 이유를 그대로 보여 준다
+    if (!opened.isPlaced) return { text: `팀 상황판을 그리지 못했어요: ${opened.reason}` }
     return { text: '팀 상황판을 열었어요. (Tab 버튼 · Enter 누름 · PgUp/PgDn 스크롤 · Esc 닫기)' }
   })
 
