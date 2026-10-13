@@ -6,6 +6,6 @@ export type Spent = { calls: number; input: number; output: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'prompt-coach': { band: CoachBand; spent: Spent; original: string }
+    'prompt-coach': { band: CoachBand; spent: Spent; original: string; refined: string }
   }
 }
