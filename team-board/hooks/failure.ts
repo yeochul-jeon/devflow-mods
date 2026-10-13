@@ -154,6 +154,7 @@ export function noteForClaude(alert: FailAlert): string | null {
     'team-board: 이 Bash 명령은 exit 0 으로 끝났지만 출력에 실패 흔적이 있습니다.',
     ...alert.signs.map(s => `- ${s}`),
     ...(alert.masks.length ? [`실패 코드가 가려졌을 수 있습니다: ${alert.masks.join(', ')}. 파이프 없이 다시 실행하거나 set -o pipefail 을 쓰세요.`] : []),
+    `같은 명령(\`${alert.key}\` 로 시작)이 실패 흔적 없이 다시 돌면 이 표시는 저절로 지워집니다. 그때는 /board fail clear 가 필요 없습니다.`,
     '이 단계를 성공으로 보고하기 전에 확인하거나, 문제가 아닌 이유를 말해 주세요.',
   ].join('\n')
 }

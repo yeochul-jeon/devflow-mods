@@ -290,6 +290,8 @@ describe('숨은 실패', () => {
     expect(a.signs.some(s => s.includes('12 tests completed, 1 failed'))).toBe(true)
     expect(a.masks[0]).toContain('파이프')
     expect(noteForClaude(a)).toContain('pipefail')
+    // Claude 가 "다른 명령이라 안 지워진다" 고 추측하지 않도록 지워지는 규칙을 알린다
+    expect(noteForClaude(a)).toContain('같은 명령(`./gradlew test` 로 시작)이 실패 흔적 없이 다시 돌면 이 표시는 저절로 지워집니다')
   })
 
   test('Maven, Spring, Kotlin 컴파일 오류', async () => {
