@@ -596,6 +596,8 @@ describe('프롬프트 캐시', () => {
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
     expect(await pane.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
+    // 라벨 칸은 6칸이다. 세 글자 라벨은 내용과 붙어 보이므로 두 글자 '최근'
+    expect(await pane.find({ type: 'Text', text: /^최근$/ })).toBeDefined()
     await pane.unmount()
 
     // compact 뒤에는 새 prefix 라 캐시가 없다. 다음 메인 요청에서 다시 잰다

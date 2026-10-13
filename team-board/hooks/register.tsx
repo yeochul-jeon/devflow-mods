@@ -939,7 +939,7 @@ export const register: Register = (on, options) => {
           : b.state === 'working' && b.step
             ? row('지금', <Text color={pal.work} wrap="truncate-end">{b.step}</Text>)
             : b.last
-              ? row('마지막', <Text color={pal.dim} wrap="truncate-end">{b.last}</Text>)
+              ? row('최근', <Text color={pal.dim} wrap="truncate-end">{b.last}</Text>)
               : b.prompt
                 ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>)
                 : null
