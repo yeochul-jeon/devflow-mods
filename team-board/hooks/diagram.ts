@@ -1,7 +1,7 @@
 // 12살 설명을 ASCII 그림으로 그린다. 모델에게는 내용(JSON)만 받고,
 // 그림은 여기서 한글 폭(2칸)을 계산해 직접 그려서 상자가 어긋나지 않게 한다.
 
-import type { ExplainData, ExplainItem, SteData } from '../types'
+import type { ExplainData, ExplainItem, SteData, SteItem } from '../types'
 
 /** 터미널에서 차지하는 칸 수: 한글·한자·전각은 2칸. */
 export function cells(text: string): number {
@@ -136,27 +136,40 @@ export function parseSte(raw: string): SteData | null {
   const o = obj as { items?: unknown }
   if (!Array.isArray(o.items)) return null
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
-  const items = o.items.slice(0, 6).flatMap(it => {
+  const lines = (v: unknown, max: number) => (Array.isArray(v) ? v.map(str).filter(Boolean).slice(0, max) : [])
+  const items: SteItem[] = o.items.slice(0, 6).flatMap(it => {
     if (!it || typeof it !== 'object') return []
     const r = it as Record<string, unknown>
-    const ste = Array.isArray(r.ste) ? r.ste.map(str).filter(Boolean).slice(0, 8) : []
-    return str(r.title) && ste.length ? [{ title: str(r.title), ste }] : []
+    const options = Array.isArray(r.options)
+      ? r.options.slice(0, 4).flatMap(op => {
+          if (!op || typeof op !== 'object') return []
+          const p = op as Record<string, unknown>
+          const ste = lines(p.ste, 3)
+          return str(p.label) && ste.length ? [{ label: str(p.label), ste }] : []
+        })
+      : []
+    const item = { title: str(r.title), decide: str(r.decide), options, suggest: str(r.suggest), ste: lines(r.ste, 8) }
+    return item.title && (item.decide || options.length || item.ste.length) ? [item] : []
   })
   return items.length ? { items } : null
 }
 
 export const STE_JSON_SPEC = [
   '반드시 아래 모양의 JSON 하나만 출력해. 앞뒤에 설명 문장, 코드블록 표시, 주석을 붙이지 마.',
-  '{"items":[{"title":"","ste":["",""]}]}',
+  '{"items":[{"title":"","decide":"","options":[{"label":"","ste":[""]}],"suggest":""}]}',
   '규칙:',
   '- items: 결정 항목마다 하나 (최대 6개).',
   '- title: 무엇을 정하는지 한 줄, 25자 이내.',
-  '- ste: 그 항목을 ASD-STE100 의 80% 수준으로 쓴 한국어 문장 목록 (3~8개). 다르게 해석할 여지가 없게 쓴다:',
+  '- decide: 정할 것을 지시하는 문장 하나.',
+  '- options: 선택지마다 하나 (2~4개). label 은 선택지 이름, 10자 이내.',
+  '- options[].ste: 그 선택지를 고르면 일어나는 일 (문장 1~3개). 첫 문장은 "<label> 를 고르면 …" 으로 쓰고, label 과 같은 이름을 쓴다.',
+  '- suggest: 세션이 제안한 것과 이유를 쓴 문장 하나. 없으면 "".',
+  '- 모든 문장은 ASD-STE100 의 80% 수준으로 쓴 한국어 문장이다. 다르게 해석할 여지가 없게 쓴다:',
   '  · 원소 하나에는 마침표로 끝나는 문장 하나만 넣는다.',
   '  · 능동태로 쓴다. 한 문장에 지시는 하나만.',
   '  · 조건이 있으면 문장 앞에 쓴다 ("X 이면 Y 하세요").',
   '  · 같은 대상은 항상 같은 이름으로 부른다. 명사를 3개 넘게 잇지 않는다.',
   '  · 전문용어·식별자는 그대로 쓴다. 비유·꾸밈말·감탄은 쓰지 않는다.',
   '  · 한 문장은 25어절 이내.',
-  '  · 순서: 정할 것을 지시하는 문장 → 선택지마다 "A 를 고르면 …" 문장 → 세션 제안이 있으면 그 문장. "무엇을 정하는지:", "세션 제안:" 같은 머리말은 붙이지 않는다.',
+  '  · "무엇을 정하는지:", "세션 제안:" 같은 머리말은 붙이지 않는다.',
 ].join('\n')

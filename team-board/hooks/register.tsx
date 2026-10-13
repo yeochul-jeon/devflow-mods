@@ -1064,6 +1064,28 @@ export const register: Register = (on, options) => {
             {steEx.data.items.map((it, i) => (
               <Box flexDirection="column" marginTop={i ? 1 : 0}>
                 <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
+                {it.decide ? (
+                  <Box flexDirection="row">
+                    <Box width={2} flexShrink={0}><Text color={pal.work}>▶</Text></Box>
+                    <Box flexGrow={1} flexShrink={1}><Text color={pal.text} bold wrap="wrap">{it.decide}</Text></Box>
+                  </Box>
+                ) : null}
+                {/* 0.14 가 만들어 둔 설명(상태는 모듈을 다시 불러와도 남는다)에는 options 가 없다 */}
+                {(it.options ?? []).map(op => (
+                  // 이름 칸 폭은 항목에서 가장 긴 선택지 이름에 맞춘다: 문장이 같은 줄에서 시작한다
+                  <Box flexDirection="row">
+                    <Box width={Math.max(...it.options.map(o => widthOf(o.label))) + 7} flexShrink={0}><Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text></Box>
+                    <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+                      {op.ste.map(l => <Text color={pal.text} wrap="wrap">{l}</Text>)}
+                    </Box>
+                  </Box>
+                ))}
+                {it.suggest ? (
+                  <Box flexDirection="row">
+                    <Box width={2} flexShrink={0}><Text color={pal.ask}>★</Text></Box>
+                    <Box flexGrow={1} flexShrink={1}><Text color={pal.ask} wrap="wrap">{it.suggest}</Text></Box>
+                  </Box>
+                ) : null}
                 {it.ste.map(l => (
                   <Box flexDirection="row">
                     <Box width={2} flexShrink={0}><Text color={pal.dim}>·</Text></Box>

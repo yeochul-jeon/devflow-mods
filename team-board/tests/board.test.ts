@@ -65,10 +65,28 @@ describe('diagram (ASCII 그림)', () => {
   })
 
   test('ASD-STE100 JSON: 빈 문장은 빼고, 문장 없는 항목은 버린다', async () => {
+    // 예전 형식 (0.12~0.14): 평평한 문장 목록
     const s = parseSte('답:\n{"items":[{"title":"t","ste":["첫 문장", "", 3, "둘째 문장"]},{"title":"빈 항목","ste":[]}]}')
-    expect(s).toEqual({ items: [{ title: 't', ste: ['첫 문장', '둘째 문장'] }] })
+    expect(s).toEqual({ items: [{ title: 't', decide: '', options: [], suggest: '', ste: ['첫 문장', '둘째 문장'] }] })
     expect(parseSte('{"items":[{"title":"t"}]}')).toBeNull()
     expect(parseSte('그냥 글')).toBeNull()
+  })
+
+  test('ASD-STE100 JSON: 정할 것·선택지·제안으로 나눈 형식. 이름 없는 선택지와 빈 문장은 버린다', async () => {
+    const s = parseSte(JSON.stringify({
+      items: [{
+        title: 't', decide: '시점을 정하세요.',
+        options: [{ label: '이번 주', ste: ['이번 주를 고르면 지금 갱신합니다.', ''] }, { label: '', ste: ['이름 없음.'] }, { label: '다음 주', ste: [] }],
+        suggest: '세션은 이번 주를 제안합니다.',
+      }],
+    }))
+    expect(s).toEqual({
+      items: [{
+        title: 't', decide: '시점을 정하세요.',
+        options: [{ label: '이번 주', ste: ['이번 주를 고르면 지금 갱신합니다.'] }],
+        suggest: '세션은 이번 주를 제안합니다.', ste: [],
+      }],
+    })
   })
 })
 
@@ -782,15 +800,24 @@ describe('팀 상황판', () => {
       first: 'PR38 과 겹치는지 확인',
     })
     const STE_ANSWER = JSON.stringify({
-      items: [{ title: 'PR11 작업 시점', ste: ['PR11 의 작업 시점을 정하세요.', '이번 주를 고르면 PR11 을 지금 갱신합니다.', '다음 주를 고르면 현재 작업을 먼저 끝냅니다.'] }],
+      items: [{
+        title: 'PR11 작업 시점', decide: 'PR11 의 작업 시점을 정하세요.',
+        options: [
+          { label: '이번 주', ste: ['이번 주를 고르면 PR11 을 지금 갱신합니다.'] },
+          { label: '다음 주', ste: ['다음 주를 고르면 현재 작업을 먼저 끝냅니다.'] },
+        ],
+        suggest: '세션은 이번 주를 제안합니다.',
+      }],
     })
+    // 0.14 까지의 평평한 목록 형식 (재생성 첫 번째 답으로 쓴다)
+    const STE_OLD = JSON.stringify({ items: [{ title: 'PR11 작업 시점', ste: ['PR11 의 작업 시점을 정하세요.', '예전 형식 문장입니다.'] }] })
     let steCalls = 0
     on('model.complete', ($, e: any) => {
       asked = e.prompt
       // ASD-STE100 요청은 따로 센다 (12살 쪽 순번을 밀지 않게)
       if (e.prompt.includes('"ste"')) {
         steCalls += 1
-        return { value: { isAnswered: true, text: STE_ANSWER, usage: USAGE } }
+        return { value: { isAnswered: true, text: steCalls === 2 ? STE_OLD : STE_ANSWER, usage: USAGE } }
       }
       calls += 1
       // 세 번째는 던져서 건너뛰고, 그 아래 답할 구현이 없으므로 $.model.complete 가 reject 된다. 네 번째는 답 없음
@@ -971,6 +998,12 @@ describe('팀 상황판', () => {
     expect(asked).toContain('"ste"')
     expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면 PR11 을 지금 갱신합니다\.$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^1\. PR11 작업 시점$/ })).toBeDefined()
+    // 역할별 세로 목록: ▶ 정할 것, ▸ 선택지 이름 칸 + 그 문장, ★ 세션 제안
+    expect(await pane.find({ type: 'Text', text: /^▶$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^PR11 의 작업 시점을 정하세요\.$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ {3}▸ 이번 주$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ {3}▸ 다음 주$/ })).toBeDefined()
+    expect((await pane.find({ type: 'Text', text: /^세션은 이번 주를 제안합니다\.$/ }))?.props).toMatchObject({ color: night.ask })
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeUndefined()
     expect((await pane.find({ type: 'Text', text: /^ ASD-STE100 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.work })
     expect(await pane.find({ type: 'Text', text: /^\[ 12살 \]$/ })).toBeDefined()
@@ -990,6 +1023,10 @@ describe('팀 상황판', () => {
     await clock.advance(3_000)
     expect(steCalls).toBe(2)
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeDefined()
+    // 예전 형식 답은 · 목록으로 보인다
+    expect(await pane.find({ type: 'Text', text: /^예전 형식 문장입니다\.$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^·$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^▶$/ })).toBeUndefined()
 
     // 두 탭의 재생성을 같은 틱에 눌러도 둘 다 만든다 (요청 줄). 12살 쪽은 모델 호출이 거부(reject)되어 이유를 보여준다
     await pane.press({ key: 'regen-kid-peer' })

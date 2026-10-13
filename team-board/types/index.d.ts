@@ -43,8 +43,12 @@ export type ExplainData = { items: ExplainItem[]; first: string }
 /** 12살 설명. question 은 설명을 만든 그 질문: 질문이 바뀌면 보이지 않는다. data 가 없으면 text 를 글로 보여준다. */
 export type Explain = { id: string; question: string; status: 'loading' | 'done' | 'error'; text: string; data: ExplainData | null }
 
-/** ASD-STE100 기준 설명: 결정 항목마다 제목과 문장들. */
-export type SteData = { items: { title: string; ste: string[] }[] }
+/** ASD-STE100 선택지: 이름과 그 선택지를 고르면 일어나는 일의 문장들. */
+export type SteOption = { label: string; ste: string[] }
+/** ASD-STE100 항목: 정할 것, 선택지, 세션 제안. ste 는 0.14 까지의 평평한 문장 목록 (새 답에서는 []). */
+export type SteItem = { title: string; decide: string; options: SteOption[]; suggest: string; ste: string[] }
+/** ASD-STE100 기준 설명: 결정 항목마다 하나. */
+export type SteData = { items: SteItem[] }
 /** ASD-STE100 설명. 규칙은 Explain 과 같다. */
 export type SteExplain = { id: string; question: string; status: 'loading' | 'done' | 'error'; text: string; data: SteData | null }
 
