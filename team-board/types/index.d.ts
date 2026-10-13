@@ -36,8 +36,9 @@ export type Beat = {
 }
 
 export type ExplainOption = { label: string; flow: string[]; result: string }
-export type ExplainItem = { title: string; analogy: string; options: ExplainOption[]; link: string; suggest: string }
-/** 모델이 준 12살 설명의 내용. 그림은 mod 가 그린다. */
+/** ste: ASD-STE100 기준 문장들. 0.11 이 남긴 상태에는 없다. */
+export type ExplainItem = { title: string; analogy: string; options: ExplainOption[]; link: string; suggest: string; ste?: string[] }
+/** 모델이 준 12살·STE 설명의 내용. 그림은 mod 가 그린다. */
 export type ExplainData = { items: ExplainItem[]; first: string }
 
 /** 12살 설명. question 은 설명을 만든 그 질문: 질문이 바뀌면 보이지 않는다. data 가 없으면 text 를 글로 보여준다. */

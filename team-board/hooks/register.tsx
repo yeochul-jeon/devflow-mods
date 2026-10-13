@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Beat, Explain } from '../types'
+import type { Beat, Explain, ExplainItem } from '../types'
 import {
   EVENT_MARK,
   ago,
@@ -48,6 +48,8 @@ import { hex, ICONS, sprite } from './pixel'
 
 const PANE = 'team-board'
 const TICK_MS = 3_000
+// 이 폭(패널 칸) 이상이면 12살 설명과 ASD-STE100 을 좌우로, 아니면 위아래로 놓는다
+const SIDE_COLS = 100
 const HEARTBEAT_MS = 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
@@ -149,7 +151,7 @@ async function runExplain($: EngineInterface): Promise<void> {
   try {
     await update($, explain, (): Explain => ({ id, question: target.question, status: 'loading', text: '', data: null }))
     await update($, collapsed, list => list.filter(x => x !== id))
-    const r = await $.model.complete({ model: 'haiku', prompt: explainPrompt(target), maxTokens: 3000, timeoutMs: 120_000 })
+    const r = await $.model.complete({ model: 'haiku', prompt: explainPrompt(target), maxTokens: 8000, timeoutMs: 120_000 })
     await update($, explain, (): Explain =>
       r.isAnswered
         ? // JSON 이면 그림으로, 아니면 글 그대로 보여준다.
@@ -917,46 +919,92 @@ export const register: Register = (on, options) => {
         )
       }
       const d = mine.data
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor={pal.accent} paddingX={1} marginTop={1}>
-          <Text color={pal.accent} bold>12살 버전</Text>
-          {d.items.map((it, i) => (
+      // 예전 상태처럼 STE 문장이 하나도 없으면 좌우로 나누지 않는다
+      const side = cols >= SIDE_COLS && d.items.some(it => (it.ste ?? []).length > 0)
+      // 좌우일 때 왼쪽 칸 폭: 상자 안쪽에서 세로선과 양옆 여백(3칸)을 빼고 반으로 나눈다.
+      const art = side ? Math.max(20, Math.floor((cols - 21) / 2)) : artWidth
+      // 12살 설명 한 항목
+      const kid = (it: ExplainItem, i: number) => (
+        <Box flexDirection="column">
+          <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
+          {it.analogy ? (
+            <Box flexDirection="row">
+              <Box width={8} flexShrink={0}><Text color={pal.dim}>   비유 </Text></Box>
+              <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{it.analogy}</Text></Box>
+            </Box>
+          ) : null}
+          {it.options.map(op => (
             <Box flexDirection="column" marginTop={1}>
-              <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
-              {it.analogy ? (
-                <Box flexDirection="row">
-                  <Box width={8} flexShrink={0}><Text color={pal.dim}>   비유 </Text></Box>
-                  <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{it.analogy}</Text></Box>
-                </Box>
-              ) : null}
-              {it.options.map(op => (
-                <Box flexDirection="column" marginTop={1}>
-                  <Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text>
-                  {flowArt(op.flow, artWidth).map(line => (
-                    <Text color={pal.frame === 'promptBorder' ? pal.dim : pal.accent} wrap="truncate-end">{`     ${line}`}</Text>
-                  ))}
-                  {op.result ? (
-                    <Box flexDirection="row">
-                      <Box width={7} flexShrink={0}><Text color={pal.dim}>     └</Text></Box>
-                      <Box flexGrow={1} flexShrink={1}><Text color={pal.dim} wrap="wrap">{op.result}</Text></Box>
-                    </Box>
-                  ) : null}
-                </Box>
+              <Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text>
+              {flowArt(op.flow, art).map(line => (
+                <Text color={pal.frame === 'promptBorder' ? pal.dim : pal.accent} wrap="truncate-end">{`     ${line}`}</Text>
               ))}
-              {it.link ? (
-                <Box flexDirection="row" marginTop={1}>
-                  <Box width={10} flexShrink={0}><Text color={pal.ok}>   ◆ 맥락 </Text></Box>
-                  <Box flexGrow={1} flexShrink={1}><Text color={pal.ok} wrap="wrap">{it.link}</Text></Box>
-                </Box>
-              ) : null}
-              {it.suggest ? (
+              {op.result ? (
                 <Box flexDirection="row">
-                  <Box width={10} flexShrink={0}><Text color={pal.ask}>   ★ 제안 </Text></Box>
-                  <Box flexGrow={1} flexShrink={1}><Text color={pal.ask} wrap="wrap">{it.suggest}</Text></Box>
+                  <Box width={7} flexShrink={0}><Text color={pal.dim}>     └</Text></Box>
+                  <Box flexGrow={1} flexShrink={1}><Text color={pal.dim} wrap="wrap">{op.result}</Text></Box>
                 </Box>
               ) : null}
             </Box>
           ))}
+          {it.link ? (
+            <Box flexDirection="row" marginTop={1}>
+              <Box width={10} flexShrink={0}><Text color={pal.ok}>   ◆ 맥락 </Text></Box>
+              <Box flexGrow={1} flexShrink={1}><Text color={pal.ok} wrap="wrap">{it.link}</Text></Box>
+            </Box>
+          ) : null}
+          {it.suggest ? (
+            <Box flexDirection="row">
+              <Box width={10} flexShrink={0}><Text color={pal.ask}>   ★ 제안 </Text></Box>
+              <Box flexGrow={1} flexShrink={1}><Text color={pal.ask} wrap="wrap">{it.suggest}</Text></Box>
+            </Box>
+          ) : null}
+        </Box>
+      )
+      // ASD-STE100 문장들
+      const ste = (lines: readonly string[]) =>
+        lines.map(l => (
+          <Box flexDirection="row">
+            <Box width={2} flexShrink={0}><Text color={pal.dim}>·</Text></Box>
+            <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{l}</Text></Box>
+          </Box>
+        ))
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={pal.accent} paddingX={1} marginTop={1}>
+          {side ? (
+            <Box flexDirection="row">
+              <Box width="50%" flexShrink={1}><Text color={pal.accent} bold>12살 버전</Text></Box>
+              <Box width={3} flexShrink={0} />
+              <Box width="50%" flexShrink={1}><Text color={pal.accent} bold>ASD-STE100</Text></Box>
+            </Box>
+          ) : (
+            <Text color={pal.accent} bold>12살 버전</Text>
+          )}
+          {d.items.map((it, i) => {
+            const lines = it.ste ?? []
+            if (side) {
+              return (
+                <Box flexDirection="row" marginTop={1}>
+                  <Box width="50%" flexShrink={1}>{kid(it, i)}</Box>
+                  {/* 가운데 구분선: 자식 없는 1칸 Box 가 행 높이만큼 늘어나 색 막대가 된다 */}
+                  <Box width={1} flexShrink={0} marginX={1} {...(lines.length ? { backgroundColor: pal.accent } : {})} />
+                  <Box width="50%" flexShrink={1} flexDirection="column">{ste(lines)}</Box>
+                </Box>
+              )
+            }
+            return (
+              <Box flexDirection="column" marginTop={1}>
+                {kid(it, i)}
+                {lines.length ? (
+                  <Box flexDirection="column" marginTop={1}>
+                    {/* 상자 안쪽 폭(art + 8)에 맞춘다 */}
+                    <Text color={pal.accent} wrap="truncate-end">{'── ASD-STE100 ' + '─'.repeat(Math.max(0, art - 6))}</Text>
+                    {ste(lines)}
+                  </Box>
+                ) : null}
+              </Box>
+            )
+          })}
           {d.first ? (
             <Box flexDirection="row" marginTop={1}>
               <Box width={14} flexShrink={0}><Text color={pal.onBadge} backgroundColor={pal.ask} bold>{' 먼저 정할 것 '}</Text></Box>
@@ -989,12 +1037,12 @@ export const register: Register = (on, options) => {
           ))}
           <Box flexDirection="row" columnGap={1} marginTop={1}>
             {has ? (
-              <Button key={`toggle-${b.id}`} variant="primary" label={folded.includes(b.id) ? '12살 설명 펼치기 ▾' : '12살 설명 접기 ▴'} onPress={noop} />
+              <Button key={`toggle-${b.id}`} variant="primary" label={folded.includes(b.id) ? '설명 펼치기 ▾' : '설명 접기 ▴'} onPress={noop} />
             ) : null}
             <Button
               key={`explain-${b.id}`}
               variant={has ? 'secondary' : 'primary'}
-              label={loading ? '설명 만드는 중…' : has ? '다시 만들기' : '12살 버전으로 설명'}
+              label={loading ? '설명 만드는 중…' : has ? '다시 만들기' : '12살·STE 로 설명'}
               onPress={noop}
             />
           </Box>

@@ -102,14 +102,15 @@ export function parseExplain(raw: string): ExplainData | null {
           return str(p.label) ? [{ label: str(p.label), flow, result: str(p.result) }] : []
         })
       : []
-    return str(r.title) ? [{ title: str(r.title), analogy: str(r.analogy), options, link: str(r.link), suggest: str(r.suggest) }] : []
+    const ste = Array.isArray(r.ste) ? r.ste.map(str).filter(Boolean).slice(0, 8) : []
+    return str(r.title) ? [{ title: str(r.title), analogy: str(r.analogy), options, link: str(r.link), suggest: str(r.suggest), ste }] : []
   })
   return items.length ? { items, first: str(o.first) } : null
 }
 
 export const EXPLAIN_JSON_SPEC = [
   '반드시 아래 모양의 JSON 하나만 출력해. 앞뒤에 설명 문장, 코드블록 표시, 주석을 붙이지 마.',
-  '{"items":[{"title":"","analogy":"","options":[{"label":"","flow":["",""],"result":""}],"link":"","suggest":""}],"first":""}',
+  '{"items":[{"title":"","analogy":"","options":[{"label":"","flow":["",""],"result":""}],"link":"","suggest":"","ste":["",""]}],"first":""}',
   '규칙:',
   '- items: 결정 항목마다 하나 (최대 6개).',
   '- title: 무엇을 정하는지 한 줄, 25자 이내.',
@@ -120,4 +121,12 @@ export const EXPLAIN_JSON_SPEC = [
   '- link: 앞선 결정이나 진행 상황과 이어지는 점 한 줄. 없으면 "".',
   '- suggest: 세션이 제안한 것과 이유 한 줄. 없으면 "".',
   '- first: 먼저 정할 것 한 줄.',
+  '- ste: 같은 항목을 ASD-STE100 의 80% 수준으로 쓴 한국어 문장 목록 (3~8개). 문장 하나가 원소 하나. 12살 비유와 별개로, 다르게 해석할 여지가 없게 쓴다:',
+  '  · 능동태로 쓴다. 한 문장에 지시는 하나만.',
+  '  · 조건이 있으면 문장 앞에 쓴다 ("X 이면 Y 하세요").',
+  '  · 같은 대상은 항상 같은 이름으로 부른다. 명사를 3개 넘게 잇지 않는다.',
+  '  · 전문용어·식별자는 그대로 쓴다. 비유·꾸밈말·감탄은 쓰지 않는다.',
+  '  · 한 문장은 25어절 이내.',
+  '  · 원소 하나에는 마침표로 끝나는 문장 하나만 넣는다.',
+  '  · 순서: 정할 것을 지시하는 문장 → 선택지마다 "A 를 고르면 …" 문장 → 세션 제안이 있으면 그 문장. "무엇을 정하는지:", "세션 제안:" 같은 머리말은 붙이지 않는다.',
 ].join('\n')

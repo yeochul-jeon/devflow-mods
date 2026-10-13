@@ -276,7 +276,7 @@ export function explainPrompt(b: Beat): string {
     total ? `작업 진행: ${done}/${total}${current ? `, 지금 "${current.subject}"` : ''}` : '',
     history ? `지금까지 이 세션에서 내려진 결정:\n${history}` : '',
     '',
-    '결정 항목마다 12살도 직관적으로 이해하게 정리해줘. 읽는 사람은 현업 개발자라 정확한 용어도 살려 줘.',
+    '결정 항목마다 12살도 직관적으로 이해하게 정리하고, 같은 내용을 ASD-STE100 기준 문장으로도 써 줘. 읽는 사람은 현업 개발자라 정확한 용어도 살려 줘.',
     EXPLAIN_JSON_SPEC,
     '',
     '--- 결정 요청 원문 ---',

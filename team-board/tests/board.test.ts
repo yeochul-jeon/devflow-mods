@@ -60,6 +60,9 @@ describe('diagram (ASCII 그림)', () => {
     const d = parseExplain('여기 있어요\n{"items":[{"title":"PR38 시작 시점","analogy":"숙제 순서","options":[{"label":"지금","flow":["바로 진행"],"result":"빠름"}],"link":"","suggest":"지금"}],"first":"겹침 확인"}\n끝')
     expect(d?.items[0]?.options[0]?.flow).toEqual(['바로 진행'])
     expect(d?.first).toBe('겹침 확인')
+    expect(d?.items[0]?.ste).toEqual([]) // ste 가 없으면 빈 목록 (12살만 보임)
+    const s = parseExplain('{"items":[{"title":"t","options":[],"ste":["첫 문장", "", 3, "둘째 문장"]}]}')
+    expect(s?.items[0]?.ste).toEqual(['첫 문장', '둘째 문장'])
     expect(parseExplain('그냥 글입니다')).toBeNull()
     expect(parseExplain('{"items": "x"}')).toBeNull()
   })
@@ -736,6 +739,7 @@ describe('팀 상황판', () => {
           { label: '다음 주', flow: ['지금 일 먼저', 'PR11 나중'], result: '집중할 수 있어요' },
         ],
         link: '앞서 release 만 push 하기로 함', suggest: '이번 주 (이미 진행 중)',
+        ste: ['PR11 의 작업 시점을 정하세요.', '이번 주를 고르면: PR11 을 지금 갱신합니다.', '다음 주를 고르면: 현재 작업을 먼저 끝냅니다.'],
       }],
       first: 'PR38 과 겹치는지 확인',
     })
@@ -866,6 +870,11 @@ describe('팀 상황판', () => {
     await pane.press({ key: 'explain-peer' })
     await clock.advance(3_000)
     expect(asked).toContain('"items"')
+    expect(asked).toContain('"ste"')
+    expect(asked).toContain('ASD-STE100')
+    // 좁은 패널(90칸): 12살 설명 아래에 이름 붙은 가로선과 STE 문장
+    expect(await pane.find({ type: 'Text', text: /^── ASD-STE100 ─+$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면: PR11 을 지금 갱신합니다\.$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /│ PR11 바로 갱신 │ → │ 문서 최신 │/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /▸ 다음 주/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /앞서 release 만 push 하기로 함/ })).toBeDefined()
@@ -877,6 +886,17 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeUndefined()
     await pane.press({ key: 'toggle-peer' })
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeDefined()
+
+    // 넓은 패널(120칸): 좌우로 놓고, 가운데 1칸 색 막대로 나눈다
+    await pane.unmount()
+    const wide = await $.ui.mount({ ...PANE, props: { bodyColumns: 120 } })
+    expect(await wide.find({ type: 'Text', text: /^ASD-STE100$/ })).toBeDefined()
+    expect(await wide.find({ type: 'Text', text: /^── ASD-STE100/ })).toBeUndefined()
+    expect(await wide.find({ type: 'Text', text: /^PR11 의 작업 시점을 정하세요\.$/ })).toBeDefined()
+    const bars = (await wide.findAll({ type: 'Box' })).filter(b => (b.props as any).width === 1 && (b.props as any).backgroundColor === paletteOf('night').accent)
+    expect(bars.length).toBe(1)
+    await wide.unmount()
+    pane = await $.ui.mount(PANE)
 
     // 모델 호출이 거부(reject)되거나 답이 없으면 로딩에 머물지 않고 이유를 보여준다
     await pane.press({ key: 'explain-peer' })
