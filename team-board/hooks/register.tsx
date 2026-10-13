@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Beat, Explain, ExplainItem } from '../types'
+import type { Beat, Explain, ExplainItem, ExplainKind, SteExplain } from '../types'
 import {
   EVENT_MARK,
   ago,
@@ -43,13 +43,11 @@ import {
 } from './board'
 import { commandKey, formatAlert, judge, masksIn, noteForClaude, signLine } from './failure'
 import { bar, contextTone, paletteOf } from './palette'
-import { cells as widthOf, flowArt, parseExplain } from './diagram'
+import { cells as widthOf, flowArt, parseExplain, parseSte } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
 
 const PANE = 'team-board'
 const TICK_MS = 3_000
-// 이 폭(패널 칸) 이상이면 12살 설명과 ASD-STE100 을 좌우로, 아니면 위아래로 놓는다
-const SIDE_COLS = 100
 const HEARTBEAT_MS = 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
@@ -58,7 +56,9 @@ const USER_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
 const beats = atom({ plugin: 'team-board', key: 'beats' } as const, [] as Beat[])
 const explain = atom({ plugin: 'team-board', key: 'explain' } as const, null as Explain | null)
-const pending = atom({ plugin: 'team-board', key: 'pending' } as const, null as string | null)
+const steExplain = atom({ plugin: 'team-board', key: 'steExplain' } as const, null as SteExplain | null)
+const tab = atom({ plugin: 'team-board', key: 'tab' } as const, 'kid' as ExplainKind)
+const queue = atom({ plugin: 'team-board', key: 'queue' } as const, [] as string[])
 const focus = atom({ plugin: 'team-board', key: 'focus' } as const, null as string | null)
 const me = atom({ plugin: 'team-board', key: 'me' } as const, null as Beat | null)
 const collapsed = atom({ plugin: 'team-board', key: 'collapsed' } as const, [] as string[])
@@ -141,30 +141,63 @@ async function scan($: EngineInterface): Promise<void> {
 }
 
 async function runExplain($: EngineInterface): Promise<void> {
-  const id = await read($, pending)
-  if (!id || self.busy) return
-  await update($, pending, () => null)
+  if (self.busy) return
+  const job = (await read($, queue))[0]
+  if (!job) return
+  await update($, queue, list => list.slice(1))
+  const kind: ExplainKind = job.startsWith('ste:') ? 'ste' : 'kid'
+  const id = job.slice(job.indexOf(':') + 1)
   const target = (await read($, beats)).find(b => b.id === id)
   if (!target?.question) return
+  const question = target.question
+  // JSON 이면 그림으로, 아니면 글 그대로 보여준다.
+  const put = (status: Explain['status'], text: string, raw = '') =>
+    kind === 'ste'
+      ? update($, steExplain, (): SteExplain => ({ id, question, status, text, data: raw ? parseSte(raw) : null }))
+      : update($, explain, (): Explain => ({ id, question, status, text, data: raw ? parseExplain(raw) : null }))
 
   self.busy = true
   try {
-    await update($, explain, (): Explain => ({ id, question: target.question, status: 'loading', text: '', data: null }))
+    await put('loading', '')
     await update($, collapsed, list => list.filter(x => x !== id))
-    const r = await $.model.complete({ model: 'haiku', prompt: explainPrompt(target), maxTokens: 8000, timeoutMs: 120_000 })
-    await update($, explain, (): Explain =>
-      r.isAnswered
-        ? // JSON 이면 그림으로, 아니면 글 그대로 보여준다.
-          { id, question: target.question, status: 'done', text: stripMarkdown(r.text).trim(), data: parseExplain(r.text) }
-        : { id, question: target.question, status: 'error', text: `설명을 만들지 못했어요 (${r.reason})`, data: null },
-    )
+    const r = await $.model.complete({ model: 'haiku', prompt: explainPrompt(target, kind), maxTokens: 3000, timeoutMs: 120_000 })
+    if (r.isAnswered) await put('done', stripMarkdown(r.text).trim(), r.text)
+    else await put('error', `설명을 만들지 못했어요 (${r.reason})`)
   } catch (err) {
     // 엔진이 보내기를 거부한 요청(막힌 모델 등)은 reject 된다. 로딩에 머물지 않게 이유를 보여준다
-    await update($, explain, (): Explain => ({
-      id, question: target.question, status: 'error', text: `설명을 만들지 못했어요 (${err instanceof Error ? err.message : String(err)})`, data: null,
-    }))
+    await put('error', `설명을 만들지 못했어요 (${err instanceof Error ? err.message : String(err)})`)
   } finally {
     self.busy = false
+  }
+}
+
+/**
+ * 설명 탭 누름. 탭: 설명이 없으면 고르고 만들기, 다른 탭이 열려 있으면 고르기, 이 탭이 열려 있으면 접기·펼치기.
+ * 재생성: 이 탭을 고르고 다시 만들기. 만드는 중에는 새 요청을 넣지 않는다.
+ */
+async function pressExplain($: EngineInterface, action: 'tab' | 'regen', kind: ExplainKind, id: string): Promise<void> {
+  const target = (await read($, beats)).find(b => b.id === id)
+  if (!target?.question) return
+  const job = `${kind}:${id}`
+  const part = kind === 'ste' ? await read($, steExplain) : await read($, explain)
+  const mine = part && part.id === id && part.question === target.question ? part : null
+  const making = (await read($, queue)).includes(job) || mine?.status === 'loading'
+  const open = async () => {
+    await update($, tab, () => kind)
+    await update($, collapsed, list => list.filter(x => x !== id))
+  }
+  const make = () => update($, queue, list => (list.includes(job) ? list : [...list, job]))
+  if (action === 'regen') {
+    if (!mine || making) return
+    await open()
+    await make()
+  } else if (!mine && !making) {
+    await open()
+    await make()
+  } else if ((await read($, tab)) === kind) {
+    if (!making) await update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id]))
+  } else {
+    await open()
   }
 }
 
@@ -553,11 +586,9 @@ export const register: Register = (on, options) => {
   on('ui.press', async ($, e, next) => {
     if (e.plugin !== 'team-board') return next(e)
     const key = String(e.element ?? '')
-    if (key.startsWith('explain-')) await update($, pending, () => key.slice('explain-'.length))
-    else if (key.startsWith('toggle-')) {
-      const id = key.slice('toggle-'.length)
-      await update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id]))
-    } else if (key.startsWith('detail-')) await update($, focus, () => key.slice('detail-'.length))
+    const tabKey = /^(tab|regen)-(kid|ste)-(.+)$/.exec(key)
+    if (tabKey) await pressExplain($, tabKey[1] as 'tab' | 'regen', tabKey[2] as ExplainKind, tabKey[3]!)
+    else if (key.startsWith('detail-')) await update($, focus, () => key.slice('detail-'.length))
     else if (key === 'back') await update($, focus, () => null)
     else if (key === 'band-board') await $.command.run({ command: 'board', args: '' })
     else return next(e)
@@ -752,7 +783,9 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const list = visible(await read($, beats), now)
     const ex = await read($, explain)
-    const waiting = await read($, pending)
+    const steEx = await read($, steExplain)
+    const tabNow = await read($, tab)
+    const jobs = await read($, queue)
     const focusId = await read($, focus)
     const folded = await read($, collapsed)
     const focused = focusId ? list.find(b => b.id === focusId) : undefined
@@ -905,106 +938,103 @@ export const register: Register = (on, options) => {
     // 설명 상자 안쪽 폭: 패널 폭에서 패널·카드·상자의 테두리와 여백, 들여쓰기를 뺀다.
     const artWidth = Math.max(20, cols - 18)
 
+    // 설명 탭: 종류별 이름과 색. 결정 배지의 노랑과 겹치지 않게 초록·파랑.
+    const TABS: { kind: ExplainKind; label: string; hue: string }[] = [
+      { kind: 'kid', label: '12살', hue: pal.ok },
+      { kind: 'ste', label: 'ASD-STE100', hue: pal.work },
+    ]
+    // 이 세션 질문으로 만든 설명 (질문이 바뀌면 보이지 않는다)
+    const partOf = (b: Beat, kind: ExplainKind) => {
+      const part = kind === 'ste' ? steEx : ex
+      return part && part.id === b.id && part.question === b.question ? part : null
+    }
+    const makingOf = (b: Beat, kind: ExplainKind) => jobs.includes(`${kind}:${b.id}`) || partOf(b, kind)?.status === 'loading'
+    // 상자를 보일지: 어느 한쪽이라도 만들었거나 만드는 중
+    const hasAny = (b: Beat) => TABS.some(t => partOf(b, t.kind) || makingOf(b, t.kind))
+
+    // 12살 설명 한 항목
+    const kid = (it: ExplainItem, i: number) => (
+      <Box flexDirection="column">
+        <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
+        {it.analogy ? (
+          <Box flexDirection="row">
+            <Box width={8} flexShrink={0}><Text color={pal.dim}>   비유 </Text></Box>
+            <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{it.analogy}</Text></Box>
+          </Box>
+        ) : null}
+        {it.options.map(op => (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text>
+            {flowArt(op.flow, artWidth).map(line => (
+              <Text color={pal.frame === 'promptBorder' ? pal.dim : pal.accent} wrap="truncate-end">{`     ${line}`}</Text>
+            ))}
+            {op.result ? (
+              <Box flexDirection="row">
+                <Box width={7} flexShrink={0}><Text color={pal.dim}>     └</Text></Box>
+                <Box flexGrow={1} flexShrink={1}><Text color={pal.dim} wrap="wrap">{op.result}</Text></Box>
+              </Box>
+            ) : null}
+          </Box>
+        ))}
+        {it.link ? (
+          <Box flexDirection="row" marginTop={1}>
+            <Box width={10} flexShrink={0}><Text color={pal.ok}>   ◆ 맥락 </Text></Box>
+            <Box flexGrow={1} flexShrink={1}><Text color={pal.ok} wrap="wrap">{it.link}</Text></Box>
+          </Box>
+        ) : null}
+        {it.suggest ? (
+          <Box flexDirection="row">
+            <Box width={10} flexShrink={0}><Text color={pal.ask}>   ★ 제안 </Text></Box>
+            <Box flexGrow={1} flexShrink={1}><Text color={pal.ask} wrap="wrap">{it.suggest}</Text></Box>
+          </Box>
+        ) : null}
+      </Box>
+    )
+
     const explainBox = (b: Beat) => {
-      const mine = ex && ex.id === b.id && ex.question === b.question ? ex : null
-      if (!mine || mine.status === 'loading' || folded.includes(b.id)) return null
-      if (mine.status === 'error' || !mine.data) {
+      if (!hasAny(b) || folded.includes(b.id)) return null
+      const t = TABS.find(x => x.kind === tabNow) ?? TABS[0]!
+      const part = partOf(b, t.kind)
+      if (makingOf(b, t.kind) || !part) {
         return (
-          <Box flexDirection="column" borderStyle="round" borderColor={mine.status === 'error' ? pal.bad : pal.accent} paddingX={1} marginTop={1}>
-            <Text color={pal.accent} bold>12살 버전</Text>
-            {mine.text.split('\n').map(l => (
-              <Text color={mine.status === 'error' ? pal.bad : pal.text}>{l || ' '}</Text>
+          <Box flexDirection="column" borderStyle="round" borderColor={t.hue} paddingX={1} marginTop={1}>
+            <Text color={t.hue}>{makingOf(b, t.kind) ? '설명 만드는 중…' : ' '}</Text>
+          </Box>
+        )
+      }
+      if (part.status === 'error' || !part.data) {
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor={part.status === 'error' ? pal.bad : t.hue} paddingX={1} marginTop={1}>
+            {part.text.split('\n').map(l => (
+              <Text color={part.status === 'error' ? pal.bad : pal.text}>{l || ' '}</Text>
             ))}
           </Box>
         )
       }
-      const d = mine.data
-      // 예전 상태처럼 STE 문장이 하나도 없으면 좌우로 나누지 않는다
-      const side = cols >= SIDE_COLS && d.items.some(it => (it.ste ?? []).length > 0)
-      // 좌우일 때 왼쪽 칸 폭: 상자 안쪽에서 세로선과 양옆 여백(3칸)을 빼고 반으로 나눈다.
-      const art = side ? Math.max(20, Math.floor((cols - 21) / 2)) : artWidth
-      // 12살 설명 한 항목
-      const kid = (it: ExplainItem, i: number) => (
-        <Box flexDirection="column">
-          <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
-          {it.analogy ? (
-            <Box flexDirection="row">
-              <Box width={8} flexShrink={0}><Text color={pal.dim}>   비유 </Text></Box>
-              <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{it.analogy}</Text></Box>
-            </Box>
-          ) : null}
-          {it.options.map(op => (
-            <Box flexDirection="column" marginTop={1}>
-              <Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text>
-              {flowArt(op.flow, art).map(line => (
-                <Text color={pal.frame === 'promptBorder' ? pal.dim : pal.accent} wrap="truncate-end">{`     ${line}`}</Text>
-              ))}
-              {op.result ? (
-                <Box flexDirection="row">
-                  <Box width={7} flexShrink={0}><Text color={pal.dim}>     └</Text></Box>
-                  <Box flexGrow={1} flexShrink={1}><Text color={pal.dim} wrap="wrap">{op.result}</Text></Box>
-                </Box>
-              ) : null}
-            </Box>
-          ))}
-          {it.link ? (
-            <Box flexDirection="row" marginTop={1}>
-              <Box width={10} flexShrink={0}><Text color={pal.ok}>   ◆ 맥락 </Text></Box>
-              <Box flexGrow={1} flexShrink={1}><Text color={pal.ok} wrap="wrap">{it.link}</Text></Box>
-            </Box>
-          ) : null}
-          {it.suggest ? (
-            <Box flexDirection="row">
-              <Box width={10} flexShrink={0}><Text color={pal.ask}>   ★ 제안 </Text></Box>
-              <Box flexGrow={1} flexShrink={1}><Text color={pal.ask} wrap="wrap">{it.suggest}</Text></Box>
-            </Box>
-          ) : null}
-        </Box>
-      )
-      // ASD-STE100 문장들
-      const ste = (lines: readonly string[]) =>
-        lines.map(l => (
-          <Box flexDirection="row">
-            <Box width={2} flexShrink={0}><Text color={pal.dim}>·</Text></Box>
-            <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{l}</Text></Box>
-          </Box>
-        ))
-      return (
-        <Box flexDirection="column" borderStyle="round" borderColor={pal.accent} paddingX={1} marginTop={1}>
-          {side ? (
-            <Box flexDirection="row">
-              <Box width="50%" flexShrink={1}><Text color={pal.accent} bold>12살 버전</Text></Box>
-              <Box width={3} flexShrink={0} />
-              <Box width="50%" flexShrink={1}><Text color={pal.accent} bold>ASD-STE100</Text></Box>
-            </Box>
-          ) : (
-            <Text color={pal.accent} bold>12살 버전</Text>
-          )}
-          {d.items.map((it, i) => {
-            const lines = it.ste ?? []
-            if (side) {
-              return (
-                <Box flexDirection="row" marginTop={1}>
-                  <Box width="50%" flexShrink={1}>{kid(it, i)}</Box>
-                  {/* 가운데 구분선: 자식 없는 1칸 Box 가 행 높이만큼 늘어나 색 막대가 된다 */}
-                  <Box width={1} flexShrink={0} marginX={1} {...(lines.length ? { backgroundColor: pal.accent } : {})} />
-                  <Box width="50%" flexShrink={1} flexDirection="column">{ste(lines)}</Box>
-                </Box>
-              )
-            }
-            return (
-              <Box flexDirection="column" marginTop={1}>
-                {kid(it, i)}
-                {lines.length ? (
-                  <Box flexDirection="column" marginTop={1}>
-                    {/* 상자 안쪽 폭(art + 8)에 맞춘다 */}
-                    <Text color={pal.accent} wrap="truncate-end">{'── ASD-STE100 ' + '─'.repeat(Math.max(0, art - 6))}</Text>
-                    {ste(lines)}
+      if (t.kind === 'ste' && steEx?.data) {
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor={t.hue} paddingX={1} marginTop={1}>
+            {steEx.data.items.map((it, i) => (
+              <Box flexDirection="column" marginTop={i ? 1 : 0}>
+                <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
+                {it.ste.map(l => (
+                  <Box flexDirection="row">
+                    <Box width={2} flexShrink={0}><Text color={pal.dim}>·</Text></Box>
+                    <Box flexGrow={1} flexShrink={1}><Text color={pal.text} wrap="wrap">{l}</Text></Box>
                   </Box>
-                ) : null}
+                ))}
               </Box>
-            )
-          })}
+            ))}
+          </Box>
+        )
+      }
+      const d = ex?.data
+      if (!d) return null
+      return (
+        <Box flexDirection="column" borderStyle="round" borderColor={t.hue} paddingX={1} marginTop={1}>
+          {d.items.map((it, i) => (
+            <Box marginTop={i ? 1 : 0}>{kid(it, i)}</Box>
+          ))}
           {d.first ? (
             <Box flexDirection="row" marginTop={1}>
               <Box width={14} flexShrink={0}><Text color={pal.onBadge} backgroundColor={pal.ask} bold>{' 먼저 정할 것 '}</Text></Box>
@@ -1015,11 +1045,34 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // 탭 줄: [ 12살 ▴ ][ ↻ ] │ [ ASD-STE100 ][ ↻ ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
+    // (초점 반전이 걸린 고른 탭이 안 고른 탭처럼 보일 수 있어 기호로 구분한다).
+    const tabRow = (b: Beat) => {
+      const shown = hasAny(b)
+      return (
+        <Box flexDirection="row" columnGap={1} marginTop={1}>
+          {TABS.flatMap((t, i) => {
+            const picked = shown && tabNow === t.kind
+            const out = [
+              <Button key={`tab-${t.kind}-${b.id}`} plain onPress={noop}>
+                {picked ? (
+                  <Text color={pal.onBadge} backgroundColor={t.hue} bold>{` ${t.label} ${folded.includes(b.id) ? '▾' : '▴'} `}</Text>
+                ) : (
+                  <Text color={t.hue} bold>{`[ ${t.label} ]`}</Text>
+                )}
+              </Button>,
+            ]
+            if (partOf(b, t.kind)) out.push(<Button key={`regen-${t.kind}-${b.id}`} variant="secondary" label="↻" onPress={noop} />)
+            if (i < TABS.length - 1) out.push(<Text color={pal.dim}>│</Text>)
+            return out
+          })}
+        </Box>
+      )
+    }
+
     const askBlock = (b: Beat, maxLines: number) => {
       if (b.state !== 'asking' || !b.question) return null
       const all = b.question.split('\n').filter(l => l.trim())
-      const loading = waiting === b.id || (ex?.id === b.id && ex.question === b.question && ex.status === 'loading')
-      const has = !loading && !!ex && ex.id === b.id && ex.question === b.question && ex.status !== 'loading'
       return (
         <Box flexDirection="column" marginTop={1}>
           <Text color={pal.ask} bold>⚑ 결정할 것</Text>
@@ -1035,17 +1088,7 @@ export const register: Register = (on, options) => {
               </Box>
             </Box>
           ))}
-          <Box flexDirection="row" columnGap={1} marginTop={1}>
-            {has ? (
-              <Button key={`toggle-${b.id}`} variant="primary" label={folded.includes(b.id) ? '설명 펼치기 ▾' : '설명 접기 ▴'} onPress={noop} />
-            ) : null}
-            <Button
-              key={`explain-${b.id}`}
-              variant={has ? 'secondary' : 'primary'}
-              label={loading ? '설명 만드는 중…' : has ? '다시 만들기' : '12살·STE 로 설명'}
-              onPress={noop}
-            />
-          </Box>
+          {tabRow(b)}
           {explainBox(b)}
         </Box>
       )

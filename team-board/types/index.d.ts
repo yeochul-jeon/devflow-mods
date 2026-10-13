@@ -36,20 +36,31 @@ export type Beat = {
 }
 
 export type ExplainOption = { label: string; flow: string[]; result: string }
-/** ste: ASD-STE100 기준 문장들. 0.11 이 남긴 상태에는 없다. */
-export type ExplainItem = { title: string; analogy: string; options: ExplainOption[]; link: string; suggest: string; ste?: string[] }
-/** 모델이 준 12살·STE 설명의 내용. 그림은 mod 가 그린다. */
+export type ExplainItem = { title: string; analogy: string; options: ExplainOption[]; link: string; suggest: string }
+/** 모델이 준 12살 설명의 내용. 그림은 mod 가 그린다. */
 export type ExplainData = { items: ExplainItem[]; first: string }
 
 /** 12살 설명. question 은 설명을 만든 그 질문: 질문이 바뀌면 보이지 않는다. data 가 없으면 text 를 글로 보여준다. */
 export type Explain = { id: string; question: string; status: 'loading' | 'done' | 'error'; text: string; data: ExplainData | null }
+
+/** ASD-STE100 기준 설명: 결정 항목마다 제목과 문장들. */
+export type SteData = { items: { title: string; ste: string[] }[] }
+/** ASD-STE100 설명. 규칙은 Explain 과 같다. */
+export type SteExplain = { id: string; question: string; status: 'loading' | 'done' | 'error'; text: string; data: SteData | null }
+
+/** 설명 탭: 12살 또는 ASD-STE100 */
+export type ExplainKind = 'kid' | 'ste'
 
 declare module 'claude-code' {
   interface PluginState {
     'team-board': {
       beats: Beat[]
       explain: Explain | null
-      pending: string | null
+      steExplain: SteExplain | null
+      /** 고른 설명 탭 */
+      tab: ExplainKind
+      /** 만들 설명 요청 줄: `kid:<세션 id>` / `ste:<세션 id>` */
+      queue: string[]
       /** 자세히 보는 세션 id, null 이면 전체 보기 */
       focus: string | null
       /** 이 세션 자신의 기록. 모듈이 다시 로드돼도 같은 세션으로 이어진다. */

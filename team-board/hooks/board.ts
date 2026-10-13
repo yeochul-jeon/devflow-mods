@@ -1,6 +1,6 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
-import type { Beat, Decision, Event, Task } from '../types'
-import { EXPLAIN_JSON_SPEC } from './diagram'
+import type { Beat, Decision, Event, ExplainKind, Task } from '../types'
+import { EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 
 // 살아 있는 세션은 1분마다 기록하므로, 3분 넘게 소식이 없으면 흐리게 표시한다.
@@ -267,7 +267,7 @@ export const EVENT_MARK: Record<Event['kind'], string> = {
   clear: '⟲ 대화 지움',
 }
 
-export function explainPrompt(b: Beat): string {
+export function explainPrompt(b: Beat, kind: ExplainKind = 'kid'): string {
   const { done, total, current } = progress(b.tasks)
   const history = b.decisions.slice(-6).map(d => `- ${d.question} → ${d.answer}`).join('\n')
   return [
@@ -276,8 +276,10 @@ export function explainPrompt(b: Beat): string {
     total ? `작업 진행: ${done}/${total}${current ? `, 지금 "${current.subject}"` : ''}` : '',
     history ? `지금까지 이 세션에서 내려진 결정:\n${history}` : '',
     '',
-    '결정 항목마다 12살도 직관적으로 이해하게 정리하고, 같은 내용을 ASD-STE100 기준 문장으로도 써 줘. 읽는 사람은 현업 개발자라 정확한 용어도 살려 줘.',
-    EXPLAIN_JSON_SPEC,
+    kind === 'ste'
+      ? '결정 항목마다 ASD-STE100 기준 문장으로 정리해줘. 읽는 사람은 현업 개발자라 정확한 용어를 그대로 살려 줘.'
+      : '결정 항목마다 12살도 직관적으로 이해하게 정리해줘. 읽는 사람은 현업 개발자라 정확한 용어도 살려 줘.',
+    kind === 'ste' ? STE_JSON_SPEC : EXPLAIN_JSON_SPEC,
     '',
     '--- 결정 요청 원문 ---',
     b.question,

@@ -25,7 +25,7 @@ import {
   visible,
 } from '../hooks/board'
 import { bar, contextTone, paletteOf } from '../hooks/palette'
-import { cells, clip, flowArt, parseExplain } from '../hooks/diagram'
+import { cells, clip, flowArt, parseExplain, parseSte } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
 import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
 
@@ -60,11 +60,15 @@ describe('diagram (ASCII 그림)', () => {
     const d = parseExplain('여기 있어요\n{"items":[{"title":"PR38 시작 시점","analogy":"숙제 순서","options":[{"label":"지금","flow":["바로 진행"],"result":"빠름"}],"link":"","suggest":"지금"}],"first":"겹침 확인"}\n끝')
     expect(d?.items[0]?.options[0]?.flow).toEqual(['바로 진행'])
     expect(d?.first).toBe('겹침 확인')
-    expect(d?.items[0]?.ste).toEqual([]) // ste 가 없으면 빈 목록 (12살만 보임)
-    const s = parseExplain('{"items":[{"title":"t","options":[],"ste":["첫 문장", "", 3, "둘째 문장"]}]}')
-    expect(s?.items[0]?.ste).toEqual(['첫 문장', '둘째 문장'])
     expect(parseExplain('그냥 글입니다')).toBeNull()
     expect(parseExplain('{"items": "x"}')).toBeNull()
+  })
+
+  test('ASD-STE100 JSON: 빈 문장은 빼고, 문장 없는 항목은 버린다', async () => {
+    const s = parseSte('답:\n{"items":[{"title":"t","ste":["첫 문장", "", 3, "둘째 문장"]},{"title":"빈 항목","ste":[]}]}')
+    expect(s).toEqual({ items: [{ title: 't', ste: ['첫 문장', '둘째 문장'] }] })
+    expect(parseSte('{"items":[{"title":"t"}]}')).toBeNull()
+    expect(parseSte('그냥 글')).toBeNull()
   })
 })
 
@@ -739,12 +743,20 @@ describe('팀 상황판', () => {
           { label: '다음 주', flow: ['지금 일 먼저', 'PR11 나중'], result: '집중할 수 있어요' },
         ],
         link: '앞서 release 만 push 하기로 함', suggest: '이번 주 (이미 진행 중)',
-        ste: ['PR11 의 작업 시점을 정하세요.', '이번 주를 고르면: PR11 을 지금 갱신합니다.', '다음 주를 고르면: 현재 작업을 먼저 끝냅니다.'],
       }],
       first: 'PR38 과 겹치는지 확인',
     })
+    const STE_ANSWER = JSON.stringify({
+      items: [{ title: 'PR11 작업 시점', ste: ['PR11 의 작업 시점을 정하세요.', '이번 주를 고르면 PR11 을 지금 갱신합니다.', '다음 주를 고르면 현재 작업을 먼저 끝냅니다.'] }],
+    })
+    let steCalls = 0
     on('model.complete', ($, e: any) => {
       asked = e.prompt
+      // ASD-STE100 요청은 따로 센다 (12살 쪽 순번을 밀지 않게)
+      if (e.prompt.includes('"ste"')) {
+        steCalls += 1
+        return { value: { isAnswered: true, text: STE_ANSWER, usage: USAGE } }
+      }
       calls += 1
       // 세 번째는 던져서 건너뛰고, 그 아래 답할 구현이 없으므로 $.model.complete 가 reject 된다. 네 번째는 답 없음
       if (calls === 3) throw new Error('blocked model')
@@ -851,8 +863,9 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /PR38 래퍼/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /결정을 기다려요/ })).toBeDefined() // 주의 띠
 
-    // 12살 설명 버튼: 지난 결정까지 맥락으로 넘긴다
-    await pane.press({ key: 'explain-peer' })
+    // 12살 탭: 지난 결정까지 맥락으로 넘긴다
+    expect(await pane.find({ key: 'regen-kid-peer' })).toBeUndefined() // 만들기 전에는 재생성 없음
+    await pane.press({ key: 'tab-kid-peer' })
     await clock.advance(3_000)
     expect(asked).toContain('PR38을 지금 시작할까요?')
     expect(asked).toContain('push 할까요? → 예, release 만')
@@ -866,43 +879,67 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /PR11 은 이번 주에 할까요/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^1\. PR38 착수$/ })).toBeUndefined()
 
-    // 새 질문의 설명은 JSON 으로 받아 mod 가 ASCII 그림으로 그린다
-    await pane.press({ key: 'explain-peer' })
+    // 새 질문의 설명은 JSON 으로 받아 mod 가 ASCII 그림으로 그린다. 12살 요청에는 STE 규격이 없다
+    await pane.press({ key: 'tab-kid-peer' })
     await clock.advance(3_000)
     expect(asked).toContain('"items"')
-    expect(asked).toContain('"ste"')
-    expect(asked).toContain('ASD-STE100')
-    // 좁은 패널(90칸): 12살 설명 아래에 이름 붙은 가로선과 STE 문장
-    expect(await pane.find({ type: 'Text', text: /^── ASD-STE100 ─+$/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면: PR11 을 지금 갱신합니다\.$/ })).toBeDefined()
+    expect(asked).not.toContain('"ste"')
     expect(await pane.find({ type: 'Text', text: /│ PR11 바로 갱신 │ → │ 문서 최신 │/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /▸ 다음 주/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /앞서 release 만 push 하기로 함/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /PR38 과 겹치는지 확인/ })).toBeDefined()
+    // 고른 탭은 배지처럼 색 바탕, 안 고른 탭은 색 글자. 만든 종류에만 재생성(↻)
+    const night = paletteOf('night')
+    expect((await pane.find({ type: 'Text', text: /^ 12살 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.ok, color: night.onBadge })
+    expect((await pane.find({ type: 'Text', text: /^\[ ASD-STE100 \]$/ }))?.props).toMatchObject({ color: night.work })
+    expect(await pane.find({ key: 'regen-kid-peer' })).toBeDefined()
+    expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined()
 
-    // 접기 / 펼치기
-    expect(await pane.find({ key: 'toggle-peer' })).toBeDefined()
-    await pane.press({ key: 'toggle-peer' })
+    // 열린 탭을 다시 누르면 접기 / 펼치기
+    await pane.press({ key: 'tab-kid-peer' })
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeUndefined()
-    await pane.press({ key: 'toggle-peer' })
+    expect(await pane.find({ type: 'Text', text: /^ 12살 ▾ $/ })).toBeDefined()
+    await pane.press({ key: 'tab-kid-peer' })
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeDefined()
 
-    // 넓은 패널(120칸): 좌우로 놓고, 가운데 1칸 색 막대로 나눈다
-    await pane.unmount()
-    const wide = await $.ui.mount({ ...PANE, props: { bodyColumns: 120 } })
-    expect(await wide.find({ type: 'Text', text: /^ASD-STE100$/ })).toBeDefined()
-    expect(await wide.find({ type: 'Text', text: /^── ASD-STE100/ })).toBeUndefined()
-    expect(await wide.find({ type: 'Text', text: /^PR11 의 작업 시점을 정하세요\.$/ })).toBeDefined()
-    const bars = (await wide.findAll({ type: 'Box' })).filter(b => (b.props as any).width === 1 && (b.props as any).backgroundColor === paletteOf('night').accent)
-    expect(bars.length).toBe(1)
-    await wide.unmount()
-    pane = await $.ui.mount(PANE)
-
-    // 모델 호출이 거부(reject)되거나 답이 없으면 로딩에 머물지 않고 이유를 보여준다
-    await pane.press({ key: 'explain-peer' })
+    // ASD-STE100 탭: 따로 만들고, 상자에는 고른 탭의 설명만 보인다
+    await pane.press({ key: 'tab-ste-peer' })
+    expect(await pane.find({ type: 'Text', text: /설명 만드는 중…/ })).toBeDefined()
     await clock.advance(3_000)
+    expect(steCalls).toBe(1)
+    expect(asked).toContain('ASD-STE100')
+    expect(asked).toContain('"ste"')
+    expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면 PR11 을 지금 갱신합니다\.$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^1\. PR11 작업 시점$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeUndefined()
+    expect((await pane.find({ type: 'Text', text: /^ ASD-STE100 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.work })
+    expect(await pane.find({ type: 'Text', text: /^\[ 12살 \]$/ })).toBeDefined()
+
+    // 이미 만든 탭으로 돌아가면 모델을 다시 부르지 않는다
+    const kidCalls = calls
+    await pane.press({ key: 'tab-kid-peer' })
+    await clock.advance(3_000)
+    expect(calls).toBe(kidCalls)
+    expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면/ })).toBeUndefined()
+
+    // 재생성: 두 번 눌러도 한 번만 만든다
+    await pane.press({ key: 'regen-ste-peer' })
+    await pane.press({ key: 'regen-ste-peer' })
+    await clock.advance(3_000)
+    await clock.advance(3_000)
+    expect(steCalls).toBe(2)
+
+    // 두 탭의 재생성을 같은 틱에 눌러도 둘 다 만든다 (요청 줄). 12살 쪽은 모델 호출이 거부(reject)되어 이유를 보여준다
+    await pane.press({ key: 'regen-kid-peer' })
+    await pane.press({ key: 'regen-ste-peer' })
+    await clock.advance(3_000)
+    await clock.advance(3_000)
+    expect(steCalls).toBe(3)
+    await pane.press({ key: 'tab-kid-peer' })
     expect(await pane.find({ type: 'Text', text: /설명을 만들지 못했어요 \(.*no implementation for model\.complete\)/ })).toBeDefined()
-    await pane.press({ key: 'explain-peer' })
+    // 답이 없을 때도 로딩에 머물지 않는다
+    await pane.press({ key: 'regen-kid-peer' })
     await clock.advance(3_000)
     expect(await pane.find({ type: 'Text', text: /설명을 만들지 못했어요 \(empty-reply\)/ })).toBeDefined()
     await pane.unmount()
