@@ -704,12 +704,13 @@ export const register: Register = (on, options) => {
     }
     const minutesOf = (b: Beat) => <Text color={pal.ask}>{cacheMinutes(cacheLeft(b.cacheAt, now)!)}</Text>
 
-    const secondOf = (b: Beat, width: number) => {
+    // filled: 칸이 노랗게 칠해졌는지 (HUD 칸). 혼자 띠는 바탕이 칠해지지 않아 질문을 노란 글자로 쓴다
+    const secondOf = (b: Beat, width: number, filled = true) => {
       const hot = b.state === 'asking' && !isStale(b, now)
       const bad = !hot && failed(b)
       const { done, total } = progress(b.tasks)
       return hot
-        ? <Text color={pal.onBadge} wrap="truncate-end">{questionSummary(b.question)}</Text>
+        ? <Text color={filled ? pal.onBadge : pal.ask} wrap="truncate-end">{questionSummary(b.question)}</Text>
         : bad
           ? <Text color={pal.bad} wrap="truncate-end">{signLine(b.fail!.signs[0] ?? b.fail!.key)}</Text>
         : total
@@ -786,7 +787,7 @@ export const register: Register = (on, options) => {
                 {badgeOf(b)}
                 {cool ? minutesOf(b) : null}
               </Box>
-              <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40))}</Box>
+              <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40), false)}</Box>
             </Box>
             <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
           </Box>

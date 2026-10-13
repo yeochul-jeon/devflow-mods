@@ -608,6 +608,13 @@ describe('프롬프트 캐시', () => {
     // /clear 도 새 대화다
     await $.session.end({ reason: 'clear' } as any)
     expect(mine().cacheAt).toBeNull()
+
+    // 세션 하나(solo)로 결정 대기: 띠 바탕이 노랗지 않으므로 질문 요약은 노란 글자
+    await $.turn.complete({ reason: 'answer', answer: '1. 캐시 만료 시간\n2. 배포 시점\n어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't4' } as any)
+    await clock.advance(3_000)
+    const asking = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+    expect((await asking.find({ type: 'Text', text: /^캐시 만료 시간 · 배포 시점$/ }))?.props.color).toBe(paletteOf('night').ask)
+    await asking.unmount()
   })
 })
 
@@ -856,6 +863,8 @@ describe('팀 상황판', () => {
     // 결정 대기 칸: 칸이 노랗게 칠해져 있어 배지는 반전색. 이름 앞 표시(⚑)는 배지로 바뀌었다
     const askBadge = await band.find({ type: 'Text', text: /^ 결정 $/ })
     expect(askBadge?.props).toMatchObject({ color: paletteOf('night').ask, backgroundColor: paletteOf('night').onBadge })
+    // 노란 칸의 질문 요약은 어두운 글자
+    expect((await band.find({ type: 'Text', text: /^5\. PR38을 지금 시작할까요\?$/ }))?.props.color).toBe(paletteOf('night').onBadge)
     expect(await band.find({ type: 'Text', text: /^sub-2$/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /⚑/ })).toBeUndefined()
     expect(await band.find({ type: 'Text', text: /sub-2·2/ })).toBeUndefined()
