@@ -88,6 +88,8 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
+        {/* 바로 위 대화 기록과 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다 */}
+        <Text dimColor wrap="truncate-end">{rule(e.props.bodyColumns)}</Text>
         <Box flexDirection="row" columnGap={1} paddingX={1}>
           {b.busy ? (
             <Text dimColor>다듬는 중…</Text>
@@ -101,6 +103,12 @@ export const register: Register = on => {
       </Box>
     )
   })
+}
+
+/** 띠 폭을 채우는 이름 붙은 가로줄. */
+function rule(width: number): string {
+  const head = '── prompt-coach '
+  return head + '─'.repeat(Math.max(0, width - head.length))
 }
 
 /** 입력창의 지금 초안을 다듬는다. 모델이 일하는 동안 초안이 바뀌었으면 덮지 않는다. */

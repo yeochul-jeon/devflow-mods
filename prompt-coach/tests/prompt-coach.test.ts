@@ -91,11 +91,14 @@ describe('prompt-coach', () => {
     // 빈 입력창: 버튼 없음
     let band = await $.ui.mount(BAND)
     expect(await band.find({ key: 'coach-refine' })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /prompt-coach/ })).toBeUndefined()
     await band.unmount()
 
     await type(DRAFT)
     band = await $.ui.mount(BAND)
     expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined() // 다른 mod 의 띠를 가리지 않는다
+    // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
+    expect(await band.find({ type: 'Text', text: /^── prompt-coach ─{104}$/ })).toBeDefined()
     expect(await band.find({ key: 'coach-refine' })).toBeDefined()
     await band.press({ key: 'coach-refine' })
     expect(fills).toEqual([REFINED])
