@@ -81,6 +81,8 @@ describe('next-steps', () => {
     expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined() // 다른 mod 의 띠를 가리지 않는다
     expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /0 닫기/ })).toBeDefined()
+    // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
+    expect(await band.find({ type: 'Text', text: /^── next-steps ─{106}$/ })).toBeDefined()
     await band.unmount()
 
     // 빈 입력창의 2 → 두 번째 제안이 초안으로. 보내지는 않는다
@@ -92,6 +94,7 @@ describe('next-steps', () => {
     expect((await key('0')).text).toBe('')
     band = await $.ui.mount(BAND)
     expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /next-steps/ })).toBeUndefined()
     await band.unmount()
     expect((await key('1')).text).toBe('1') // 닫은 뒤의 숫자는 그냥 글자
 

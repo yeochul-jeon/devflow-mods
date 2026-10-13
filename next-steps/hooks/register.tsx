@@ -86,8 +86,8 @@ export const register: Register = on => {
 
     const { Box, Text } = $.ui.resolve(e)
     const close = <Text color="cyan" bold>{'0 '}</Text>
-    // 줄이 모자라면 한 줄에 모은다
-    const oneRow = e.props.maxRows < s.items.length + 2
+    // 줄이 모자라면 한 줄에 모은다. 가로줄 한 줄을 더 센다
+    const oneRow = e.props.maxRows < s.items.length + 3
     const mine = oneRow ? (
       <Text wrap="truncate-end">
         <Text dimColor>{'다음: '}</Text>
@@ -113,11 +113,19 @@ export const register: Register = on => {
     )
     return (
       <Box flexDirection="column">
+        {/* 바로 위 대화 기록과 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 두 줄도 안 되면 뺀다 */}
+        {e.props.maxRows >= 2 && <Text dimColor wrap="truncate-end">{rule(e.props.bodyColumns)}</Text>}
         <Box paddingX={1}>{mine}</Box>
         {rest}
       </Box>
     )
   })
+}
+
+/** 띠 폭을 채우는 이름 붙은 가로줄. */
+function rule(width: number): string {
+  const head = '── next-steps '
+  return head + '─'.repeat(Math.max(0, width - head.length))
 }
 
 async function suggest($: EngineInterface, turnId: string, answer: string): Promise<void> {
