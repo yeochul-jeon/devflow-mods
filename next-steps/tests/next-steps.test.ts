@@ -142,7 +142,8 @@ describe('next-steps', () => {
 
     let band = await $.ui.mount(BAND)
     // 번호까지 한 Button 이라 마우스 반전이 줄 전체에 걸린다. 반전은 화면에서 본다
-    expect((await band.find({ key: 'step-2' }))?.text).toBe('2 PR 초안을 만들어 줘')
+    // 끝의 공백 한 칸: 반전이 오른쪽 끝에서 한 칸 모자라 마지막 넓은 글자가 반만 덮이던 것을 그 칸이 받는다
+    expect((await band.find({ key: 'step-2' }))?.text).toBe('2 PR 초안을 만들어 줘 ')
     await band.press({ key: 'step-2' })
     expect(fills).toEqual([{ text: 'PR 초안을 만들어 줘', mode: 'insert' }])
     expect(submits).toEqual([])

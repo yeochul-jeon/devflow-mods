@@ -86,12 +86,13 @@ export const register: Register = on => {
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const close = <Text color="cyan" bold>{'0 '}</Text>
-    // 제안 하나: 번호와 글을 한 Button 으로. 마우스를 올리면 엔진이 Button 전체를 반전한다
+    // 제안 하나: 번호와 글을 한 Button 으로. 마우스를 올리면 엔진이 Button 전체를 반전한다.
+    // 반전이 오른쪽 끝에서 한 칸 모자라 마지막 넓은 글자가 반만 덮이므로 끝에 공백 한 칸을 둔다
     const item = (t: string, i: number, shrink: boolean) => (
       <Box flexShrink={shrink ? 1 : 0}>
         <Button key={`step-${i + 1}`} plain onPress={() => void pick($, t)}>
           <Text color="cyan" bold>{`${i + 1} `}</Text>
-          <Text wrap="truncate-end">{t}</Text>
+          <Text wrap="truncate-end">{`${t} `}</Text>
         </Button>
       </Box>
     )
@@ -102,7 +103,7 @@ export const register: Register = on => {
         {/* 줄지 않게 두어야 폭이 넘칠 때 라벨·구분 기호가 0칸으로 줄지 않고 오른쪽 끝에서 잘린다 */}
         <Box key="one-row" flexShrink={0}>
           <Text dimColor>{'다음: '}</Text>
-          {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{'  ·  '}</Text>])}
+          {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{' ·  '}</Text>])}
           {close}
           <Text dimColor>닫기</Text>
         </Box>

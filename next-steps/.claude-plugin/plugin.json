@@ -1,6 +1,6 @@
 {
   "name": "next-steps",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "답변이 끝나면 다음에 보낼 만한 요청 2~3개를 입력창 위에: 클릭하거나 빈 입력창에서 숫자를 누르면 초안으로 (Haiku)",
   "author": {
     "name": "yeochul-jeon",
