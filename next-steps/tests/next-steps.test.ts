@@ -122,6 +122,39 @@ describe('next-steps', () => {
     expect(calls).toBe(3)
   })
 
+  test('제안 줄을 누르면 커서 자리에 끼워 넣고 보내지 않는다. 줄은 마우스를 올리면 음영, 한 줄 모드도 같다', async ($, on) => {
+    mock.store(on)
+    const fills: any[] = []
+    const submits: string[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('agent.list', () => ({ value: [] }))
+    on('session.messages', () => ({ value: [] }))
+    on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
+    on('turn.complete', () => ({ text: '' }))
+    on('prompt.fill', ($, e: any) => { fills.push({ text: e.text, mode: e.mode }); return { isFilled: true } })
+    on('prompt.submit', ($, e: any) => { submits.push(e.text); return { text: e.text } })
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await settle()
+
+    let band = await $.ui.mount(BAND)
+    // 음영(hover)은 find 의 props 에 실리지 않아 화면에서 본다. 여기서는 번호까지 한 줄로 묶였는지만
+    expect((await band.find({ key: 'row-2' }))?.text).toBe('2 PR 초안을 만들어 줘')
+    await band.press({ key: 'step-2' })
+    expect(fills).toEqual([{ text: 'PR 초안을 만들어 줘', mode: 'insert' }])
+    expect(submits).toEqual([])
+    await band.unmount()
+
+    // 줄이 모자라 한 줄에 모아도 누를 수 있다
+    band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 3 } })
+    await band.press({ key: 'step-1' })
+    expect(fills.at(-1)).toEqual({ text: '테스트를 다시 돌려 줘', mode: 'insert' })
+    await band.unmount()
+  })
+
   test('모델 호출이 실패하면 알리고, 제안은 띄우지 않는다', async ($, on) => {
     mock.store(on)
     const toasts: string[] = []

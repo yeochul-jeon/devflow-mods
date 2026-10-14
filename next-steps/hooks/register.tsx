@@ -1,5 +1,5 @@
 // 답이 끝나면 다음에 보낼 만한 요청 2~3개를 입력창 위에 띄운다.
-// 빈 입력창에서 1~3 을 누르면 그 제안이 초안으로 들어가고(저절로 보내지 않음), 0 은 닫는다.
+// 빈 입력창에서 1~3 을 누르면 그 제안이 초안으로 들어가고(저절로 보내지 않음), 0 은 닫는다. 줄을 클릭하면 커서 자리에 끼워 넣는다.
 // 아이디어: hamzafer/claude-code-mods 의 next-steps (MIT). 코드는 새로 썼다.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -84,30 +84,38 @@ export const register: Register = on => {
     const s = await read($, steps)
     if (e.props.hasSurvey || e.props.isWorking || !s || s.items.length === 0) return rest
 
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const close = <Text color="cyan" bold>{'0 '}</Text>
+    // 제안 하나: 번호와 누를 수 있는 글. 마우스를 올리면 그 줄에 음영
+    const item = (t: string, i: number, shrink: boolean) => (
+      <Box key={`row-${i + 1}`} hover={{ backgroundColor: 'subtle' }} flexShrink={shrink ? 1 : 0}>
+        <Text color="cyan" bold>{`${i + 1} `}</Text>
+        <Button key={`step-${i + 1}`} plain onPress={() => void pick($, t)}>
+          <Text wrap="truncate-end">{t}</Text>
+        </Button>
+      </Box>
+    )
     // 줄이 모자라면 한 줄에 모은다. 가로줄 한 줄을 더 센다
     const oneRow = e.props.maxRows < s.items.length + 3
     const mine = oneRow ? (
-      <Text wrap="truncate-end">
+      <Box height={1} overflow="hidden">
         <Text dimColor>{'다음: '}</Text>
-        {s.items.flatMap((t, i) => [<Text color="cyan" bold>{`${i + 1} `}</Text>, <Text>{t}</Text>, <Text dimColor>{'  ·  '}</Text>])}
+        {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{'  ·  '}</Text>])}
         {close}
         <Text dimColor>닫기</Text>
-      </Text>
+      </Box>
     ) : (
       <Box flexDirection="column">
         {s.items.map((t, i) => (
-          <Text wrap="truncate-end">
+          <Box height={1} overflow="hidden">
             <Text dimColor>{i === 0 ? '다음: ' : '      '}</Text>
-            <Text color="cyan" bold>{`${i + 1} `}</Text>
-            <Text>{t}</Text>
-          </Text>
+            {item(t, i, true)}
+          </Box>
         ))}
         <Text>
           <Text dimColor>{'      '}</Text>
           {close}
-          <Text dimColor>닫기 · 빈 입력창에서 숫자</Text>
+          <Text dimColor>닫기 · 클릭이나 빈 입력창에서 숫자</Text>
         </Text>
       </Box>
     )
@@ -126,6 +134,11 @@ export const register: Register = on => {
 function rule(width: number): string {
   const head = '── next-steps '
   return head + '─'.repeat(Math.max(0, width - head.length))
+}
+
+/** 누른 제안을 커서 자리에 끼워 넣는다. 보내지는 않는다. */
+async function pick($: EngineInterface, text: string): Promise<void> {
+  await $.prompt.fill({ text, mode: 'insert' })
 }
 
 async function suggest($: EngineInterface, turnId: string, answer: string): Promise<void> {
