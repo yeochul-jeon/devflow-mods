@@ -150,6 +150,10 @@ describe('next-steps', () => {
 
     // 줄이 모자라 한 줄에 모아도 누를 수 있다
     band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 3 } })
+    // 폭이 넘치면 줄어드는 건 라벨·구분 기호뿐이라 사라졌다. 한 줄 전체를 줄지 않는 Box 에 담아 오른쪽 끝에서만 잘리게 한다
+    const row = await band.find({ key: 'one-row' })
+    expect(row?.props.flexShrink).toBe(0)
+    expect(row?.text).toMatch(/^다음: 1 테스트를 다시 돌려 줘 {2}· {2}2 PR 초안을 만들어 줘 {2}· {2}0 닫기$/)
     await band.press({ key: 'step-1' })
     expect(fills.at(-1)).toEqual({ text: '테스트를 다시 돌려 줘', mode: 'insert' })
     await band.unmount()

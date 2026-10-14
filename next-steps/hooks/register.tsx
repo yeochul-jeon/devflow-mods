@@ -99,10 +99,13 @@ export const register: Register = on => {
     const oneRow = e.props.maxRows < s.items.length + 3
     const mine = oneRow ? (
       <Box height={1} overflow="hidden">
-        <Text dimColor>{'다음: '}</Text>
-        {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{'  ·  '}</Text>])}
-        {close}
-        <Text dimColor>닫기</Text>
+        {/* 줄지 않게 두어야 폭이 넘칠 때 라벨·구분 기호가 0칸으로 줄지 않고 오른쪽 끝에서 잘린다 */}
+        <Box key="one-row" flexShrink={0}>
+          <Text dimColor>{'다음: '}</Text>
+          {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{'  ·  '}</Text>])}
+          {close}
+          <Text dimColor>닫기</Text>
+        </Box>
       </Box>
     ) : (
       <Box flexDirection="column">
