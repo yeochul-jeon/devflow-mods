@@ -86,11 +86,11 @@ export const register: Register = on => {
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const close = <Text color="cyan" bold>{'0 '}</Text>
-    // 제안 하나: 번호와 누를 수 있는 글. 마우스를 올리면 그 줄에 음영
+    // 제안 하나: 번호와 글을 한 Button 으로. 마우스를 올리면 엔진이 Button 전체를 반전한다
     const item = (t: string, i: number, shrink: boolean) => (
-      <Box key={`row-${i + 1}`} hover={{ backgroundColor: 'subtle' }} flexShrink={shrink ? 1 : 0}>
-        <Text color="cyan" bold>{`${i + 1} `}</Text>
+      <Box flexShrink={shrink ? 1 : 0}>
         <Button key={`step-${i + 1}`} plain onPress={() => void pick($, t)}>
+          <Text color="cyan" bold>{`${i + 1} `}</Text>
           <Text wrap="truncate-end">{t}</Text>
         </Button>
       </Box>

@@ -141,8 +141,8 @@ describe('next-steps', () => {
     await settle()
 
     let band = await $.ui.mount(BAND)
-    // 음영(hover)은 find 의 props 에 실리지 않아 화면에서 본다. 여기서는 번호까지 한 줄로 묶였는지만
-    expect((await band.find({ key: 'row-2' }))?.text).toBe('2 PR 초안을 만들어 줘')
+    // 번호까지 한 Button 이라 마우스 반전이 줄 전체에 걸린다. 반전은 화면에서 본다
+    expect((await band.find({ key: 'step-2' }))?.text).toBe('2 PR 초안을 만들어 줘')
     await band.press({ key: 'step-2' })
     expect(fills).toEqual([{ text: 'PR 초안을 만들어 줘', mode: 'insert' }])
     expect(submits).toEqual([])
