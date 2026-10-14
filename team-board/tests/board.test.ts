@@ -25,7 +25,7 @@ import {
   visible,
 } from '../hooks/board'
 import { bar, contextTone, paletteOf } from '../hooks/palette'
-import { cells, clip, flowArt, parseExplain, parseSte } from '../hooks/diagram'
+import { cells, clip, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
 import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
 
@@ -70,6 +70,11 @@ describe('diagram (ASCII 그림)', () => {
     expect(s).toEqual({ items: [{ title: 't', decide: '', options: [], suggest: '', ste: ['첫 문장', '둘째 문장'] }] })
     expect(parseSte('{"items":[{"title":"t"}]}')).toBeNull()
     expect(parseSte('그냥 글')).toBeNull()
+  })
+
+  test('ASD-STE100 규격: 선택지 첫 문장의 조사는 이름에 맞춘다 (0.15.0 ai-test V3 의 "5분 를")', async () => {
+    expect(STE_JSON_SPEC).not.toContain('<label> 를')
+    expect(STE_JSON_SPEC).toContain('"5분을 고르면')
   })
 
   test('ASD-STE100 JSON: 정할 것·선택지·제안으로 나눈 형식. 이름 없는 선택지와 빈 문장은 버린다', async () => {
@@ -202,6 +207,11 @@ describe('board (순수 함수)', () => {
     expect(looksLikeQuestion('어떤 DB 를 쓰는지 알려 주세요.')).toBe(true)
     expect(looksLikeQuestion('가능하면 어떤 DB 를 쓰는지 알려 주세요.')).toBe(true)
     expect(questionSummary('어느 쪽으로 할까요?\n1. A\n2. B\n궁금한 점이 있으면 언제든 알려 주세요.')).toBe('어느 쪽으로 할까요?')
+  })
+
+  test('"필요하면 (세 낱말까지) 알려 주세요" 도 맺음말이다 (0.15.0 ai-test V8)', async () => {
+    expect(looksLikeQuestion('설정 변경이나 배포 체크리스트 작성이 필요하면 해당 저장소 경로를 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('필요하면 해당 저장소 경로를 알려 주세요.')).toBe(false)
   })
 
   test('조건문은 문제·필요·궁금함만 뺀다. "되면/괜찮으시면 알려 주세요" 는 허락을 묻는 결정 요청이다', async () => {
@@ -812,8 +822,10 @@ describe('팀 상황판', () => {
     // 0.14 까지의 평평한 목록 형식 (재생성 첫 번째 답으로 쓴다)
     const STE_OLD = JSON.stringify({ items: [{ title: 'PR11 작업 시점', ste: ['PR11 의 작업 시점을 정하세요.', '예전 형식 문장입니다.'] }] })
     let steCalls = 0
+    let askedMax = 0
     on('model.complete', ($, e: any) => {
       asked = e.prompt
+      askedMax = e.maxTokens
       // ASD-STE100 요청은 따로 센다 (12살 쪽 순번을 밀지 않게)
       if (e.prompt.includes('"ste"')) {
         steCalls += 1
@@ -994,6 +1006,8 @@ describe('팀 상황판', () => {
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined() // 만드는 중에는 재생성을 숨긴다
     await clock.advance(3_000)
     expect(steCalls).toBe(1)
+    // 생각(thinking) 토큰도 한도 안에서 쓰므로 6항목 답이 잘리지 않게 넉넉히 (0.15.0 ai-test V9)
+    expect(askedMax).toBe(8000)
     expect(asked).toContain('ASD-STE100')
     expect(asked).toContain('"ste"')
     expect(await pane.find({ type: 'Text', text: /^이번 주를 고르면 PR11 을 지금 갱신합니다\.$/ })).toBeDefined()

@@ -166,7 +166,8 @@ async function runExplain($: EngineInterface): Promise<void> {
   try {
     await put('loading', '')
     await update($, collapsed, list => list.filter(x => x !== id))
-    const r = await $.model.complete({ model: 'haiku', prompt: explainPrompt(target, kind), maxTokens: 3000, timeoutMs: 120_000 })
+    // 생각(thinking) 토큰도 이 한도 안에서 쓴다. 3000 이면 6항목 STE 답이 잘려 JSON 글자로 보였다 (0.15.0)
+    const r = await $.model.complete({ model: 'haiku', prompt: explainPrompt(target, kind), maxTokens: 8000, timeoutMs: 120_000 })
     if (r.isAnswered) await put('done', stripMarkdown(r.text).trim(), r.text)
     else await put('error', `설명을 만들지 못했어요 (${r.reason})`)
   } catch (err) {
