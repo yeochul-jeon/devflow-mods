@@ -1,5 +1,5 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
-import type { Beat, Decision, Event, ExplainKind, Task, WorkPlan } from '../types'
+import type { Beat, Decision, Event, ExplainKind, RecentLine, Task, WorkPlan } from '../types'
 import { EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 
@@ -11,7 +11,7 @@ export const MAX_DECISIONS = 20
 
 export function emptyBeat(id: string, name: string, cwd: string): Beat {
   return {
-    id, name, cwd, state: 'idle', step: '', prompt: '', last: '', question: '',
+    id, name, cwd, state: 'idle', step: '', prompt: '', last: '', question: '', recent: [],
     contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], fail: null, cacheAt: null, updatedAt: 0,
   }
 }
@@ -305,15 +305,48 @@ export const EVENT_MARK: Record<Event['kind'], string> = {
   clear: '⟲ 대화 지움',
 }
 
+const NOT_TYPED = /^(?:<|\[Request interrupted|The \S+ plugin sent a message:)/
+
+/**
+ * 결정 요청 직전 대화: `$.session.messages()` 에서 글이 있는 행만, Claude 의 연속 행은 합쳐, 사용자 글 기준 마지막 `turns` 턴.
+ * 메시지는 내용 블록마다 한 행이고 도구 결과·thinking·tool_use 행은 글이 비어 있다.
+ * `dropLast`: turn.complete 시점에는 이번 답(질문 원문)이 이미 마지막 행이라 뺀다.
+ * 사람이 쓰지 않은 사용자 행(알림·명령 기록 '<…', 중단 표시, 플러그인이 보낸 요청)은 뺀다. 이 mod 의 HTML 요청은 맥락을 다시 담고 있다.
+ * 사용자 행은 합치지 않는다: 합쳐서 자르면 뒤에 온 답이 잘린다.
+ */
+export function recentTurns(
+  messages: readonly { role: 'user' | 'assistant'; text: string }[],
+  dropLast: boolean,
+  turns = 3,
+  chars = 400,
+): RecentLine[] {
+  const rows = messages
+    .map(m => ({ role: m.role, text: m.text.trim() }))
+    .filter(m => m.text && !(m.role === 'user' && NOT_TYPED.test(m.text)))
+  // 질문 원문 행만 뺀다. 같은 턴의 앞선 글은 남긴다
+  if (dropLast && rows.at(-1)?.role === 'assistant') rows.pop()
+  const lines: RecentLine[] = []
+  for (const m of rows) {
+    const prev = lines.at(-1)
+    if (m.role === 'assistant' && prev?.role === 'assistant') prev.text += ' ' + m.text
+    else lines.push({ ...m })
+  }
+  let start = lines.length
+  for (let seen = 0; start > 0 && seen < turns; ) if (lines[--start]!.role === 'user') seen++
+  return lines.slice(start).map(l => ({ role: l.role, text: oneLine(l.text, chars) }))
+}
+
 /** 결정을 설명할 때 넘기는 그 세션의 맥락: 이름, 받은 요청, 진행, 지난 결정 */
 function contextLines(b: Beat): string[] {
   const { done, total, current } = progress(b.tasks)
   const history = b.decisions.slice(-6).map(d => `- ${d.question} → ${d.answer}`).join('\n')
+  const recent = (b.recent ?? []).map(r => `${r.role === 'user' ? '사용자' : 'Claude'}: ${r.text}`).join('\n')
   return [
     `"${b.name}" 작업 세션이 사용자에게 아래 결정을 요청하고 있어.`,
     `이 세션이 받은 요청: ${b.prompt || '(알 수 없음)'}`,
     total ? `작업 진행: ${done}/${total}${current ? `, 지금 "${current.subject}"` : ''}` : '',
     history ? `지금까지 이 세션에서 내려진 결정:\n${history}` : '',
+    recent ? `질문 직전 대화:\n${recent}` : '',
   ]
 }
 

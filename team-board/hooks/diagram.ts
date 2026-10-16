@@ -88,7 +88,7 @@ export function parseExplain(raw: string): ExplainData | null {
   } catch {
     return null
   }
-  const o = obj as { items?: unknown; first?: unknown }
+  const o = obj as { items?: unknown; first?: unknown; why?: unknown }
   if (!Array.isArray(o.items)) return null
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
   const items: ExplainItem[] = o.items.slice(0, 6).flatMap(it => {
@@ -104,13 +104,14 @@ export function parseExplain(raw: string): ExplainData | null {
       : []
     return str(r.title) ? [{ title: str(r.title), analogy: str(r.analogy), options, link: str(r.link), suggest: str(r.suggest) }] : []
   })
-  return items.length ? { items, first: str(o.first) } : null
+  return items.length ? { items, first: str(o.first), why: str(o.why) } : null
 }
 
 export const EXPLAIN_JSON_SPEC = [
   '반드시 아래 모양의 JSON 하나만 출력해. 앞뒤에 설명 문장, 코드블록 표시, 주석을 붙이지 마.',
-  '{"items":[{"title":"","analogy":"","options":[{"label":"","flow":["",""],"result":""}],"link":"","suggest":""}],"first":""}',
+  '{"why":"","items":[{"title":"","analogy":"","options":[{"label":"","flow":["",""],"result":""}],"link":"","suggest":""}],"first":""}',
   '규칙:',
+  '- why: 지금 이 결정이 없으면 무엇이 멈추는지 한 줄, 40자 이내. 질문 직전 대화와 작업 진행에서 찾는다.',
   '- items: 결정 항목마다 하나 (최대 6개).',
   '- title: 무엇을 정하는지 한 줄, 25자 이내.',
   '- analogy: 12살이 겪는 일상 비유 한두 문장.',
@@ -133,7 +134,7 @@ export function parseSte(raw: string): SteData | null {
   } catch {
     return null
   }
-  const o = obj as { items?: unknown }
+  const o = obj as { items?: unknown; why?: unknown }
   if (!Array.isArray(o.items)) return null
   const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
   const lines = (v: unknown, max: number) => (Array.isArray(v) ? v.map(str).filter(Boolean).slice(0, max) : [])
@@ -151,13 +152,14 @@ export function parseSte(raw: string): SteData | null {
     const item = { title: str(r.title), decide: str(r.decide), options, suggest: str(r.suggest), ste: lines(r.ste, 8) }
     return item.title && (item.decide || options.length || item.ste.length) ? [item] : []
   })
-  return items.length ? { items } : null
+  return items.length ? { items, why: str(o.why) } : null
 }
 
 export const STE_JSON_SPEC = [
   '반드시 아래 모양의 JSON 하나만 출력해. 앞뒤에 설명 문장, 코드블록 표시, 주석을 붙이지 마.',
-  '{"items":[{"title":"","decide":"","options":[{"label":"","ste":[""]}],"suggest":""}]}',
+  '{"why":"","items":[{"title":"","decide":"","options":[{"label":"","ste":[""]}],"suggest":""}]}',
   '규칙:',
+  '- why: 지금 이 결정이 없으면 무엇이 멈추는지 쓴 문장 하나. 질문 직전 대화와 작업 진행에서 찾는다.',
   '- items: 결정 항목마다 하나 (최대 6개).',
   '- title: 무엇을 정하는지 한 줄, 25자 이내.',
   '- decide: 정할 것을 지시하는 문장 하나.',

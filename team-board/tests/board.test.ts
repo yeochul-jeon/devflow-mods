@@ -19,6 +19,7 @@ import {
   normalize,
   progress,
   questionSummary,
+  recentTurns,
   repoKey,
   routeLine,
   stripMarkdown,
@@ -26,7 +27,7 @@ import {
   visible,
 } from '../hooks/board'
 import { bar, contextTone, paletteOf } from '../hooks/palette'
-import { cells, clip, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
+import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
 import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
 
@@ -65,10 +66,21 @@ describe('diagram (ASCII 그림)', () => {
     expect(parseExplain('{"items": "x"}')).toBeNull()
   })
 
+  test('"왜 지금" 한 줄: 두 형식 모두 why 를 읽고, 없거나 글이 아니면 "" (옛 답 호환)', async () => {
+    const item = { title: 't', decide: '정하세요.', analogy: '', options: [{ label: 'A', flow: ['x'], result: '', ste: ['A를 고르면 x.'] }] }
+    expect(parseExplain(JSON.stringify({ why: ' 배포 설정이 멈춤 ', items: [item], first: '' }))?.why).toBe('배포 설정이 멈춤')
+    expect(parseExplain(JSON.stringify({ items: [item], first: '' }))?.why).toBe('')
+    expect(parseExplain(JSON.stringify({ why: 3, items: [item], first: '' }))?.why).toBe('')
+    expect(parseSte(JSON.stringify({ why: '배포 설정이 멈춥니다.', items: [item] }))?.why).toBe('배포 설정이 멈춥니다.')
+    expect(parseSte(JSON.stringify({ items: [item] }))?.why).toBe('')
+    expect(EXPLAIN_JSON_SPEC).toContain('"why"')
+    expect(STE_JSON_SPEC).toContain('"why"')
+  })
+
   test('ASD-STE100 JSON: 빈 문장은 빼고, 문장 없는 항목은 버린다', async () => {
     // 예전 형식 (0.12~0.14): 평평한 문장 목록
     const s = parseSte('답:\n{"items":[{"title":"t","ste":["첫 문장", "", 3, "둘째 문장"]},{"title":"빈 항목","ste":[]}]}')
-    expect(s).toEqual({ items: [{ title: 't', decide: '', options: [], suggest: '', ste: ['첫 문장', '둘째 문장'] }] })
+    expect(s).toEqual({ items: [{ title: 't', decide: '', options: [], suggest: '', ste: ['첫 문장', '둘째 문장'] }], why: '' })
     expect(parseSte('{"items":[{"title":"t"}]}')).toBeNull()
     expect(parseSte('그냥 글')).toBeNull()
   })
@@ -92,6 +104,7 @@ describe('diagram (ASCII 그림)', () => {
         options: [{ label: '이번 주', ste: ['이번 주를 고르면 지금 갱신합니다.'] }],
         suggest: '세션은 이번 주를 제안합니다.', ste: [],
       }],
+      why: '',
     })
   })
 })
@@ -245,6 +258,44 @@ describe('board (순수 함수)', () => {
     expect(looksLikeQuestion('무엇을 도와드릴까요? 편하게 말씀해 주세요.')).toBe(false)
     expect(looksLikeQuestion('검색은 https://example.com/search?q=team 으로 했습니다.')).toBe(false)
     expect(looksLikeQuestion('The flag is `a ? b : c` here.')).toBe(false)
+  })
+
+  test('직전 대화: 글 있는 행만, 같은 사람 행은 합치고, 질문 원문은 빼고, 마지막 3턴, 글마다 400자 (2026-10-16 messages() 시험 모양)', async () => {
+    const u = (text: string) => ({ role: 'user' as const, text })
+    const a = (text: string) => ({ role: 'assistant' as const, text })
+    // 내용 블록마다 한 행: thinking·tool_use·도구 결과 행은 글이 비어 있다
+    const rows = [
+      u('첫 요청'), a(''), a('첫 답'),
+      u('a.txt 에 hello 를 써'), a(''), u(''), a('a.txt 를 썼습니다.'),
+      u('<task-notification>done</task-notification>'),
+      u('b.txt 이름을 물어봐'), a('확인할게요.'), a(''), u(''), a('b1 과 b2 중 무엇으로 할까요?'),
+    ]
+    expect(recentTurns(rows, true, 2)).toEqual([u('a.txt 에 hello 를 써'), a('a.txt 를 썼습니다.'), u('b.txt 이름을 물어봐'), a('확인할게요.')])
+    // AskUserQuestion 시점: 질문은 도구 입력에 있으므로 마지막 글을 남긴다
+    expect(recentTurns(rows, false, 1)).toEqual([u('b.txt 이름을 물어봐'), a('확인할게요. b1 과 b2 중 무엇으로 할까요?')])
+    expect(recentTurns(rows, true).length).toBe(6)
+    expect(recentTurns([u('x'.repeat(500))], true)[0]!.text).toHaveLength(400)
+    expect(recentTurns([], true)).toEqual([])
+    expect(recentTurns([a('질문만')], true)).toEqual([])
+  })
+
+  test('직전 대화: 플러그인이 보낸 요청·중단 표시는 빼고, 사용자 행은 합치지 않아 답이 잘리지 않는다 (0.17.0 실세션 G5 뒤)', async () => {
+    const u = (text: string) => ({ role: 'user' as const, text })
+    const a = (text: string) => ({ role: 'assistant' as const, text })
+    const rows = [
+      u('ttl 기본값을 물어봐'), a('무엇으로 할까요?'),
+      u('The team-board plugin sent a message: 팀 상황판에서 아래 결정의 HTML 설명을 요청했어. ' + '맥락 '.repeat(200)),
+      u('[Request interrupted by user for tool use]'),
+      u('5분으로 할게. cache.py 의 ttl 기본값을 300 으로 바꿔.'), a('300 으로 바꿨습니다.'),
+      u('테스트를 물어봐'), a('어느 프레임워크로 할까요?'),
+    ]
+    expect(recentTurns(rows, true)).toEqual([
+      u('ttl 기본값을 물어봐'), a('무엇으로 할까요?'),
+      u('5분으로 할게. cache.py 의 ttl 기본값을 300 으로 바꿔.'), a('300 으로 바꿨습니다.'),
+      u('테스트를 물어봐'),
+    ])
+    // 글 있는 assistant 행 없이 사용자 행이 이어지면 따로 둔다 (각각 한 턴)
+    expect(recentTurns([u('하나'), u('둘'), a('질문')], true, 1)).toEqual([u('둘')])
   })
 
   test('마크다운 기호를 걷어낸다', async () => {
@@ -631,6 +682,7 @@ describe('프롬프트 캐시', () => {
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
@@ -727,6 +779,7 @@ describe('팀 창 배지', () => {
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
@@ -793,6 +846,7 @@ describe('팀 상황판', () => {
         id: 'peer', name: 'sub-2', state: 'asking', question: '5. PR38을 지금 시작할까요?',
         tasks: [{ id: '1', subject: 'PR39 로그', status: 'completed' }, { id: '2', subject: 'PR38 래퍼', status: 'in_progress' }],
         decisions: [{ at: NOW - 60_000, question: 'push 할까요?', answer: '예, release 만' }],
+        recent: [{ role: 'user', text: 'PR39 로그 정리 끝나면 PR38 도 봐 줘' }, { role: 'assistant', text: 'PR39 로그를 정리했습니다.' }],
       }),
     ))
     // 같은 폴더·이름의 닫힌 탭 잔재: 숨기고, 살아 있는 세션 이름에 ·2 를 붙이지 않는다
@@ -810,6 +864,9 @@ describe('팀 상황판', () => {
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     let sid = 'me'
     on('session.id', () => ({ value: sid }))
+    // 결정 대기로 바뀔 때 읽는 직전 대화. 마지막 행은 이번 답(질문 원문)이다
+    let talk: { role: 'user' | 'assistant'; text: string; toolUses?: [] }[] = []
+    on('session.messages', () => ({ value: talk.map(m => ({ toolUses: [], ...m })) }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
@@ -859,6 +916,7 @@ describe('팀 상황판', () => {
     on('audio.speak', ($, e: any) => { spoken.push(e.text); return { value: { via: 'system' as const } } })
     let calls = 0
     const JSON_ANSWER = JSON.stringify({
+      why: 'PR38 착수가 이 답을 기다림',
       items: [{
         title: 'PR11 을 언제 할지', analogy: '숙제를 오늘 할지 내일 할지 정하기',
         options: [
@@ -870,6 +928,7 @@ describe('팀 상황판', () => {
       first: 'PR38 과 겹치는지 확인',
     })
     const STE_ANSWER = JSON.stringify({
+      why: 'PR11 갱신이 이 결정을 기다립니다.',
       items: [{
         title: 'PR11 작업 시점', decide: 'PR11 의 작업 시점을 정하세요.',
         options: [
@@ -921,11 +980,15 @@ describe('팀 상황판', () => {
 
     // 작업 도중 결정 2: 답변 끝의 질문에 사용자가 다음 프롬프트로 답함
     await clock.advance(2_000)
+    talk = [{ role: 'user', text: 'PR38 준비해 줘' }, { role: 'assistant', text: '' }, { role: 'assistant', text: '1. push 여부\n2. PR38 착수 시점을 정해 주십시오.' }]
     await $.turn.complete({ reason: 'answer', answer: '1. push 여부\n2. PR38 착수 시점을 정해 주십시오.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
     expect(mine().state).toBe('asking')
+    // 직전 대화는 질문 원문을 빼고 싣는다
+    expect(mine().recent).toEqual([{ role: 'user', text: 'PR38 준비해 줘' }])
     await clock.advance(2_000)
     await $.prompt.submit({ text: 'PR38은 10장 수정 뒤에 시작해', origin: { kind: 'composer' } } as any)
     expect(mine().decisions.at(-1)).toMatchObject({ question: '2. PR38 착수 시점을 정해 주십시오.', answer: 'PR38은 10장 수정 뒤에 시작해' })
+    expect(mine().recent).toEqual([])
     expect(mine().timeline.map((t: any) => t.kind)).toEqual(['ask', 'decide', 'ask', 'decide', 'prompt'])
 
     // 바로 답했으니 소리 없음. 결정을 20초 넘게 기다리면 한 번만 알린다.
@@ -956,7 +1019,8 @@ describe('팀 상황판', () => {
     await $.prompt.submit({ text: '다른 걸 먼저 물어볼게', origin: { kind: 'composer' } } as any)
     expect(mine().decisions.length).toBe(decided + 1)
     await $.turn.complete({ reason: 'aborted', answer: '', durationMs: 1, isAborted: true, turnId: 't-undo' } as any)
-    expect(mine()).toMatchObject({ state: 'asking', question: '테스트 범위는 어느 쪽으로 할까요?' })
+    // 결정 대기로 돌아가면 직전 대화도 돌아온다
+    expect(mine()).toMatchObject({ state: 'asking', question: '테스트 범위는 어느 쪽으로 할까요?', recent: [{ role: 'user', text: 'PR38 준비해 줘' }] })
     expect(mine().decisions.length).toBe(decided)
     expect(mine().timeline.filter((t: any) => t.kind === 'decide' && t.text.includes('다른 걸 먼저'))).toEqual([])
     expect(mine().timeline.at(-1)).toMatchObject({ kind: 'abort' })
@@ -1026,6 +1090,7 @@ describe('팀 상황판', () => {
     await pane.press({ key: 'tab-kid-peer' })
     await clock.advance(3_000)
     expect(asked).toContain('PR38을 지금 시작할까요?')
+    expect(asked).toContain('질문 직전 대화:\n사용자: PR39 로그 정리 끝나면 PR38 도 봐 줘\nClaude: PR39 로그를 정리했습니다.')
     expect(asked).toContain('push 할까요? → 예, release 만')
     expect(await pane.find({ type: 'Text', text: /^1\. PR38 착수$/ })).toBeDefined()
     await pane.unmount()
@@ -1046,6 +1111,8 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /▸ 다음 주/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /앞서 release 만 push 하기로 함/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /PR38 과 겹치는지 확인/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ 왜 지금 $/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^PR38 착수가 이 답을 기다림$/ })).toBeDefined()
     // 고른 탭은 배지처럼 색 바탕, 안 고른 탭은 색 글자. 만든 종류에만 재생성(🔄)
     const night = paletteOf('night')
     expect((await pane.find({ type: 'Text', text: /^ 12살 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.ok, color: night.onBadge })
@@ -1078,6 +1145,7 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /^ {3}▸ 이번 주$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^ {3}▸ 다음 주$/ })).toBeDefined()
     expect((await pane.find({ type: 'Text', text: /^세션은 이번 주를 제안합니다\.$/ }))?.props).toMatchObject({ color: night.ask })
+    expect(await pane.find({ type: 'Text', text: /^PR11 갱신이 이 결정을 기다립니다\.$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /PR11 바로 갱신/ })).toBeUndefined()
     expect((await pane.find({ type: 'Text', text: /^ ASD-STE100 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.work })
     expect(await pane.find({ type: 'Text', text: /^\[ 12살 \]$/ })).toBeDefined()
@@ -1285,6 +1353,7 @@ describe('work-plan 연동', () => {
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
     on('fs.list', () => ({ value: [] }))
@@ -1361,9 +1430,10 @@ describe('깜빡임', () => {
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
-    on('fs.list', () => ({ value: [...files.keys()].map(p => ({ kind: 'file', name: p.split('/').pop(), mtimeMs: NOW })) }))
+    on('fs.list', () => ({ value: [...files.keys()].map(p => ({ kind: 'file' as const, name: p.split('/').pop()!, mtimeMs: NOW, size: 0, isLink: false })) }))
     on('fs.read', ($, e: any) => {
       const text = files.get(e.path) ?? ''
       if (!armed) return { value: text }
@@ -1393,7 +1463,7 @@ describe('깜빡임', () => {
     // 실제 엔진은 clock.every 콜백을 겹쳐 부르므로 틱끼리도 같다 (100ms 주기·450ms 본문에서 동시 5개, 2026-10-16 -p 시험)
     armed = true
     const slow = clock.advance(3_000)
-    for (let i = 0; i < 100 && !hold; i++) await new Promise(r => setTimeout(r, 1))
+    for (let i = 0; i < 100 && !hold; i++) await new Promise(r => (globalThis as any).setTimeout(r, 1))
     expect(hold).not.toBeNull()
     await setPlan(plan([['가', 'done'], ['나', 'doing'], ['다', 'todo']]))
     await clock.advance(1_500)

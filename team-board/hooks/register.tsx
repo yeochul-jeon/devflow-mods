@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, SteExplain, WorkPlan } from '../types'
+import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, WorkPlan } from '../types'
 import {
   EVENT_MARK,
   ago,
@@ -34,6 +34,7 @@ import {
   pushCapped,
   questionSummary,
   questionText,
+  recentTurns,
   repoKey,
   dedupeNames,
   lastCustomTitle,
@@ -107,6 +108,8 @@ const self = {
   htmlKeep: '',
   /** 결정의 답으로 기록한 요청. 그 턴이 답도 도구 호출도 없이 중단되면 이것으로 되돌린다 */
   undo: null as { question: string; decisions: Decision[]; decide: Event } | null,
+  /** 마지막 결정 요청의 직전 대화. 질문을 되돌릴 때(htmlKeep, undo) 함께 되돌린다 */
+  lastRecent: [] as RecentLine[],
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -114,6 +117,8 @@ async function save($: EngineInterface, patch: Partial<Beat>, force = false): Pr
   const now = await $.clock.now()
   const stateChanged = patch.state !== undefined && patch.state !== self.beat.state
   if (stateChanged && patch.state === 'asking') self.askingSince = now
+  // 직전 대화는 결정을 기다리는 동안만 둔다
+  if (patch.question === '') patch = { ...patch, recent: [] }
   Object.assign(self.beat, patch)
   // 도구 호출이 몰릴 때는 1.5초에 한 번만 쓰고, 미룬 내용은 다음 틱에 쓴다.
   if (!force && !stateChanged && now - self.lastWrite < 1_500) {
@@ -503,7 +508,9 @@ export const register: Register = (on, options) => {
 
     if (e.tool === 'AskUserQuestion' && main) {
       const asked = askUserText(input)
-      await note($, 'ask', asked.split('\n')[0] ?? '', { state: 'asking', step: '질문 중', question: asked }, true)
+      // 질문은 도구 입력에만 있고, 앞선 안내 글은 직전 대화로 둔다
+      self.lastRecent = recentTurns(await $.session.messages(), false)
+      await note($, 'ask', asked.split('\n')[0] ?? '', { state: 'asking', step: '질문 중', question: asked, recent: self.lastRecent }, true)
       const r = await next(e)
       const answers = (r as { result?: { answers?: unknown } }).result?.answers
       const at = await $.clock.now()
@@ -556,7 +563,7 @@ export const register: Register = (on, options) => {
       const at = await $.clock.now()
       const kept = self.beat.timeline.filter(t => !(t.kind === 'decide' && t.at === undo.decide.at && t.text === undo.decide.text))
       const timeline = pushCapped(kept, event(at, 'abort', '중단됨'), MAX_TIMELINE)
-      await save($, { state: 'asking', step: '', contextPct, question: undo.question, decisions: undo.decisions, timeline }, true)
+      await save($, { state: 'asking', step: '', contextPct, question: undo.question, recent: self.lastRecent, decisions: undo.decisions, timeline }, true)
       await syncPlan($)
       return r
     }
@@ -564,7 +571,7 @@ export const register: Register = (on, options) => {
     if (self.htmlKeep) {
       const question = self.htmlKeep
       self.htmlKeep = ''
-      await save($, { state: 'asking', step: '', contextPct, question }, true)
+      await save($, { state: 'asking', step: '', contextPct, question, recent: self.lastRecent }, true)
       await syncPlan($)
       return r
     }
@@ -572,7 +579,8 @@ export const register: Register = (on, options) => {
       await note($, 'abort', '중단됨', { state: 'idle', step: '', contextPct, last: '중단됨' })
     } else if (looksLikeQuestion(answer)) {
       const q = questionText(answer)
-      await note($, 'ask', questionSummary(q), { state: 'asking', step: '', contextPct, last: oneLine(answer, 100), question: q })
+      self.lastRecent = recentTurns(await $.session.messages(), true)
+      await note($, 'ask', questionSummary(q), { state: 'asking', step: '', contextPct, last: oneLine(answer, 100), question: q, recent: self.lastRecent })
     } else {
       await note($, 'done', answer, { state: 'idle', step: '', contextPct, last: oneLine(answer, 100), question: '' })
     }
@@ -1096,9 +1104,18 @@ export const register: Register = (on, options) => {
           </Box>
         )
       }
+      // 지금 이 결정이 필요한 이유 한 줄. 0.17 전에 만든 설명(상태는 모듈을 다시 불러와도 남는다)에는 why 가 없다
+      const whyRow = (why: string | undefined) =>
+        why ? (
+          <Box flexDirection="row" marginBottom={1}>
+            <Box width={10} flexShrink={0}><Text color={pal.onBadge} backgroundColor={pal.ask} bold>{' 왜 지금 '}</Text></Box>
+            <Box flexGrow={1} flexShrink={1} paddingLeft={1}><Text color={pal.text} bold wrap="wrap">{why}</Text></Box>
+          </Box>
+        ) : null
       if (t.kind === 'ste' && steEx?.data) {
         return (
           <Box flexDirection="column" borderStyle="round" borderColor={t.hue} paddingX={1} marginTop={1}>
+            {whyRow(steEx.data.why)}
             {steEx.data.items.map((it, i) => (
               <Box flexDirection="column" marginTop={i ? 1 : 0}>
                 <Text color={pal.text} bold wrap="wrap">{`${i + 1}. ${it.title}`}</Text>
@@ -1139,6 +1156,7 @@ export const register: Register = (on, options) => {
       if (!d) return null
       return (
         <Box flexDirection="column" borderStyle="round" borderColor={t.hue} paddingX={1} marginTop={1}>
+          {whyRow(d.why)}
           {d.items.map((it, i) => (
             <Box marginTop={i ? 1 : 0}>{kid(it, i)}</Box>
           ))}
