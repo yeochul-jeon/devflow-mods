@@ -82,14 +82,16 @@ const IF_TELL = /(?:있으(?:시)?면|있(?:으실|을)\s*경우|생기(?:시)?�
 // '무엇을 도와드릴까요?' 같은 도움 제안 인사는 고를 것이 없다.
 const HELP_OFFER = /(?:무엇|뭘|어떤\s+\S+?)\s*(?:을|를)?\s*도와\s*드릴까요\s*\?/g
 const ENDS_ASKING = /\?\s*$/
+// '몇 개 만들까요? 답을 받을 때까지 기다리겠습니다.' 처럼 한국어 의문 어미 + ? 뒤에 문장이 이어진 줄. URL 쿼리와 영어 문장 중간의 ? 는 걸리지 않는다.
+const ASKS_MID = /(?:까요|나요|가요|니까|래요)\s*\?\s+\S/
 const HEADING = /^#{1,6}\s/
 
 const decides = (line: string) => DECIDE.test(line.replace(IF_TELL, ''))
 
-/** 한 줄이 결정을 묻는지: 결정을 묻는 낱말이 있거나 ? 로 끝난다 (마크다운 제목은 ? 로 끝나도 아님). 상황판도 이 줄을 강조한다. */
+/** 한 줄이 결정을 묻는지: 결정을 묻는 낱말이 있거나 ? 로 끝나거나 줄 중간에 한국어 의문 어미 + ? 가 있다 (마크다운 제목은 ? 로 끝나도 아님). 상황판도 이 줄을 강조한다. */
 export function isAskingLine(raw: string): boolean {
   const line = raw.replace(HELP_OFFER, '').trim()
-  return decides(line) || (ENDS_ASKING.test(line) && !HEADING.test(line))
+  return decides(line) || ((ENDS_ASKING.test(line) || ASKS_MID.test(line)) && !HEADING.test(line))
 }
 
 /** 답변 끝부분이 사용자에게 결정을 요청하는지: 끝 1500자의 줄마다 보되 코드 블록 안은 뺀다. */

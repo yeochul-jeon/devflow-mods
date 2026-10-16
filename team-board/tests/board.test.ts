@@ -238,6 +238,15 @@ describe('board (순수 함수)', () => {
     expect(looksLikeQuestion('진행해도 되면 알려 주세요.')).toBe(true)
   })
 
+  test('한국어 의문 어미 + ? 뒤에 문장이 이어져도 결정 요청이다 (T5 S4 준비 턴). URL·영어 중간의 ? 는 아니다', async () => {
+    expect(looksLikeQuestion('파일을 몇 개 만들까요? 답을 받을 때까지 기다리겠습니다.')).toBe(true)
+    expect(looksLikeQuestion('이대로 진행해도 되나요? 확인되면 바로 적용합니다.')).toBe(true)
+    expect(looksLikeQuestion('A안이 괜찮은가요? 아니면 B안으로 바꾸겠습니다.')).toBe(true)
+    expect(looksLikeQuestion('무엇을 도와드릴까요? 편하게 말씀해 주세요.')).toBe(false)
+    expect(looksLikeQuestion('검색은 https://example.com/search?q=team 으로 했습니다.')).toBe(false)
+    expect(looksLikeQuestion('The flag is `a ? b : c` here.')).toBe(false)
+  })
+
   test('마크다운 기호를 걷어낸다', async () => {
     expect(stripMarkdown('**1. 요약**\n```\n# 제목\n`code`')).toBe('1. 요약\n\n제목\ncode')
   })
