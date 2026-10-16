@@ -1,0 +1,181 @@
+import { describe, expect, mock, test } from 'claude-code/testing'
+
+import { contextFor, emptyPlan, MAX_STEPS, normalizeSteps, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
+
+const NOW = 1_800_000_000_000
+
+describe('plan (순수 함수)', () => {
+  test('입력을 단계 목록으로: 배열이 아니면 null, 공백 정리, 빈 제목 버림, 모르는 상태는 todo', async () => {
+    expect(normalizeSteps(undefined)).toBeNull()
+    expect(normalizeSteps('a')).toBeNull()
+    expect(normalizeSteps({ steps: [] })).toBeNull()
+    expect(normalizeSteps([])).toEqual([])
+    expect(
+      normalizeSteps([
+        { title: '  math.py 만들기 ', status: 'done' },
+        { title: '   ', status: 'doing' },
+        { status: 'doing' },
+        null,
+        { title: '테스트 쓰기', status: 'started' },
+        { title: '실행', status: 'blocked' },
+      ]),
+    ).toEqual([
+      { title: 'math.py 만들기', status: 'done' },
+      { title: '테스트 쓰기', status: 'todo' },
+      { title: '실행', status: 'blocked' },
+    ])
+  })
+
+  test('제목은 60자(코드 포인트)로 자르고, 단계는 30개까지', async () => {
+    const [step] = normalizeSteps([{ title: '가'.repeat(70) + '😀', status: 'todo' }])!
+    expect([...step!.title]).toHaveLength(60)
+    expect(normalizeSteps([{ title: 'x'.repeat(59) + '😀😀', status: 'todo' }])![0]!.title).toBe('x'.repeat(59) + '😀')
+    const many = Array.from({ length: 40 }, (_, i) => ({ title: `s${i}`, status: 'todo' }))
+    expect(normalizeSteps(many)).toHaveLength(MAX_STEPS)
+  })
+
+  test('새 보고는 목록을 바꾸고 낡음·턴 끝을 지운다, 턴 끝과 압축은 단계를 건드리지 않는다', async () => {
+    const steps = [{ title: 'a', status: 'doing' as const }]
+    const p0 = emptyPlan(NOW)
+    expect(p0).toEqual({ v: 1, steps: [], updatedAt: NOW, stale: false, ended: null })
+
+    const p1 = withSteps(withStale(withEnded(p0, 'answer', NOW)), steps, NOW + 1)
+    expect(p1).toEqual({ v: 1, steps, updatedAt: NOW + 1, stale: false, ended: null })
+
+    const p2 = withEnded(p1, 'aborted', NOW + 2)
+    expect(p2.ended).toEqual({ reason: 'aborted', at: NOW + 2 })
+    expect(p2.steps).toBe(steps)
+    expect(p2.updatedAt).toBe(NOW + 1)
+
+    const p3 = withStale(p1)
+    expect(p3.stale).toBe(true)
+    expect(p3.steps).toBe(steps)
+  })
+
+  test('첫 프롬프트 문맥: 시작이면 규칙만, 압축 뒤면 규칙 + 지금 계획', async () => {
+    const plan = withSteps(emptyPlan(NOW), [{ title: 'math.py 만들기', status: 'done' }, { title: '테스트 쓰기', status: 'doing' }], NOW)
+    expect(contextFor(plan, 'start')).toBe(RULE)
+    expect(contextFor(emptyPlan(NOW), 'compact')).toBe(RULE)
+    const text = contextFor(plan, 'compact')
+    expect(text.startsWith(RULE)).toBe(true)
+    expect(text).toContain('- [done] math.py 만들기\n- [doing] 테스트 쓰기')
+  })
+
+  test('규칙과 도구 설명은 보고 전용 요청을 막는 v2 문구', async () => {
+    expect(RULE).toContain('Never send a response whose only tool call is plan_update')
+    expect(RULE).toContain('single question or a one-step change')
+    expect(RULE).toContain('first plan_update together with your first work tool call')
+    expect(RULE).toContain('language the user writes in')
+    expect(TOOL_DESCRIPTION).toContain('never alone')
+    expect(TOOL_DESCRIPTION).toContain('language the user writes in')
+  })
+})
+
+const TOOL = 'mcp__work-plan__plan_update'
+const MSGS = [{ role: 'user', text: '요약', toolUses: [] }]
+const STEPS = [
+  { title: 'math.py 만들기', status: 'doing' },
+  { title: '테스트 쓰기', status: 'todo' },
+]
+
+// 엔진 $ 에는 state 가 없다. 옆에 실은 plugin 이 work-plan atom 을 읽어 Peek 도구 결과로 돌려준다.
+const PEEK = {
+  name: 'peek',
+  register(on: any) {
+    on('tool.call', { tool: 'Peek' }, async ($: any) => ({ result: JSON.stringify((await $.state.get({ plugin: 'work-plan', key: 'plan' })).value ?? null) }))
+  },
+}
+const peek = async ($: any) => JSON.parse(((await $.tool.call({ tool: 'Peek', tool_use_id: 'peek' })) as any).result)
+
+describe('work-plan (hook)', () => {
+  test('도구를 등록하고, 보고를 저장하고 문자열로 답한다. 서브에이전트 보고와 잘못된 입력은 저장하지 않는다', { plugins: [PEEK] }, async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const registered: any[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('tool.register', ($, e: any) => {
+      registered.push(e)
+      return { value: { tool: `mcp__work-plan__${e.name}` } }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    expect(registered).toHaveLength(1)
+    expect(registered[0]).toMatchObject({ name: 'plan_update', isDeferred: false, description: TOOL_DESCRIPTION })
+
+    const plan = () => peek($)
+
+    const r: any = await $.tool.call({ tool: TOOL, steps: STEPS, tool_use_id: 'p1' } as any)
+    expect(r.result).toBe('ok: 2 steps')
+    expect(await plan()).toEqual({ v: 1, steps: STEPS, updatedAt: NOW, stale: false, ended: null })
+
+    const sub: any = await $.tool.call({ tool: TOOL, steps: [{ title: '서브 단계', status: 'doing' }], agentId: 'sub-1', tool_use_id: 'p2' } as any)
+    expect(sub.result).toBe('ok: 1 steps')
+    expect((await plan()).steps).toEqual(STEPS)
+
+    const bad: any = await $.tool.call({ tool: TOOL, steps: 'x', tool_use_id: 'p3' } as any)
+    expect(bad).toEqual({ deny: 'plan_update: steps must be an array of { title, status }' })
+    expect((await plan()).steps).toEqual(STEPS)
+  })
+
+  test('규칙은 첫 프롬프트에 한 번, compaction 뒤엔 규칙 + 계획, /clear 뒤엔 규칙만 다시 붙는다', { plugins: [PEEK] }, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const contexts: (readonly string[] | undefined)[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('tool.register', ($, e: any) => ({ value: { tool: `mcp__work-plan__${e.name}` } }))
+    on('prompt.submit', ($, e: any) => {
+      contexts.push(e.context)
+      return { text: e.text }
+    })
+    on('turn.complete', () => ({ text: '' }))
+    on('session.compact', ($, e: any) => ({ messages: e.messages }))
+    on('session.end', ($, e: any) => ({ sessionId: e.sessionId }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+
+    const plan = () => peek($)
+    const submit = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false } as any)
+    const complete = (reason: string, agentId?: string) =>
+      $.turn.complete({ reason, answer: '끝', durationMs: 1, isAborted: reason === 'aborted', turnId: 't', ...(agentId ? { agentId } : {}) } as any)
+
+    // 슬래시 명령은 건너뛰고, 첫 일반 프롬프트에 규칙만. 두 번째 프롬프트엔 없음
+    await submit('/model')
+    await submit('math.py 만들어 줘')
+    await submit('계속')
+    expect(contexts).toEqual([undefined, [RULE], undefined])
+
+    // 계획이 없으면 턴 끝을 적지 않는다 (atom 은 한 번도 쓰이지 않아 빈 값)
+    await complete('answer')
+    expect(await plan()).toBeNull()
+
+    await $.tool.call({ tool: TOOL, steps: STEPS, tool_use_id: 'p1' } as any)
+    await clock.advance(1_000)
+    await complete('answer', 'sub-1') // 서브에이전트 턴은 무시
+    expect((await plan()).ended).toBeNull()
+    await complete('aborted')
+    expect((await plan()).ended).toEqual({ reason: 'aborted', at: NOW + 1_000 })
+    expect((await plan()).steps).toEqual(STEPS)
+
+    // precompute·서브에이전트 compaction 은 대화를 바꾸지 않는다
+    await $.session.compact({ trigger: 'precompute', messages: MSGS } as any)
+    await $.session.compact({ trigger: 'auto', agentId: 'sub-1', messages: MSGS } as any)
+    expect((await plan()).stale).toBe(false)
+    await submit('이어서')
+    expect(contexts.at(-1)).toBeUndefined()
+
+    // 메인 compaction: 낡음 표시, 다음 프롬프트에 규칙 + 지금 계획
+    await $.session.compact({ trigger: 'manual', messages: MSGS } as any)
+    expect((await plan()).stale).toBe(true)
+    await submit('이어서 해 줘')
+    expect(contexts.at(-1)).toEqual([contextFor(await plan(), 'compact')])
+    expect(contexts.at(-1)![0]).toContain('- [doing] math.py 만들기')
+    await $.tool.call({ tool: TOOL, steps: STEPS, tool_use_id: 'p2' } as any)
+    expect((await plan()).stale).toBe(false)
+
+    // 다른 이유의 session.end 는 계획을 그대로 둔다
+    await $.session.end({ reason: 'other', sessionId: 's', resume: {} } as any)
+    expect((await plan()).steps).toEqual(STEPS)
+
+    // /clear: 빈 계획, 다음 프롬프트에 규칙만
+    await $.session.end({ reason: 'clear', sessionId: 's', resume: {} } as any)
+    expect(await plan()).toMatchObject({ v: 1, steps: [], stale: false, ended: null })
+    await submit('새 작업')
+    expect(contexts.at(-1)).toEqual([RULE])
+  })
+})
