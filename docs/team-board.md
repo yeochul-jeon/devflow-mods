@@ -257,7 +257,11 @@ claude plugin configure team-board@devflow-mods      # 또는 /plugin → Instal
 
 ## 무엇이 기록되나
 
-- 진행 현황: Claude의 할 일 도구(TaskCreate, TaskUpdate, TodoWrite)를 따라갑니다.
+- 진행 현황: Claude의 할 일 도구(TaskCreate, TaskUpdate, TodoWrite)를 따라갑니다. [work-plan](../work-plan/README.md)을 함께 설치하면 그 계획 보고도 따라갑니다.
+  - 질문 없이 답으로 끝난 턴이면 남은 단계를 완료로 그립니다. 결정 대기·중단으로 끝난 턴은 보고된 그대로 둡니다.
+  - `막힘` 단계는 `막힘: <제목>` 으로 보입니다.
+  - compaction 뒤 새 보고 전에는 지금 하는 일이 `할 일(압축 전): …` 으로 보입니다.
+  - 두 곳에서 모두 보고하면 나중에 쓴 쪽이 보입니다.
 - 결정 ①: AskUserQuestion의 질문과 사용자가 고른 답
 - 결정 ②: 답변 끝에서 결정을 요청하면 사용자의 다음 요청을 그 결정의 답으로 기록합니다.
   - 결정 요청으로 보는 문장: "정해 주세요", "할까요?", "진행해도 되면 알려 주세요" 등

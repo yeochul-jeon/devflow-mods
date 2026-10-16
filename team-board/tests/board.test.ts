@@ -22,6 +22,7 @@ import {
   repoKey,
   routeLine,
   stripMarkdown,
+  tasksFromPlan,
   visible,
 } from '../hooks/board'
 import { bar, contextTone, paletteOf } from '../hooks/palette'
@@ -270,6 +271,56 @@ describe('board (순수 함수)', () => {
   test('TodoWrite 도 진행률로', async () => {
     const t = applyTaskTool([], 'TodoWrite', { todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress' }] }, {})!
     expect(progress(t).done).toBe(1)
+  })
+
+  test('work-plan 계획 → 할 일: 4종 변환, 막힘 접두어, 모르는 모양은 무시', async () => {
+    const plan = (over: Record<string, unknown> = {}) => ({
+      v: 1,
+      steps: [
+        { title: 'math.py 만들기', status: 'done' },
+        { title: '테스트 쓰기', status: 'doing' },
+        { title: '실행', status: 'todo' },
+        { title: '배포 승인', status: 'blocked' },
+      ],
+      updatedAt: NOW,
+      stale: false,
+      ended: null,
+      ...over,
+    })
+    expect(tasksFromPlan(plan(), false)).toEqual({
+      tasks: [
+        { id: '1', subject: 'math.py 만들기', status: 'completed' },
+        { id: '2', subject: '테스트 쓰기', status: 'in_progress' },
+        { id: '3', subject: '실행', status: 'pending' },
+        { id: '4', subject: '막힘: 배포 승인', status: 'pending' },
+      ],
+      step: '할 일: 테스트 쓰기',
+    })
+    // compaction 뒤 새 보고 전
+    expect(tasksFromPlan(plan({ stale: true }), false)!.step).toBe('할 일(압축 전): 테스트 쓰기')
+    // 진행 중인 단계가 없으면 단계 줄은 비운다 (team-board 자신의 줄을 덮지 않는다)
+    expect(tasksFromPlan(plan({ steps: [{ title: 'a', status: 'todo' }] }), false)!.step).toBe('')
+    expect(tasksFromPlan({ ...plan(), steps: [] }, false)).toEqual({ tasks: [], step: '' })
+    // 모르는 모양·없음
+    expect(tasksFromPlan(plan({ v: 2 }), false)).toBeNull()
+    expect(tasksFromPlan(undefined, false)).toBeNull()
+    expect(tasksFromPlan({ v: 1 }, false)).toBeNull()
+  })
+
+  test('work-plan 턴 끝: 답으로 끝나고 결정 대기가 아니면 남은 단계도 완료, 그 밖엔 그대로', async () => {
+    const steps = [
+      { title: 'a', status: 'done' },
+      { title: 'b', status: 'doing' },
+      { title: 'c', status: 'todo' },
+    ]
+    const ended = (reason: string) => ({ v: 1, steps, updatedAt: NOW, stale: false, ended: { reason, at: NOW } })
+    const statuses = (r: ReturnType<typeof tasksFromPlan>) => r!.tasks.map(t => t.status)
+    expect(statuses(tasksFromPlan(ended('answer'), false))).toEqual(['completed', 'completed', 'completed'])
+    expect(tasksFromPlan(ended('answer'), false)!.step).toBe('')
+    expect(statuses(tasksFromPlan(ended('answer'), true))).toEqual(['completed', 'in_progress', 'pending'])
+    for (const reason of ['aborted', 'error', 'refusal']) {
+      expect(statuses(tasksFromPlan(ended(reason), false))).toEqual(['completed', 'in_progress', 'pending'])
+    }
   })
 
   test('결정 필요가 먼저, 종료와 오래된 기록은 숨김', async () => {
@@ -1201,5 +1252,82 @@ describe('팀 상황판', () => {
     // 진짜 종료는 숨김
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 'me', resume: {} } as any)
     expect(mine().state).toBe('ended')
+  })
+})
+
+// work-plan 대역: 테스트가 준 계획을 자기 atom 에 쓴다 (atom 은 주인만 쓸 수 있다)
+const WORK_PLAN = {
+  name: 'work-plan',
+  register(on: any) {
+    on('tool.call', { tool: 'SetPlan' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'work-plan', key: 'plan' }, e.plan)
+      return { result: 'ok' }
+    })
+  },
+}
+
+describe('work-plan 연동', () => {
+  test('계획 atom 을 관찰해 할 일로 옮기고, 턴 끝은 결정 대기 여부로 그린다 (hook 순서 무관)', { plugins: [WORK_PLAN] }, async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.complete', () => ({ text: '' }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('tool.call', () => ({ result: 'ok: 3 steps', text: 'ok' }) as any)
+
+    const plan = (steps: [string, string][], over: Record<string, unknown> = {}) => ({
+      v: 1, steps: steps.map(([title, status]) => ({ title, status })), updatedAt: NOW, stale: false, ended: null, ...over,
+    })
+    const STEPS: [string, string][] = [['math.py 만들기', 'done'], ['테스트 쓰기', 'doing'], ['실행', 'todo']]
+    const setPlan = (p: unknown) => $.tool.call({ tool: 'SetPlan', plan: p, tool_use_id: 'sp' } as any)
+    const mine = () => JSON.parse([...files.entries()].find(([k]) => /\/me-[0-9a-f]{8}\.json$/.test(k))![1])
+    const statuses = () => mine().tasks.map((t: any) => t.status)
+    const flush = () => clock.advance(3_000) // 미룬 기록은 다음 틱에 써진다
+
+    // 모듈이 로드되기 전에 쓰인 계획도 session.start 에서 읽는다
+    await setPlan(plan([['math.py 만들기', 'doing']]))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await flush()
+    expect(mine().tasks).toEqual([{ id: '1', subject: 'math.py 만들기', status: 'in_progress' }])
+
+    // 일하는 중: 할 일과 단계 줄. plan_update 호출 자체는 단계 줄을 덮지 않는다
+    await $.turn.start({ text: 'math.py 와 테스트', turnId: 't1' } as any)
+    await setPlan(plan(STEPS))
+    await $.tool.call({ tool: 'mcp__work-plan__plan_update', steps: [], tool_use_id: 'pu' } as any)
+    await flush()
+    expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
+    expect(mine().step).toBe('할 일: 테스트 쓰기')
+
+    // 모르는 모양은 무시
+    await setPlan({ ...plan(STEPS), v: 2, steps: [] })
+    await flush()
+    expect(mine().tasks).toHaveLength(3)
+
+    // 질문으로 끝난 턴. 계획의 턴 끝 표시가 team-board 의 판정보다 먼저 와도(안쪽 hook) 결정 대기면 그대로 그린다
+    await setPlan(plan(STEPS, { ended: { reason: 'answer', at: NOW } }))
+    await $.turn.complete({ reason: 'answer', answer: '테스트 파일 이름을 무엇으로 할까요?', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await flush()
+    expect(mine().state).toBe('asking')
+    expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
+
+    // 답으로 끝난 턴: 남은 단계도 완료. 표시가 나중에 와도(바깥 hook) 같다
+    await $.turn.start({ text: 'test_math.py', turnId: 't2' } as any)
+    await setPlan(plan(STEPS))
+    await $.turn.complete({ reason: 'answer', answer: '세 단계를 마쳤습니다.', durationMs: 1, isAborted: false, turnId: 't2' } as any)
+    await setPlan(plan(STEPS, { ended: { reason: 'answer', at: NOW + 1 } }))
+    await flush()
+    expect(mine().state).toBe('idle')
+    expect(statuses()).toEqual(['completed', 'completed', 'completed'])
   })
 })

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, SteExplain } from '../types'
+import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, SteExplain, WorkPlan } from '../types'
 import {
   EVENT_MARK,
   ago,
@@ -40,6 +40,7 @@ import {
   projectDirName,
   routeLine,
   stripMarkdown,
+  tasksFromPlan,
   visible,
 } from './board'
 import { commandKey, formatAlert, judge, masksIn, noteForClaude, signLine } from './failure'
@@ -52,6 +53,8 @@ const TICK_MS = 3_000
 const HEARTBEAT_MS = 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
+// work-plan mod 의 계획 보고. 할 일은 그 mod 의 atom 을 관찰해 받으므로 단계 줄을 이 도구 이름으로 덮지 않는다
+const PLAN_TOOL = 'mcp__work-plan__plan_update'
 // 사람이 보낸 입력: 터미널 입력, Remote Control, claude -p·Agent SDK. 작업 알림·다른 세션·플러그인이 넣은 입력은 기록하지 않는다
 const USER_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
@@ -67,6 +70,8 @@ const collapsed = atom({ plugin: 'team-board', key: 'collapsed' } as const, [] a
 const bandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
 const bandMode = atom({ plugin: 'team-board', key: 'bandMode' } as const, 'hud' as 'hud' | 'line')
 const bandSoloOff = atom({ plugin: 'team-board', key: 'bandSoloOff' } as const, false)
+// 읽기만 한다. work-plan 이 없으면 값이 없다
+const workPlan = atom({ plugin: 'work-plan', key: 'plan' } as const, null as WorkPlan | null)
 const BAND_KEY = 'band-off'
 const BAND_MODE_KEY = 'band-mode'
 const BAND_SOLO_KEY = 'band-solo-off'
@@ -119,6 +124,18 @@ async function save($: EngineInterface, patch: Partial<Beat>, force = false): Pr
   const snapshot: Beat = { ...self.beat }
   await update($, me, () => snapshot)
   await $.fs.write(`${self.dir}/${self.beat.id}.json`, JSON.stringify(snapshot))
+}
+
+/**
+ * work-plan 의 계획을 할 일로 옮긴다. 남은 단계를 완료로 볼지는 결정 대기 여부로 정하므로,
+ * 턴 끝에 이 세션의 상태를 정한 뒤에도 한 번 더 부른다 (hook 순서에 따라 계획의 턴 끝 표시가 먼저 올 수 있다).
+ * 단계 줄은 일하는 중일 때만 바꾼다.
+ */
+async function syncPlan($: EngineInterface, plan?: unknown): Promise<void> {
+  if (!self.beat) return
+  const r = tasksFromPlan(plan === undefined ? await read($, workPlan) : plan, self.beat.state === 'asking')
+  if (!r) return
+  await save($, r.step && self.beat.state === 'working' ? { tasks: r.tasks, step: r.step } : { tasks: r.tasks })
 }
 
 async function note($: EngineInterface, kind: Parameters<typeof event>[1], text: string, patch: Partial<Beat> = {}, force = false) {
@@ -350,6 +367,8 @@ export const register: Register = (on, options) => {
       ? { ...prev, state: prev.state === 'ended' ? 'idle' : prev.state }
       : emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd)
     await save($, {}, true)
+    // 모듈이 다시 로드되기 전에 work-plan 이 써 둔 계획
+    await syncPlan($)
     await scan($)
     await update($, bandOff, () => false)
     if ((await $.store.get(BAND_KEY)) === true) await update($, bandOff, () => true)
@@ -417,6 +436,14 @@ export const register: Register = (on, options) => {
     }
     return next(e)
   })
+
+  // work-plan 이 계획을 쓰면 할 일로 옮긴다. 기록이 끝난 뒤에 읽고, 쓰기가 거절됐으면 무시한다.
+  // 도구 호출 관찰과 달리 hook 순서와 상관없이 불린다.
+  on('state.set', { plugin: 'work-plan', key: 'plan' }, async ($, e, next) => {
+    const r = await next(e)
+    if ('value' in r && r.value.isSet) await syncPlan($, e.value)
+    return r
+  }).catch(($, e, next) => next(e)) // 표시가 실패해도 work-plan 의 기록은 그대로 선다
 
   on('turn.start', async ($, e, next) => {
     await save($, { state: 'working', step: '생각 중', question: '' })
@@ -496,6 +523,8 @@ export const register: Register = (on, options) => {
       return r
     }
 
+    if (e.tool === PLAN_TOOL) return next(e)
+
     const step = describeTool(e.tool, input)
     if (EDIT_TOOLS.has(e.tool) && main && self.beat) {
       const file = basename(String(input.file_path ?? input.notebook_path ?? ''))
@@ -523,6 +552,7 @@ export const register: Register = (on, options) => {
       const kept = self.beat.timeline.filter(t => !(t.kind === 'decide' && t.at === undo.decide.at && t.text === undo.decide.text))
       const timeline = pushCapped(kept, event(at, 'abort', '중단됨'), MAX_TIMELINE)
       await save($, { state: 'asking', step: '', contextPct, question: undo.question, decisions: undo.decisions, timeline }, true)
+      await syncPlan($)
       return r
     }
     // HTML 요청 턴(중단 포함)이 끝나면 결정 대기로 되돌린다. 답(링크)은 질문으로 보지 않는다
@@ -530,6 +560,7 @@ export const register: Register = (on, options) => {
       const question = self.htmlKeep
       self.htmlKeep = ''
       await save($, { state: 'asking', step: '', contextPct, question }, true)
+      await syncPlan($)
       return r
     }
     if (e.isAborted || !answer) {
@@ -540,6 +571,7 @@ export const register: Register = (on, options) => {
     } else {
       await note($, 'done', answer, { state: 'idle', step: '', contextPct, last: oneLine(answer, 100), question: '' })
     }
+    await syncPlan($)
     return r
   })
 

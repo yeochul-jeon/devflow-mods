@@ -55,6 +55,20 @@ export type SteExplain = { id: string; question: string; status: 'loading' | 'do
 /** 설명 탭: 12살 또는 ASD-STE100 */
 export type ExplainKind = 'kid' | 'ste'
 
+/**
+ * work-plan mod 가 $.state 에 두는 작업 계획. work-plan/types/index.d.ts 의 선언을 그대로 복사했다
+ * (dependencies 를 두지 않으려고). 모르는 v 는 무시한다.
+ */
+export type WorkPlan = {
+  v: 1
+  steps: { title: string; status: 'todo' | 'doing' | 'done' | 'blocked' }[]
+  updatedAt: number
+  /** compaction 뒤 아직 새 보고가 없음 */
+  stale: boolean
+  /** 턴이 끝났고 그 뒤 보고가 없음 */
+  ended: { reason: 'answer' | 'aborted' | 'refusal' | 'error'; at: number } | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'team-board': {
@@ -80,5 +94,7 @@ declare module 'claude-code' {
       /** 세션이 하나일 때 팀 창을 숨김 */
       bandSoloOff: boolean
     }
+    /** 읽기만 한다. work-plan 이 없으면 값이 없다 */
+    'work-plan': { plan: WorkPlan }
   }
 }

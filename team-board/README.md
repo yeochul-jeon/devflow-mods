@@ -6,6 +6,7 @@
 - `/board` 패널: 세션별 요청·진행·결정 기록, 결정 대기 항목의 12살 버전·ASD-STE100 기준 설명 (탭), HTML 페이지 요청
 - **숨은 실패 감지**: exit 0 인데 실패한 빌드·테스트를 Claude 와 모든 탭에 알림
 - 결정 대기 음성 알림 (macOS)
+- [work-plan](../work-plan/README.md)을 함께 설치하면 Claude의 계획 보고로 할 일 경로선을 채웁니다 (할 일 도구가 없는 새 모델용)
 
 설치와 주요 명령은 [저장소 README](../README.md#-team-board-팀-상황판), 세부 내용은 [docs/team-board.md](../docs/team-board.md), 바뀐 점은 [CHANGELOG](../CHANGELOG.md) 를 보세요.
 

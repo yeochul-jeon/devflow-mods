@@ -1,5 +1,5 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
-import type { Beat, Decision, Event, ExplainKind, Task } from '../types'
+import type { Beat, Decision, Event, ExplainKind, Task, WorkPlan } from '../types'
 import { EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 
@@ -225,6 +225,24 @@ export function applyTaskTool(
     }))
   }
   return null
+}
+
+/**
+ * work-plan 의 계획을 할 일 목록과 지금 단계 줄로. 모르는 모양(v 가 1 이 아님)이면 null.
+ * 질문 없이 답으로 끝난 턴이면 남은 단계도 끝난 것으로 그린다 (모델은 마지막 done 을 보내지 않는다).
+ * 결정 대기·중단·오류로 끝났으면 보고된 그대로 둔다. compaction 뒤 새 보고 전이면 단계 줄에 그렇게 적는다.
+ */
+export function tasksFromPlan(plan: unknown, asking: boolean): { tasks: Task[]; step: string } | null {
+  const p = plan as WorkPlan | null | undefined
+  if (!p || p.v !== 1 || !Array.isArray(p.steps)) return null
+  const closed = p.ended?.reason === 'answer' && !asking
+  const tasks = p.steps.slice(0, 30).map((s, i): Task => ({
+    id: String(i + 1),
+    subject: oneLine(s.status === 'blocked' ? `막힘: ${s.title}` : s.title, 60),
+    status: closed || s.status === 'done' ? 'completed' : s.status === 'doing' ? 'in_progress' : 'pending',
+  }))
+  const cur = progress(tasks).current
+  return { tasks, step: cur ? `${p.stale ? '할 일(압축 전)' : '할 일'}: ${cur.subject}` : '' }
 }
 
 export function progress(tasks: readonly Task[]): { done: number; total: number; current: Task | undefined } {
