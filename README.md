@@ -37,7 +37,7 @@ Claude Code v2.1.287 이상이 필요합니다. `claude --version` 으로 확인
 ```bash
 claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install team-board@devflow-mods
-claude plugin install work-plan@devflow-mods      # 요청마다 약 515 토큰 (team-board와 함께 쓰세요)
+claude plugin install work-plan@devflow-mods      # 요청마다 약 560 토큰 (team-board와 함께 쓰세요)
 claude plugin install eli12@devflow-mods
 claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출합니다
 claude plugin install prompt-coach@devflow-mods   # 누를 때만 Haiku를 호출합니다
@@ -99,7 +99,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 - 혼자 설치하면 화면에 보이는 것이 없습니다. team-board와 함께 설치하세요.
 - 보고는 모델이 하므로 짧은 작업에서는 빠질 수 있습니다.
 
-- 비용: 요청마다 도구 설명 약 515 토큰이 들어갑니다. 보고는 작업 도구와 같은 응답에 실려 요청 수는 늘지 않았습니다(3단계 작업 2회 측정, API 환산 +22%).
+- 비용: 요청마다 도구 설명 약 560 토큰이 들어갑니다. 보고는 작업 도구와 같은 응답에 실려 요청 수는 늘지 않았습니다(3단계 작업 2회 측정, API 환산 +22%).
 
 동작, 조직 관리 환경(Team, Enterprise)에서의 제약, 알아둘 것은 [work-plan/README.md](work-plan/README.md)를 보세요.
 

@@ -5,17 +5,17 @@ export const MAX_TITLE = 60
 export const MAX_STEPS = 30
 const STATUSES: readonly StepStatus[] = ['todo', 'doing', 'done', 'blocked']
 
-/** 대화 첫 프롬프트에 한 번 붙이는 규칙 (9.6.2 v2: 보고 전용 요청을 만들지 않는 문구 + 5단계 실세션 뒤: 사용자 언어, 첫 보고는 첫 작업과 함께). */
+/** 대화 첫 프롬프트에 한 번 붙이는 규칙 (9.6.2 v2: 보고 전용 요청을 만들지 않는 문구 + 5단계 실세션 뒤: 사용자 언어, 첫 보고는 첫 작업과 함께 + v1.1: 작업 도구 2회 이상이면 한 응답에 몰아도 보고). */
 export const RULE = `# Plan reporting
-When a task needs more than one step, report the plan with plan_update: every step as a short title, in the language the user writes in.
-Send the first plan_update together with your first work tool call, and later updates together with later work tool calls (Write, Edit, Bash, ...). Never send a response whose only tool call is plan_update.
+Whenever your turn will make two or more work tool calls (Write, Edit, Bash, ...), report the plan with plan_update: every step as a short title, in the language the user writes in. This holds even when all of them go in one response.
+Send the first plan_update in the same response as your first work tool call, and later updates together with later work tool calls. Never send a response whose only tool call is plan_update.
 Do not split work you would otherwise batch just to update a status.
 You do not need to report the final "done": the plan closes itself when your turn ends.
-Do not call plan_update for a single question or a one-step change.`
+Skip plan_update only for a question or a single tool call.`
 
 /** 규칙이 닿지 않는 환경에서도 남는 유일한 안내라 규칙의 핵심을 담는다. */
 export const TOOL_DESCRIPTION =
-  'Report the current work plan: every step with its status, the whole list each time, titles in the language the user writes in. The person sees it as a progress line. Send the first one with your first work tool call, and each one only alongside a work tool call in the same response, never alone; the final "done" is not needed, the plan closes when the turn ends.'
+  'Report the current work plan: every step with its status, the whole list each time, titles in the language the user writes in. The person sees it as a progress line. Call it whenever the turn makes two or more work tool calls, even all in one response: send the first one with your first work tool call, and each one only alongside a work tool call in the same response, never alone; the final "done" is not needed, the plan closes when the turn ends.'
 
 /**
  * 모델 입력을 단계 목록으로. 배열이 아니면 null.

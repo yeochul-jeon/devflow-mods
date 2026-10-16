@@ -63,8 +63,9 @@ describe('plan (순수 함수)', () => {
 
   test('규칙과 도구 설명은 보고 전용 요청을 막는 v2 문구', async () => {
     expect(RULE).toContain('Never send a response whose only tool call is plan_update')
-    expect(RULE).toContain('single question or a one-step change')
-    expect(RULE).toContain('first plan_update together with your first work tool call')
+    expect(RULE).toContain('two or more work tool calls')
+    expect(RULE).toContain('even when all of them go in one response')
+    expect(RULE).toContain('first plan_update in the same response as your first work tool call')
     expect(RULE).toContain('language the user writes in')
     expect(TOOL_DESCRIPTION).toContain('never alone')
     expect(TOOL_DESCRIPTION).toContain('language the user writes in')
