@@ -87,6 +87,8 @@ const self = {
   dir: '',
   beat: null as Beat | null,
   lastWrite: 0,
+  /** 마지막으로 시작한 scan 번호. 늦게 끝난 이전 scan 이 새 결과를 덮지 않게 한다 */
+  scanGen: 0,
   dirty: false,
   busy: false,
   interactive: false,
@@ -146,6 +148,7 @@ async function note($: EngineInterface, kind: Parameters<typeof event>[1], text:
 
 async function scan($: EngineInterface): Promise<void> {
   if (!self.dir) return
+  const gen = ++self.scanGen
   const entries = await $.fs.list(self.dir).catch(() => [])
   const now = await $.clock.now()
   const found: Beat[] = []
@@ -159,6 +162,8 @@ async function scan($: EngineInterface): Promise<void> {
       // 쓰는 도중이거나 깨진 파일은 다음 틱에 다시 읽는다.
     }
   }
+  // clock.every 는 앞 틱이 끝나기 전에도 다음 틱을 부른다. 그 사이 시작된 scan 이 있으면 이 결과는 낡았다 (경로선 깜빡임, 0.16.2)
+  if (gen !== self.scanGen) return
   // 잔재를 먼저 숨겨야 살아 있는 세션 이름에 ·2 가 붙지 않는다
   await update($, beats, () => dedupeNames(visible(found, now)))
 }

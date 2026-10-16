@@ -1340,3 +1340,69 @@ describe('work-plan 연동', () => {
     expect(statuses()).toEqual(['completed', 'completed', 'completed'])
   })
 })
+
+// 상황판 atom 엿보기: 테스트 키트의 $ 에는 state 가 없다
+const PEEK = {
+  name: 'peek',
+  register(on: any) {
+    on('tool.call', { tool: 'Peek' }, async ($: any) => ({ result: JSON.stringify(await $.state.get({ plugin: 'team-board', key: 'beats' })) }))
+  },
+}
+
+describe('깜빡임', () => {
+  test('늦게 끝난 이전 scan 이 새 계획을 옛 값으로 덮지 않는다 (T5 S4·S6)', { plugins: [WORK_PLAN, PEEK] }, async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    let hold: ((v: unknown) => void) | null = null
+    let armed = false
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [...files.keys()].map(p => ({ kind: 'file', name: p.split('/').pop(), mtimeMs: NOW })) }))
+    on('fs.read', ($, e: any) => {
+      const text = files.get(e.path) ?? ''
+      if (!armed) return { value: text }
+      armed = false
+      // 읽은 순간의 내용을 늦게 돌려준다
+      return new Promise(r => { hold = () => r({ value: text }) })
+    })
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('tool.call', () => ({ result: 'ok', text: 'ok' }) as any)
+
+    const plan = (steps: [string, string][]) => ({ v: 1, steps: steps.map(([title, status]) => ({ title, status })), updatedAt: NOW, stale: false, ended: null })
+    const setPlan = (p: unknown) => $.tool.call({ tool: 'SetPlan', plan: p, tool_use_id: 'sp' } as any)
+    const shown = async () => {
+      const r: any = await $.tool.call({ tool: 'Peek', tool_use_id: 'pk' } as any)
+      return JSON.parse(r.result).value[0].tasks.map((t: any) => t.status)
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.turn.start({ text: '세 단계', turnId: 't1' } as any)
+    await setPlan(plan([['가', 'doing'], ['나', 'todo'], ['다', 'todo']]))
+    await clock.advance(3_000)
+    expect(await shown()).toEqual(['in_progress', 'pending', 'pending'])
+
+    // 틱의 scan 이 옛 파일을 읽고 멈춘 사이 계획이 바뀌고, 다른 scan(/board fail clear) 이 새 값을 그린다.
+    // 실제 엔진은 clock.every 콜백을 겹쳐 부르므로 틱끼리도 같다 (100ms 주기·450ms 본문에서 동시 5개, 2026-10-16 -p 시험)
+    armed = true
+    const slow = clock.advance(3_000)
+    for (let i = 0; i < 100 && !hold; i++) await new Promise(r => setTimeout(r, 1))
+    expect(hold).not.toBeNull()
+    await setPlan(plan([['가', 'done'], ['나', 'doing'], ['다', 'todo']]))
+    await clock.advance(1_500)
+    await $.command.run({ command: 'board', args: 'fail clear' } as any)
+    expect(await shown()).toEqual(['completed', 'in_progress', 'pending'])
+
+    // 멈춰 있던 scan 이 끝나도 새 값이 남아야 한다
+    hold!(undefined)
+    await slow
+    expect(await shown()).toEqual(['completed', 'in_progress', 'pending'])
+  })
+})
