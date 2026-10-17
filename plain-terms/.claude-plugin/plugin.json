@@ -1,0 +1,13 @@
+{
+  "name": "plain-terms",
+  "displayName": "Plain Terms",
+  "version": "0.1.0",
+  "description": "약어·작업 번호·코드 이름이 답변에 처음 나올 때 괄호로 짧게 풀어 쓰게 하는 규칙 (대화 첫 프롬프트에 한 번)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/plain-terms",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT"
+}

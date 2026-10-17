@@ -1,6 +1,6 @@
 # devflow-mods
 
-Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 12살 버전 설명, 다음 요청 제안, 초안 다듬기를 제공합니다.
+Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 12살 버전 설명, 다음 요청 제안, 초안 다듬기를 제공합니다.
 
 [![Claude Code](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
@@ -15,6 +15,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | :---: | --- | --- | --- |
 | 🧭 | [**team-board**](#-team-board-팀-상황판) | 같은 저장소의 여러 세션을 한 화면에 보여 줍니다. 진행 현황, 결정 기록, 결정 대기 알림, 숨은 실패, 프롬프트 캐시 남은 시간을 표시합니다. | `/board` |
 | 📋 | [**work-plan**](#-work-plan-작업-계획-보고) | Claude가 여러 단계 작업의 계획과 진행을 보고합니다. team-board의 할 일 경로선이 이 보고로 채워집니다. | 없음 (도구 `plan_update`) |
+| 🔤 | [**plain-terms**](#-plain-terms-용어-풀이) | Claude가 약어, 작업 번호, 코드 이름을 처음 쓸 때 괄호로 풀어 씁니다. | 없음 (규칙만) |
 | 🧒 | [**eli12**](#-eli12-12살-버전-설명) | 어려운 설명을 12살 버전으로 풉니다. | `/eli12 [주제]` |
 | 💡 | [**next-steps**](#-next-steps-다음-요청-제안) | 답변이 끝나면 다음 요청 2~3개를 제안합니다. | `/next [on\|off]` |
 | 📝 | [**prompt-coach**](#-prompt-coach-초안-다듬기) | 보내기 전에 초안을 다듬습니다. | `/coach <초안>\|template\|undo`, `[다듬기]`·`[되돌리기]` 버튼 |
@@ -28,6 +29,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 세션 표시 이름 | team-board | `/board name <이름>` | 세션 이름 → 브랜치 → 폴더 |
 | 다른 mod보다 앞에 두기 | team-board | `~/.claude/settings.json` 의 `prependPlugins` | 없음 |
 | 작업 계획 보고 | work-plan | `claude plugin disable work-plan@devflow-mods` | 켜짐 |
+| 용어 풀이 | plain-terms | `claude plugin disable plain-terms@devflow-mods` | 켜짐 |
 | 다음 요청 제안 | next-steps | `/next on\|off` | 켜짐 |
 
 Claude Code v2.1.287 이상이 필요합니다. `claude --version` 으로 확인하세요.
@@ -38,6 +40,7 @@ Claude Code v2.1.287 이상이 필요합니다. `claude --version` 으로 확인
 claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install team-board@devflow-mods
 claude plugin install work-plan@devflow-mods      # 요청마다 약 560 토큰 (team-board와 함께 쓰세요)
+claude plugin install plain-terms@devflow-mods    # 대화 첫 요청에 규칙 약 280 토큰, 답변이 조금 길어집니다
 claude plugin install eli12@devflow-mods
 claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출합니다
 claude plugin install prompt-coach@devflow-mods   # 누를 때만 Haiku를 호출합니다
@@ -102,6 +105,17 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 - 비용: 요청마다 도구 설명 약 560 토큰이 들어갑니다. 보고는 작업 도구와 같은 응답에 실려 요청 수는 늘지 않았습니다(3단계 작업 2회 측정, API 환산 +22%).
 
 동작, 조직 관리 환경(Team, Enterprise)에서의 제약, 알아둘 것은 [work-plan/README.md](work-plan/README.md)를 보세요.
+
+---
+
+## 🔤 plain-terms: 용어 풀이
+
+- Claude가 답변에서 약어(`tsc`), 작업 번호(`T6`), 코드 이름(`scanGen`)을 처음 쓸 때 괄호로 짧게 풀어 씁니다. 예: `tsc(TypeScript 타입 검사기)`
+- 화면에 그리는 것은 없습니다. 혼자 설치해도 동작합니다.
+- 효과: 처음 나온 용어 중 풀이가 붙은 비율이 시험 프롬프트 5개에서 44.9% → 81.1% 로 올랐습니다. 평소 답변 20개의 기준값은 20.8% 였습니다.
+- 비용: 대화 첫 요청에 규칙 약 280 토큰. 요청 수는 늘지 않았고 답변은 평균 11.5% 길어졌습니다.
+
+측정 방법과 알아둘 것은 [plain-terms/README.md](plain-terms/README.md)를 보세요.
 
 ---
 
@@ -188,6 +202,7 @@ claude plugin validate ./team-board     # 받는 이벤트와 호출을 확인�
 claude plugin test ./team-board         # 테스트를 실행합니다
 claude plugin test ./eli12
 claude plugin test ./work-plan
+claude plugin test ./plain-terms
 ```
 
 - 각 mod의 화면과 문구는 `hooks/` 의 순수 함수에 있습니다. 예: `board.ts`, `diagram.ts`, `failure.ts`, `prompt.ts`
