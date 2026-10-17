@@ -100,6 +100,6 @@ declare module 'claude-code' {
       bandSoloOff: boolean
     }
     /** 읽기만 한다. work-plan 이 없으면 값이 없다 */
-    'work-plan': { plan: WorkPlan }
+    'work-plan': { plan: WorkPlan | null }
   }
 }

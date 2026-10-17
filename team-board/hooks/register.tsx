@@ -55,7 +55,7 @@ const HEARTBEAT_MS = 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
 // work-plan mod 의 계획 보고. 할 일은 그 mod 의 atom 을 관찰해 받으므로 단계 줄을 이 도구 이름으로 덮지 않는다
-const PLAN_TOOL = 'mcp__work-plan__plan_update'
+const PLAN_TOOL: string = 'mcp__work-plan__plan_update'
 // 사람이 보낸 입력: 터미널 입력, Remote Control, claude -p·Agent SDK. 작업 알림·다른 세션·플러그인이 넣은 입력은 기록하지 않는다
 const USER_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
@@ -451,7 +451,7 @@ export const register: Register = (on, options) => {
   // 도구 호출 관찰과 달리 hook 순서와 상관없이 불린다.
   on('state.set', { plugin: 'work-plan', key: 'plan' }, async ($, e, next) => {
     const r = await next(e)
-    if ('value' in r && r.value.isSet) await syncPlan($, e.value)
+    if ('value' in r && r.value?.isSet) await syncPlan($, e.value)
     return r
   }).catch(($, e, next) => next(e)) // 표시가 실패해도 work-plan 의 기록은 그대로 선다
 
