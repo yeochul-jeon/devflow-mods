@@ -1,6 +1,6 @@
 # devflow-mods
 
-Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 12살 버전 설명, 다음 요청 제안, 초안 다듬기를 제공합니다.
+Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 12살 버전 설명, 다음 요청 제안, 초안 다듬기를 제공합니다.
 
 [![Claude Code](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
@@ -16,6 +16,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 🧭 | [**team-board**](#-team-board-팀-상황판) | 같은 저장소의 여러 세션을 한 화면에 보여 줍니다. 진행 현황, 결정 기록, 결정 대기 알림, 숨은 실패, 프롬프트 캐시 남은 시간을 표시합니다. | `/board` |
 | 📋 | [**work-plan**](#-work-plan-작업-계획-보고) | Claude가 여러 단계 작업의 계획과 진행을 보고합니다. team-board의 할 일 경로선이 이 보고로 채워집니다. | 없음 (도구 `plan_update`) |
 | 🔤 | [**plain-terms**](#-plain-terms-용어-풀이) | Claude가 약어, 작업 번호, 코드 이름을 처음 쓸 때 괄호로 풀어 씁니다. | 없음 (규칙만) |
+| 📐 | [**draw**](#-draw-흐름-그림) | 직전 답변의 흐름을 원문 낱말 그대로 옆 패널에 그림으로 보여 줍니다. | `/draw [낱말]` |
 | 🧒 | [**eli12**](#-eli12-12살-버전-설명) | 어려운 설명을 12살 버전으로 풉니다. | `/eli12 [주제]` |
 | 💡 | [**next-steps**](#-next-steps-다음-요청-제안) | 답변이 끝나면 다음 요청 2~3개를 제안합니다. | `/next [on\|off]` |
 | 📝 | [**prompt-coach**](#-prompt-coach-초안-다듬기) | 보내기 전에 초안을 다듬습니다. | `/coach <초안>\|template\|undo`, `[다듬기]`·`[되돌리기]` 버튼 |
@@ -41,6 +42,7 @@ claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install team-board@devflow-mods
 claude plugin install work-plan@devflow-mods      # 요청마다 약 560 토큰 (team-board와 함께 쓰세요)
 claude plugin install plain-terms@devflow-mods    # 대화 첫 요청에 규칙 약 280 토큰, 답변이 조금 길어집니다
+claude plugin install draw@devflow-mods           # /draw 할 때만 Haiku를 호출합니다
 claude plugin install eli12@devflow-mods
 claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출합니다
 claude plugin install prompt-coach@devflow-mods   # 누를 때만 Haiku를 호출합니다
@@ -116,6 +118,17 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 - 비용: 대화 첫 요청에 규칙 약 280 토큰. 요청 수는 늘지 않았고 답변은 평균 11.5% 길어졌습니다.
 
 측정 방법과 알아둘 것은 [plain-terms/README.md](plain-terms/README.md)를 보세요.
+
+---
+
+## 📐 draw: 흐름 그림
+
+- `/draw` 는 직전 답변에 든 흐름(작업 순서, 호출 경로, 갈래)을 옆 패널에 그림으로 보여 줍니다. `/draw <낱말>` 은 그 낱말에 관한 흐름만 그립니다.
+- 상자 이름은 원문 낱말과 식별자를 그대로 씁니다. 설명을 쉽게 바꾸는 것은 `/eli12` 입니다.
+- 효과: 실제 긴 답변 10개에서 상자 이름 99.3% 가 원문 낱말이었고, 9/10 이 원문 단계를 빠뜨리지 않았습니다(2회 측정).
+- 비용: 실행마다 Haiku 1회. 메인 대화 요청은 늘지 않습니다. Esc로 패널을 닫습니다.
+
+측정 방법과 알아둘 것은 [draw/README.md](draw/README.md)를 보세요.
 
 ---
 
@@ -203,6 +216,7 @@ claude plugin test ./team-board         # 테스트를 실행합니다
 claude plugin test ./eli12
 claude plugin test ./work-plan
 claude plugin test ./plain-terms
+claude plugin test ./draw
 ```
 
 - 각 mod의 화면과 문구는 `hooks/` 의 순수 함수에 있습니다. 예: `board.ts`, `diagram.ts`, `failure.ts`, `prompt.ts`

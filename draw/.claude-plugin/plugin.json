@@ -1,0 +1,13 @@
+{
+  "name": "draw",
+  "version": "0.1.0",
+  "description": "/draw: 직전 답변의 흐름을 원문 낱말 그대로 옆 패널에 상자 그림으로 (요청할 때만 Haiku 1회)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/draw",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT"
+}
