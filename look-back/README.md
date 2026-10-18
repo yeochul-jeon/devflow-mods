@@ -5,11 +5,12 @@
 ```
 [ 오늘 ] [ 어제 ] [ 7일 ] [ 30일 ]
 돌아보기 · 2026-10-18
-요청 2 · Claude 작업 27초 · 커밋 2 · 프로젝트 1
+요청 2 · Claude 작업 27초 · 결정 1 · 커밋 2 · 프로젝트 1
 
-shop 요청 2 · 27초 · 커밋 2 · 토큰 40.6만 [ 요약 ]
+shop 요청 2 · 27초 · 결정 1 · 커밋 2 · 토큰 40.6만 [ 요약 ]
   fe8aa63 init shop
   6ed5ded add cart add_item
+  10/18 20:41 ? qty 가 0 이하이면 ValueError 를 낼까요? → 네, ValueError 로 해 주세요
   10/18 20:34 ✓ cart.py 에 add_item(cart, name, qty) 함수를 만들고 git add…
   10/18 20:53 ■ README.md 에 cart.py 사용 예시 섹션을 길게 써 줘  6초
 ```
