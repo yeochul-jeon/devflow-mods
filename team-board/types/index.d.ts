@@ -14,6 +14,20 @@ export type FailAlert = { at: number; command: string; key: string; level: 'high
 /** 직전 대화 한 줄: 누가 무엇을 말했는지 (텍스트만, 잘린 것). */
 export type RecentLine = { role: 'user' | 'assistant'; text: string }
 
+/** 이 세션이 띄운 보조 에이전트(서브에이전트·워크플로 에이전트) 하나. tokens 는 요청마다 더한 입력+출력 토큰. */
+export type SubAgent = {
+  id: string
+  desc: string
+  type: string
+  model: string
+  status: 'working' | 'done' | 'failed'
+  /** 지금 쓰는 도구 (끝나면 '') */
+  tool: string
+  startedAt: number
+  endedAt: number | null
+  tokens: number
+}
+
 /** 세션 하나가 공유 폴더에 쓰는 상태 한 장. */
 export type Beat = {
   id: string
@@ -35,6 +49,8 @@ export type Beat = {
   files: string[]
   /** 아직 풀리지 않은 숨은 실패 (같은 명령이 깨끗하게 다시 돌면 지워짐) */
   fail: FailAlert | null
+  /** 이 세션의 보조 에이전트. 사람이 다음 프롬프트를 보내면 끝난 것을 지운다 (0.18 전 파일에는 없음) */
+  agents: SubAgent[]
   /** 마지막 메인 스레드 모델 요청 시각. 프롬프트 캐시 남은 시간의 기준 (compact·/clear 뒤엔 null) */
   cacheAt: number | null
   updatedAt: number

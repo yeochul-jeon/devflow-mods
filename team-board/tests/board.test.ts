@@ -1,6 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import {
+  agentClearEnded,
+  agentEnd,
+  agentPatch,
+  agentStart,
+  agentSummary,
+  agentSync,
   applyTaskTool,
   askUserText,
   bandLayout,
@@ -24,6 +30,7 @@ import {
   routeLine,
   stripMarkdown,
   tasksFromPlan,
+  tokensText,
   visible,
 } from '../hooks/board'
 import { bar, contextTone, paletteOf } from '../hooks/palette'
@@ -408,6 +415,53 @@ describe('board (순수 함수)', () => {
       NOW,
     )
     expect(list.map(b => b.id).sort()).toEqual(['a', 'b', 'new'])
+  })
+})
+
+describe('보조 에이전트 장부', () => {
+  const start = (id: string, at = 1) => ({ id, desc: `일 ${id}`, type: 'Explore', model: 'haiku', at })
+
+  test('시작·도구·끝을 장부에 담고 한 줄로 요약한다', async () => {
+    let l = agentStart([], start('a'))
+    l = agentStart(l, start('b'))
+    l = agentPatch(l, 'b', a => ({ ...a, tool: 'Grep' }))
+    l = agentEnd(l, 'a', true, 5)
+    expect(agentSummary(l)).toBe('● 1 작업 · ✓ 1 끝 · Explore: Grep')
+    l = agentEnd(l, 'b', false, 6)
+    expect(agentSummary(l)).toBe('✓ 1 끝 · ✗ 1 실패')
+    expect(l.find(a => a.id === 'b')).toMatchObject({ status: 'failed', tool: '', endedAt: 6 })
+    expect(agentSummary([])).toBe('')
+  })
+
+  test('모르는 id 와 이미 끝난 것은 바꾸지 않는다', async () => {
+    let l = agentEnd(agentStart([], start('a')), 'a', true, 5)
+    expect(agentEnd(l, 'a', false, 9)[0]).toMatchObject({ status: 'done', endedAt: 5 })
+    expect(agentPatch(l, 'zz', a => ({ ...a, tool: 'x' }))).toEqual(l)
+  })
+
+  test('엔진 목록으로 놓친 끝을 보정하고, 사람 프롬프트에 끝난 것을 지운다', async () => {
+    let l = agentStart(agentStart(agentStart([], start('a')), start('b')), start('c'))
+    l = agentSync(l, [{ id: 'a', status: 'completed' }, { id: 'b', status: 'killed' }, { id: 'c', status: 'running' }], 7)
+    expect(l.map(a => a.status)).toEqual(['done', 'failed', 'working'])
+    expect(agentClearEnded(l).map(a => a.id)).toEqual(['c'])
+  })
+
+  test('12개를 넘으면 끝난 것부터 버리고, 같은 id 는 다시 작업 중으로', async () => {
+    let l = agentEnd(agentStart([], start('old')), 'old', true, 2)
+    for (let i = 0; i < 12; i++) l = agentStart(l, start(`n${i}`))
+    expect(l.length).toBe(12)
+    expect(l.some(a => a.id === 'old')).toBe(false)
+    l = agentEnd(l, 'n0', true, 3)
+    l = agentStart(l, start('n0', 4))
+    expect(l.find(a => a.id === 'n0')).toMatchObject({ status: 'working', endedAt: null, startedAt: 4 })
+  })
+
+  test('옛 파일에는 agents 가 없어도 빈 목록으로 읽는다', async () => {
+    expect(normalize({ id: 'x', name: 'old' }).agents).toEqual([])
+  })
+
+  test('토큰을 짧게 쓴다', async () => {
+    expect([tokensText(950), tokensText(41_200), tokensText(1_234_567)]).toEqual(['950', '41k', '1.2M'])
   })
 })
 
@@ -1474,5 +1528,106 @@ describe('깜빡임', () => {
     hold!(undefined)
     await slow
     expect(await shown()).toEqual(['completed', 'in_progress', 'pending'])
+  })
+})
+
+describe('보조 에이전트 (hook)', () => {
+  test('시작·도구·토큰·끝을 장부에 쓰고, 메인 상태를 바꾸지 않으며, 사람 프롬프트에 끝난 것을 지운다', async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', () => ({ text: '' }))
+    on('tool.call', () => ({ result: 'ok', text: 'ok' }) as any)
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    let spawned = 0
+    on('agent.spawn', () => {
+      const n = ++spawned
+      // 엔진이 에이전트를 띄우는 동안 다른 hook 이 끼어들 수 있게 한 박자 늦게 답한다
+      return Promise.resolve().then(() => ({ model: n === 1 ? 'claude-haiku-5-5' : 'claude-sonnet-5-5', agentId: `sub-${n}` }))
+    })
+    let listed: any[] = []
+    on('agent.list', () => ({ value: listed }))
+    on('turn.step', async function* ($, e: any) {
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...USAGE, model: 'm' } }
+    })
+    const step = async (agentId: string) => {
+      const s = $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 3, agentId } as any)
+      for await (const _ of s) { /* 조각 없음 */ }
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+
+    // 첫 요청이 spawn 결과보다 먼저 와도 토큰을 잃지 않는다
+    await step('sub-1')
+    await $.agent.spawn({ prompt: '표본 고르기', description: 'G4 표본 고르기', subagentType: 'Explore' } as any)
+    await $.turn.start({ turnId: 's1', agentId: 'sub-1' } as any)
+    await $.tool.call({ tool: 'Grep', pattern: 'flowArt', agentId: 'sub-1', tool_use_id: 'g1' } as any)
+    await clock.advance(3_000)
+    const per = USAGE.input_tokens + USAGE.output_tokens + USAGE.cache_read_input_tokens + USAGE.cache_creation_input_tokens
+    expect(mine().agents).toMatchObject([{ id: 'sub-1', desc: 'G4 표본 고르기', type: 'Explore', model: 'claude-haiku-5-5', status: 'working', tokens: per }])
+    expect(mine().agents[0].tool).toContain('flowArt')
+    // 서브의 시작과 도구는 메인 상태·단계를 바꾸지 않는다
+    expect(mine().state).toBe('idle')
+    expect(mine().step).toBe('')
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    expect(await pane.find({ type: 'Text', text: /^보조$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /● 1 작업 · Explore: / })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /● 보조 1/ })).toBeDefined()
+    await pane.unmount()
+
+    // 끝: 엔진 목록 보정과 turn.complete 둘 다 같은 결과
+    await $.turn.complete({ reason: 'answer', answer: '골랐습니다.', durationMs: 1, isAborted: false, turnId: 's1', agentId: 'sub-1' } as any)
+    expect(mine().agents[0]).toMatchObject({ status: 'done', tool: '' })
+    expect(mine().state).toBe('idle')
+
+    const detail = await (async () => {
+      await $.command.run({ command: 'board', args: 'order-svc' } as any)
+      return $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    })()
+    expect(await detail.find({ type: 'Text', text: /^보조 에이전트 $/ })).toBeDefined()
+    expect(await detail.find({ type: 'Text', text: /Explore · haiku-5-5 · 끝 · 0:03/ })).toBeDefined()
+    await detail.unmount()
+
+    // 작업 알림은 지우지 않고, 사람이 보낸 프롬프트에 끝난 에이전트를 지운다
+    await $.prompt.submit({ text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } } as any)
+    expect(mine().agents.length).toBe(1)
+    await $.prompt.submit({ text: '다음으로 가자', origin: { kind: 'composer' } } as any)
+    expect(mine().agents).toEqual([])
+
+    // 끝 신호를 놓쳐도 틱에서 엔진 목록으로 보정한다
+    await $.agent.spawn({ prompt: 'x', description: '판정', subagentType: 'general-purpose' } as any)
+    listed = [{ id: 'sub-2', status: 'failed' }]
+    await clock.advance(3_000)
+    expect(mine().agents[0]).toMatchObject({ id: 'sub-2', status: 'failed' })
+
+    // 같은 응답에서 둘을 함께 띄워도 둘 다 장부에 남는다 (실세션 L2: 나중 것이 앞 것을 덮었다)
+    await Promise.all([
+      $.agent.spawn({ prompt: 'a', description: '하나', subagentType: 'Explore' } as any),
+      $.agent.spawn({ prompt: 'b', description: '둘', subagentType: 'Explore' } as any),
+    ])
+    await Promise.all([
+      $.turn.complete({ reason: 'answer', answer: 'a', durationMs: 1, isAborted: false, turnId: 's3', agentId: 'sub-3' } as any),
+      $.turn.complete({ reason: 'error', answer: '', durationMs: 1, isAborted: false, turnId: 's4', agentId: 'sub-4' } as any),
+    ])
+    expect(mine().agents.map((a: any) => `${a.id}:${a.status}`)).toEqual(['sub-2:failed', 'sub-3:done', 'sub-4:failed'])
   })
 })

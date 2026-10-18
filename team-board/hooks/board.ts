@@ -1,5 +1,5 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
-import type { Beat, Decision, Event, ExplainKind, RecentLine, Task, WorkPlan } from '../types'
+import type { Beat, Decision, Event, ExplainKind, RecentLine, SubAgent, Task, WorkPlan } from '../types'
 import { EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 
@@ -12,7 +12,7 @@ export const MAX_DECISIONS = 20
 export function emptyBeat(id: string, name: string, cwd: string): Beat {
   return {
     id, name, cwd, state: 'idle', step: '', prompt: '', last: '', question: '', recent: [],
-    contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], fail: null, cacheAt: null, updatedAt: 0,
+    contextPct: null, tasks: [], decisions: [], timeline: [], edits: 0, files: [], fail: null, agents: [], cacheAt: null, updatedAt: 0,
   }
 }
 
@@ -482,4 +482,89 @@ export function bandOrder(beats: readonly Beat[], now: number, meId: string | un
           : b.id === meId ? 2
             : b.state === 'working' ? 3 : 4
   return [...beats].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
+}
+
+// ---- 보조 에이전트 (G3) ----
+
+/** 한 세션에 남겨 둘 보조 에이전트 수. 넘치면 끝난 것부터 버린다. */
+export const MAX_AGENTS = 12
+
+/** 새 보조 에이전트를 장부에 넣는다. 같은 id 가 있으면 (resume) 다시 작업 중으로 돌린다. */
+export function agentStart(
+  list: readonly SubAgent[],
+  a: { id: string; desc: string; type: string; model: string; at: number },
+): SubAgent[] {
+  const rest = list.filter(x => x.id !== a.id)
+  const next: SubAgent = { id: a.id, desc: a.desc, type: a.type, model: a.model, status: 'working', tool: '', startedAt: a.at, endedAt: null, tokens: list.find(x => x.id === a.id)?.tokens ?? 0 }
+  const out = [...rest, next]
+  while (out.length > MAX_AGENTS) {
+    const i = out.findIndex(x => x.status !== 'working')
+    out.splice(i < 0 ? 0 : i, 1)
+  }
+  return out
+}
+
+/** 장부의 한 에이전트를 고친다. 모르는 id 면 그대로 (mod 가 늦게 켜졌거나 다른 세션의 것). */
+export function agentPatch(list: readonly SubAgent[], id: string, patch: (a: SubAgent) => SubAgent): SubAgent[] {
+  return list.some(a => a.id === id) ? list.map(a => (a.id === id ? patch(a) : a)) : (list as SubAgent[])
+}
+
+/** 끝: 오류·중단이면 실패. 이미 끝난 것은 처음 끝난 시각을 지킨다. */
+export function agentEnd(list: readonly SubAgent[], id: string, ok: boolean, at: number): SubAgent[] {
+  return agentPatch(list, id, a => (a.status === 'working' ? { ...a, status: ok ? 'done' : 'failed', tool: '', endedAt: at } : a))
+}
+
+/** 엔진 목록($.agent.list)의 상태로 보정한다: 끝난 신호를 놓쳤을 때를 위해. */
+export function agentSync(list: readonly SubAgent[], infos: readonly { id: string; status: string }[], at: number): SubAgent[] {
+  let out = list as SubAgent[]
+  for (const i of infos) {
+    if (i.status === 'completed') out = agentEnd(out, i.id, true, at)
+    else if (i.status === 'failed' || i.status === 'killed') out = agentEnd(out, i.id, false, at)
+  }
+  return out
+}
+
+/** 사람이 새 프롬프트를 보내면 끝난 에이전트를 지운다. */
+export function agentClearEnded(list: readonly SubAgent[]): SubAgent[] {
+  return list.filter(a => a.status === 'working')
+}
+
+export function agentCounts(list: readonly SubAgent[]): { working: number; done: number; failed: number } {
+  return {
+    working: list.filter(a => a.status === 'working').length,
+    done: list.filter(a => a.status === 'done').length,
+    failed: list.filter(a => a.status === 'failed').length,
+  }
+}
+
+/** 카드 한 줄: `● 2 작업 · ✓ 1 끝 · ✗ 1 실패 · Explore: Grep`. 에이전트가 없으면 ''. */
+export function agentSummary(list: readonly SubAgent[]): string {
+  if (list.length === 0) return ''
+  const c = agentCounts(list)
+  const parts = [c.working ? `● ${c.working} 작업` : '', c.done ? `✓ ${c.done} 끝` : '', c.failed ? `✗ ${c.failed} 실패` : ''].filter(Boolean)
+  const busy = [...list].reverse().find(a => a.status === 'working' && a.tool)
+  if (busy) parts.push(`${busy.type || '에이전트'}: ${busy.tool}`)
+  return parts.join(' · ')
+}
+
+/** 토큰을 짧게: 950, 41k, 1.2M */
+export function tokensText(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+/** 경과 시간을 m:ss 로 (1시간 넘으면 h:mm:ss) */
+export function spanText(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const mm = String(Math.floor((s % 3600) / 60))
+  const ss = String(s % 60).padStart(2, '0')
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mm.padStart(2, '0')}:${ss}` : `${mm}:${ss}`
+}
+
+/** 상세 목록 한 줄의 뒷부분: `Explore · haiku-5-5 · Grep · 2:10 · 41k` */
+export function agentMeta(a: SubAgent, now: number): string {
+  const doing = a.status === 'working' ? a.tool || '시작' : a.status === 'done' ? '끝' : '실패'
+  const span = spanText((a.endedAt ?? now) - a.startedAt)
+  return [a.type, a.model.replace(/^claude-/, ''), doing, span, a.tokens ? tokensText(a.tokens) : ''].filter(Boolean).join(' · ')
 }

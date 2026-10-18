@@ -1,9 +1,17 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, WorkPlan } from '../types'
+import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, SubAgent, WorkPlan } from '../types'
 import {
   EVENT_MARK,
+  agentClearEnded,
+  agentCounts,
+  agentEnd,
+  agentMeta,
+  agentPatch,
+  agentStart,
+  agentSummary,
+  agentSync,
   ago,
   applyTaskTool,
   askUserText,
@@ -110,6 +118,13 @@ const self = {
   undo: null as { question: string; decisions: Decision[]; decide: Event } | null,
   /** 마지막 결정 요청의 직전 대화. 질문을 되돌릴 때(htmlKeep, undo) 함께 되돌린다 */
   lastRecent: [] as RecentLine[],
+  /** 보조 에이전트가 장부에 오르기 전에 쓴 토큰 (첫 요청이 agent.spawn 결과보다 먼저 올 수 있다) */
+  earlyTokens: {} as Record<string, number>,
+}
+
+/** 요청 하나가 처리한 토큰: 입력·캐시 읽기·캐시 쓰기·출력의 합 */
+function stepTokens(u: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }): number {
+  return u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -131,6 +146,27 @@ async function save($: EngineInterface, patch: Partial<Beat>, force = false): Pr
   const snapshot: Beat = { ...self.beat }
   await update($, me, () => snapshot)
   await $.fs.write(`${self.dir}/${self.beat.id}.json`, JSON.stringify(snapshot))
+}
+
+/**
+ * 보조 에이전트 장부를 바꾸고 쓴다. 읽기와 바꾸기를 await 없이 한 번에 해야 한다:
+ * 같은 응답에서 띄운 에이전트들의 hook 이 동시에 돌아, await 앞에서 읽은 장부로 쓰면 서로 덮는다.
+ */
+async function setAgents($: EngineInterface, change: (agents: SubAgent[]) => SubAgent[], force = false): Promise<void> {
+  if (!self.beat) return
+  self.beat.agents = change(self.beat.agents)
+  await save($, {}, force)
+}
+
+/** 끝난 신호를 놓친 보조 에이전트를 엔진 목록으로 보정한다. 세션이 끝난 뒤의 틱에서는 목록이 거부되므로 무시한다. */
+async function syncAgents($: EngineInterface): Promise<void> {
+  if (!self.beat || !self.beat.agents.some(a => a.status === 'working')) return
+  const infos = await $.agent.list().catch(() => null)
+  if (!infos) return
+  const at = await $.clock.now()
+  const before = self.beat.agents.map(a => a.status).join()
+  self.beat.agents = agentSync(self.beat.agents, infos, at)
+  if (self.beat.agents.map(a => a.status).join() !== before) await save($, {}, true)
 }
 
 /**
@@ -259,7 +295,7 @@ const BOARD_HELP = [
   '',
   '보기',
   '  /board                     전체: 세션마다 요청·진행·결정·결정 대기',
-  '  /board <세션>              자세히: 할 일, 결정 기록 전체, 흐름, 편집 파일   예) /board sub-2',
+  '  /board <세션>              자세히: 할 일, 보조 에이전트, 결정 기록 전체, 흐름, 편집 파일   예) /board sub-2',
   '',
   '이름',
   '  /board name <이름>         이 세션의 표시 이름 (다시 열어도 유지)          예) /board name api-fix',
@@ -389,6 +425,7 @@ export const register: Register = (on, options) => {
 
     $.clock.every(TICK_MS, async () => {
       const stale = (await $.clock.now()) - self.lastWrite > HEARTBEAT_MS
+      await syncAgents($)
       if (self.beat && (self.dirty || stale)) await save($, {}, true)
       await scan($)
       await runExplain($)
@@ -439,6 +476,7 @@ export const register: Register = (on, options) => {
       timeline = pushCapped(timeline, event(at, 'prompt', text), MAX_TIMELINE)
       // 결정과 새 요청을 한 번에 쓴다. 답을 보냈으니 더 이상 결정 대기가 아니다.
       self.htmlKeep = ''
+      self.beat.agents = agentClearEnded(self.beat.agents)
       await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), state: 'working', step: '생각 중' }, true)
     } else if (e.origin.kind === 'plugin' && e.origin.name === 'team-board' && self.beat?.state === 'asking' && self.beat.question) {
       // HTML 버튼이 보낸 요청: 결정은 아직 남아 있다
@@ -456,6 +494,8 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e)) // 표시가 실패해도 work-plan 의 기록은 그대로 선다
 
   on('turn.start', async ($, e, next) => {
+    // 보조 에이전트의 시작도 여기로 온다. 메인을 작업 중으로 바꾸지 않는다
+    if (e.agentId) return next(e)
     await save($, { state: 'working', step: '생각 중', question: '' })
     return next(e)
   })
@@ -464,8 +504,29 @@ export const register: Register = (on, options) => {
   // 도구 호출 기록처럼 1.5초에 한 번까지만 쓰고, 미룬 것은 다음 틱에 쓴다.
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId) await save($, { cacheAt: await $.clock.now() })
-    return yield* next(e)
+    const r = yield* next(e)
+    const id = e.agentId
+    if (id && r.usage && self.beat) {
+      const n = stepTokens(r.usage)
+      if (self.beat.agents.some(a => a.id === id)) await setAgents($, list => agentPatch(list, id, a => ({ ...a, tokens: a.tokens + n })))
+      else self.earlyTokens[id] = (self.earlyTokens[id] ?? 0) + n
+    }
+    return r
   })
+
+  // 보조 에이전트(서브에이전트·워크플로·팀원)의 시작. 관찰만 하므로 실패해도 띄우기를 막지 않는다
+  on('agent.spawn', async ($, e, next) => {
+    const r = await next(e)
+    if (!r.agentId || !self.beat) return r
+    const desc = e.workflow ? `워크플로 ${e.workflow.agentIndex + 1}` : e.description || e.name || ''
+    const type = e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : e.subagentType || 'agent'
+    const id = r.agentId
+    const at = await $.clock.now()
+    const early = self.earlyTokens[id] ?? 0
+    delete self.earlyTokens[id]
+    await setAgents($, list => agentPatch(agentStart(list, { id, desc, type, model: r.model, at }), id, a => ({ ...a, tokens: a.tokens + early })), true)
+    return r
+  }).catch(($, e, next) => next(e))
 
   // compact 뒤에는 대화 앞부분이 바뀌어 캐시가 없다. 다음 메인 요청에서 다시 잰다.
   on('session.compact', async ($, e, next) => {
@@ -542,15 +603,26 @@ export const register: Register = (on, options) => {
       const file = basename(String(input.file_path ?? input.notebook_path ?? ''))
       const files = [file, ...self.beat.files.filter(f => f !== file)].slice(0, 12)
       await save($, { step, edits: self.beat.edits + 1, files })
-    } else {
-      await save($, { step: main ? step : `(서브) ${step}` })
+    } else if (main) {
+      await save($, { step })
+    } else if (self.beat && e.agentId) {
+      // 보조 에이전트의 도구는 메인 단계를 덮지 않고 그 에이전트 줄에만 쓴다
+      const id = e.agentId
+      await setAgents($, list => agentPatch(list, id, a => ({ ...a, tool: step })))
     }
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId) return r
+    if (e.agentId) {
+      const reason = (e as { reason?: string }).reason
+      const ok = !e.isAborted && reason !== 'error' && reason !== 'refusal'
+      const id = e.agentId
+      const at = await $.clock.now()
+      await setAgents($, list => agentEnd(list, id, ok, at), true)
+      return r
+    }
 
     const usage = await $.session.usage().catch(() => null)
     const contextPct = usage?.context?.percent ?? null
@@ -747,6 +819,8 @@ export const register: Register = (on, options) => {
       return { done: a.done + p.done, total: a.total + p.total }
     }, { done: 0, total: 0 })
     const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now)).length
+    // 팀 전체에서 지금 도는 보조 에이전트 수
+    const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
     const SEG = { done: pal.ok, now: pal.work, left: pal.dim, end: pal.text } as const
 
     const stateOf = (b: Beat) => {
@@ -819,6 +893,7 @@ export const register: Register = (on, options) => {
             {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
             {count('working') ? <Text backgroundColor={pal.work} color={pal.onBadge} bold>{` 작업 ${count('working')} `}</Text> : null}
             {count('idle') ? <Text backgroundColor={pal.dim} color={pal.onBadge} bold>{` 대기 ${count('idle')} `}</Text> : null}
+            {helpers ? <Text color={pal.work} bold>{`보조 ${helpers}`}</Text> : null}
             {sum.total ? (
               <Text>
                 <Text color={pal.ok}>{bar(sum.done, sum.total, 8)}</Text>
@@ -998,6 +1073,7 @@ export const register: Register = (on, options) => {
               {titleRow(b)}
               {second}
               {progressRow(b) ?? (b.prompt && !showsPrompt ? row('요청', <Text color={pal.dim} wrap="truncate-end">{b.prompt}</Text>) : null)}
+              {b.agents.length ? row('보조', <Text color={agentCounts(b.agents).working ? pal.work : pal.dim} wrap="truncate-end">{agentSummary(b.agents)}</Text>) : null}
             </Box>
           </Box>
         </Box>
@@ -1259,6 +1335,24 @@ export const register: Register = (on, options) => {
             </Box>
           ) : null}
 
+          {b.agents.length ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text>
+                <Text color={pal.accent} bold>보조 에이전트 </Text>
+                <Text color={pal.dim}>{agentSummary(b.agents)}</Text>
+              </Text>
+              {b.agents.map(a => (
+                <Text wrap="truncate-end">
+                  <Text color={a.status === 'working' ? pal.work : a.status === 'done' ? pal.ok : pal.bad}>
+                    {a.status === 'working' ? '  ● ' : a.status === 'done' ? '  ✓ ' : '  ✗ '}
+                  </Text>
+                  <Text color={a.status === 'working' ? pal.text : pal.dim}>{a.desc || a.id}</Text>
+                  <Text color={pal.dim}>{`  ${agentMeta(a, now)}`}</Text>
+                </Text>
+              ))}
+            </Box>
+          ) : null}
+
           <Box flexDirection="column" marginTop={1}>
             <Text>
               <Text color={pal.accent} bold>결정 기록 </Text>
@@ -1324,6 +1418,7 @@ export const register: Register = (on, options) => {
       { done: 0, total: 0 },
     )
     const count = (s: Beat['state']) => list.filter(b => b.state === s && !isStale(b, now)).length
+    const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
     return (
       <Box flexDirection="column" paddingX={1}>
         <Box flexDirection="row" columnGap={2} flexWrap="wrap" marginBottom={1}>
@@ -1332,6 +1427,7 @@ export const register: Register = (on, options) => {
           {list.some(b => b.fail?.level === 'high' && !isStale(b, now)) ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 숨은 실패 ${list.filter(b => b.fail?.level === 'high' && !isStale(b, now)).length} `}</Text> : null}
           <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
           <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
+          {helpers ? <Text color={pal.work}>{`● 보조 ${helpers}`}</Text> : null}
           {sum.total ? (
             <Text>
               <Text color={pal.dim}>전체 </Text>
