@@ -213,8 +213,11 @@ team-board가 숨은 실패를 찾으면 아래와 같이 알립니다.
 
 ### 무시하는 것
 
-- 읽기만 하는 단계로만 된 명령: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `xargs grep`, `git log/diff/rev-parse`, `git -C <경로> …`, `pwd`, `docker logs`, `kubectl logs` 등. `echo x && ./gradlew test` 처럼 다른 단계가 섞이면 판정합니다.
-- 통과 요약: `0 failed`, `ok=1 skipped=0`
+- 읽기만 하는 단계로만 된 명령: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `sed`(`-i` 없이), `fold`, `xargs grep`, `git log/diff/rev-parse`, `git -C <경로> …`, `pwd`, `docker logs`, `kubectl logs` 등. `/bin/ls` 처럼 경로를 붙여도 같습니다. `echo x && ./gradlew test` 처럼 다른 단계가 섞이면 판정합니다.
+  - 반복·조건 구문(`for f in …; do …; done`, `if [ -f x ]; then …; fi`)은 건너뛰고 안쪽 명령으로 판정합니다.
+  - 출력을 파일로 쓰는 단계(`git show x > f`, `>> f`)는 읽기 전용으로 보지 않습니다. `2>&1`, `> /dev/null` 은 괜찮습니다.
+- 통과 요약: `0 failed`, `ok=1 skipped=0`, `tests 52 failures 0`
+- 정규식 소스 코드 줄(`(?:`, `\b`, `pattern: /` 가 든 줄)에 있는 실패 문구. 감지 규칙 같은 코드를 출력한 경우입니다.
 - 읽기 도구가 파일이 없다고 알린 줄: `ls x 2>&1` 의 `No such file or directory`
 - `File "…"` 줄이 뒤따르지 않는 `Traceback` 한 줄
 - team-board 상태 파일(`.claude/team-board/`)을 다시 출력하는 명령

@@ -495,6 +495,23 @@ describe('숨은 실패', () => {
     expect(scanOutput('Caused by: java.sql.SQLSyntaxErrorException: Table not found')[0]!.label).toBe('예외 발생')
   })
 
+  test('감지 규칙 같은 정규식 소스 코드 줄은 실패로 보지 않고, 같은 출력의 실제 실패는 잡는다 (2026-10-18 오탐)', async () => {
+    // sed -n 과 claude plugin list 를 && 로 이어 failure.ts 를 출력한 경우
+    const code = [
+      "52:const READ_MISSING = /^(?:(?:ls|stat|cat): .*No such file or directory.*|\"[^\"\\n]*\": No such file or directory \\(os error 2\\))$/gm",
+      "  { label: 'Spring 기동 실패', pattern: /APPLICATION FAILED TO START|Application run failed/, severity: 'high' },",
+      "  { label: '컴파일 오류', pattern: /^e: (?:file:\\/\\/)?\\S+\\.kts?[:(]|Compilation failed/m, severity: 'high' },",
+      "  { label: '실행된 테스트 없음', pattern: /No tests found for given includes|\\bno tests? (?:found|ran)\\b/i, severity: 'warn' },",
+    ].join('\n')
+    expect(judge('cd team-board && sed -n 1,50p hooks/failure.ts && claude plugin list', code, 1)).toBeNull()
+    // 같은 규칙의 매칭이 코드 줄 뒤에 실제로 있으면 그 줄을 보인다
+    const both = `${code}\nbash: foo: command not found`
+    expect(scanOutput(both)).toEqual([{ label: '명령·파일 없음', severity: 'high', line: 'bash: foo: command not found' }])
+    // 실제 오류 메시지는 그대로 잡는다
+    expect(scanOutput("python3: can't open file '/x/run.py': [Errno 2] No such file or directory")[0]!.label).toBe('명령·파일 없음')
+    expect(scanOutput('***************************\nAPPLICATION FAILED TO START\n***************************')[0]!.label).toBe('Spring 기동 실패')
+  })
+
   test('통과 요약과 0 건은 조용하다', async () => {
     expect(scanOutput('Tests run: 42, Failures: 0, Errors: 0, Skipped: 0\nBUILD SUCCESSFUL in 9s')).toEqual([])
     expect(scanOutput('12 tests completed, 0 failed')).toEqual([])
@@ -523,6 +540,30 @@ describe('숨은 실패', () => {
     expect(isReadOnly('echo y | ./gradlew test')).toBe(false)
     expect(isReadOnly('ls build || ./gradlew build')).toBe(false)
     expect(isReadOnly('grep -n FAILED build/test.log | head -20')).toBe(true)
+  })
+
+  test('반복·조건 구문은 건너뛰고 안쪽 명령으로 판정한다, 파일로 쓰는 단계는 읽기 전용이 아니다 (2026-10-18 표본)', async () => {
+    // 로그 보기: 표본의 오탐
+    expect(isReadOnly('D=data/logs; for f in a b; do echo "== $f"; grep -m3 ERROR $D/$f.log; done')).toBe(true)
+    expect(isReadOnly('for f in a b; do [ -f $f ] && tail -5 $f; done 2>&1')).toBe(true)
+    expect(isReadOnly("sed 's/\\x1b\\[[0-9;]*m//g' red.log | grep -E 'Tests run|FAIL'")).toBe(true)
+    expect(isReadOnly('/bin/ls -la logs && /usr/bin/grep -n FAILED logs/x.log | fold -w 200')).toBe(true)
+    expect(isReadOnly('if [ -s x.log ]; then cat x.log; fi')).toBe(true)
+    // 안쪽에 실행 명령이 있으면 판정한다
+    expect(isReadOnly('for m in a b; do ./gradlew :$m:test; done')).toBe(false)
+    expect(isReadOnly('if ./gradlew test; then echo ok; fi')).toBe(false)
+    expect(isReadOnly("sed -i '' 's/a/b/' x.ts && cat x.ts")).toBe(false)
+    expect(isReadOnly('sed --in-place s/a/b/ x.ts')).toBe(false)
+    // 파일로 쓰는 단계: 표본의 정탐(쓰기 실패)을 놓치지 않는다
+    expect(isReadOnly('for c in a b; do git show $c:docs/x.md > /tmp/out/$c.md; done')).toBe(false)
+    expect(isReadOnly('grep -n x a.log >> notes.txt')).toBe(false)
+    expect(isReadOnly('grep -n x a.log 2>/dev/null; cat b.log 2>&1 >/dev/null; echo "a > b"')).toBe(true)
+  })
+
+  test('`tests 52 failures 0` 의 52 는 실패 수가 아니다', async () => {
+    expect(scanOutput('tests 52 failures 0 errors 0 skipped 0')).toEqual([])
+    expect(scanOutput('Tests: 3 failed, 9 passed')[0]!.label).toBe('실패한 테스트')
+    expect(scanOutput('12 tests completed, 1 failed')[0]!.label).toBe('실패한 테스트')
   })
 
   test('따옴표 안의 | ; 는 단계 구분자가 아니다', async () => {

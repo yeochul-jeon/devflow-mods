@@ -11,7 +11,7 @@ type Rule = { label: string; pattern: RegExp; severity: Severity }
 /** 명령에 skipTests·skipITs·maven.test.skip 이 있으면 일부러 건너뛴 것이라 보지 않는다 (judge). */
 const MAVEN_SKIP = 'Maven 테스트 건너뜀'
 
-/** 숫자는 1 이상만 ([1-9]\d*): "0 failed" 같은 통과 요약은 걸리지 않는다. 앞에 = : 가 붙은 숫자(`ok=1 skipped=0`)는 앞 항목의 값이라 세지 않는다. */
+/** 숫자는 1 이상만 ([1-9]\d*): "0 failed" 같은 통과 요약은 걸리지 않는다. 앞에 = : 가 붙은 숫자(`ok=1 skipped=0`)와 `tests 52 failures 0` 의 52 처럼 앞 낱말의 값인 숫자는 세지 않는다. */
 const RULES: Rule[] = [
   // JVM 빌드·테스트
   { label: '실패한 테스트', pattern: /\b\d+ tests? completed, [1-9]\d* failed\b/, severity: 'high' },
@@ -24,7 +24,7 @@ const RULES: Rule[] = [
   { label: 'Spring 기동 실패', pattern: /APPLICATION FAILED TO START|Application run failed/, severity: 'high' },
   { label: '예외 발생', pattern: /^Exception in thread "|^Caused by: [\w.$]+(?:Exception|Error)\b/m, severity: 'high' },
   // 일반
-  { label: '실패한 테스트', pattern: /(?<![=:])\b[1-9]\d*\s+(?:tests?\s+|specs?\s+|suites?\s+)?(?:failed|failing|failures?)\b/i, severity: 'high' },
+  { label: '실패한 테스트', pattern: /(?<![=:]|\b(?:tests?|specs?|suites?)\s)\b[1-9]\d*\s+(?:tests?\s+|specs?\s+|suites?\s+)?(?:failed|failing|failures?)\b/i, severity: 'high' },
   { label: '실패한 테스트', pattern: /^\s*[1-9]\d* fail\s*$/m, severity: 'high' }, // bun: " 2 fail"
   { label: 'FAIL 표시', pattern: /^\s*(?:FAIL|FAILED)\b/m, severity: 'high' },
   { label: 'npm 오류', pattern: /^\s*npm (?:ERR!|error)\s/m, severity: 'high' },
@@ -46,7 +46,7 @@ const MASKS: { label: string; pattern: RegExp }[] = [
 ]
 
 /** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. */
-const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed -n|awk|echo|printf|sort|uniq|cut|tr|column|nl)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:-C \S+ )?(?:log|diff|show|blame|grep|status|rev-parse|ls-files|ls-tree|rev-list|describe|cat-file|show-ref)\b|^pwd\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
+const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed(?![^|;]*\s(?:-i|--in-place)\b)|awk|echo|printf|sort|uniq|cut|tr|column|nl|fold|file|stat)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:-C \S+ )?(?:log|diff|show|blame|grep|status|rev-parse|ls-files|ls-tree|rev-list|describe|cat-file|show-ref)\b|^pwd\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
 
 /** 읽기 도구가 파일이 없다고 알린 줄: 존재 확인의 답이지 실패가 아니다. 빌드·실행 도구가 낸 없음은 남긴다. */
 const READ_MISSING = /^(?:(?:ls|stat|cat|head|tail|grep|rg|wc|du|file|find|readlink|realpath|diff|bat|eza|jq|sed|awk): .*No such file or directory.*|"[^"\n]*": No such file or directory \(os error 2\))$/gm
@@ -88,12 +88,20 @@ function steps(command: string): string[] {
   parts.push(src.slice(from))
   return parts
     .map(s => s.trim().replace(/^(?:[A-Za-z_]\w*=(?!\S*(?:\$\(|`))\S*(?:\s+|$))+/, ''))
-    .filter(s => s && !/^cd\s/.test(s) && !/^(?:true|:)$/.test(s))
+    // 셸 구문은 건너뛰고 안쪽 명령만 본다: `for f in …; do grep …; done`, `if [ -f x ]; then cat x; fi`
+    .map(s => s.replace(/^(?:do|then|else|elif|if|until)\s+/, '').replace(/^(?:\/usr)?\/bin\//, ''))
+    .filter(s => s && !/^cd\s/.test(s) && !/^(?:true|:)$/.test(s) && !SHELL_SYNTAX.test(s))
 }
 
-/** 모든 단계가 읽기 전용일 때만 true. `echo x && ./gradlew test` 는 판정한다. */
+/** 실행하는 명령이 아닌 셸 구문: 반복·조건의 머리와 끝, 파일 검사 `[ -f x ]`. */
+const SHELL_SYNTAX = /^(?:for\s+\w+\s+in\b.*|(?:done|fi|esac)(?:\s*[0-9]?>&?\s*\S+)*|\[\[? .*\]\]?|while\s+(?:IFS=\S*\s+)?read\b.*)$/
+
+/** 출력을 파일로 쓰는 리다이렉트: `> f`, `>> f`. `2>&1`, `>&2`, `> /dev/null` 은 아니다. */
+const WRITES_FILE = /(?:^|[^0-9&>])>>?\s*(?!&|\/dev\/null\b)[^\s>&]/
+
+/** 모든 단계가 읽기 전용일 때만 true. `echo x && ./gradlew test` 는 판정한다. 파일로 쓰는 단계(`git show x > f`)는 읽기 전용이 아니다. */
 export function isReadOnly(command: string): boolean {
-  return steps(command).every(s => READ_ONLY.test(s))
+  return steps(command).every(s => READ_ONLY.test(s) && !WRITES_FILE.test(s.replace(/'[^']*'|"[^"]*"/g, '')))
 }
 
 /**
@@ -107,6 +115,12 @@ export function commandKey(command: string): string {
   return redact(words.slice(0, ['run', '-m', 'exec'].includes(words[1] ?? '') ? 3 : 2).join(' '))
 }
 
+function fullLine(text: string, index: number): string {
+  const start = text.lastIndexOf('\n', index) + 1
+  const end = text.indexOf('\n', index)
+  return text.slice(start, end === -1 ? undefined : end)
+}
+
 function lineAround(text: string, index: number): string {
   const start = text.lastIndexOf('\n', index) + 1
   const end = text.indexOf('\n', index)
@@ -116,14 +130,24 @@ function lineAround(text: string, index: number): string {
 
 export type Finding = { label: string; severity: Severity; line: string }
 
-/** 출력에서 실패 흔적을 찾는다. 같은 이름의 규칙은 한 번만. */
+/**
+ * 정규식 소스 코드 줄: 비캡처 묶음·\b 같은 이스케이프, `pattern: /…`, `= /^…`.
+ * 감지 규칙 파일을 출력한 경우 그 안의 실패 문구는 실패가 아니다. 실제 오류 메시지에는 이런 꼴이 오지 않는다.
+ */
+const REGEX_SOURCE = /\(\?[:=!<]|\\[bBdDsSwW]|\bpattern:\s*\/|=\s*\/\^/
+
+/** 출력에서 실패 흔적을 찾는다. 같은 이름의 규칙은 한 번만. 정규식 소스 코드 줄의 매칭은 건너뛰고 다음 매칭을 본다. */
 export function scanOutput(text: string): Finding[] {
   const body = text.length > MAX_SCAN ? text.slice(-MAX_SCAN) : text
   const out: Finding[] = []
   for (const rule of RULES) {
     if (out.some(f => f.label === rule.label)) continue
-    const m = rule.pattern.exec(body)
-    if (m) out.push({ label: rule.label, severity: rule.severity, line: lineAround(body, m.index) })
+    const all = new RegExp(rule.pattern.source, rule.pattern.flags.replace('g', '') + 'g')
+    for (const m of body.matchAll(all)) {
+      if (REGEX_SOURCE.test(fullLine(body, m.index))) continue
+      out.push({ label: rule.label, severity: rule.severity, line: lineAround(body, m.index) })
+      break
+    }
   }
   return out.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'high' ? -1 : 1))
 }
