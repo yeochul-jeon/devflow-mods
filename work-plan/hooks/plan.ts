@@ -52,9 +52,21 @@ export function withStale(plan: WorkPlan): WorkPlan {
   return { ...plan, stale: true }
 }
 
-/** 첫 프롬프트에 붙일 문맥. compact 뒤에는 모델이 계획을 다시 알도록 지금 목록을 덧붙인다. */
-export function contextFor(plan: WorkPlan, why: 'start' | 'compact'): string {
-  if (why === 'start' || plan.steps.length === 0) return RULE
+/** 첫 프롬프트에 붙일 문맥. compact 뒤에는 모델이 계획을 다시 알도록 지금 목록을 덧붙인다. 게이트를 켰으면 그 사실을 한 줄 더한다. */
+export function contextFor(plan: WorkPlan, why: 'start' | 'compact', gate = false): string {
+  const rule = gate ? `${RULE}\n${GATE_RULE}` : RULE
+  if (why === 'start' || plan.steps.length === 0) return rule
   const lines = plan.steps.map(s => `- [${s.status}] ${s.title}`)
-  return `${RULE}\n\nYour plan before the conversation was compacted (report it again with plan_update when you continue):\n${lines.join('\n')}`
+  return `${rule}\n\nYour plan before the conversation was compacted (report it again with plan_update when you continue):\n${lines.join('\n')}`
 }
+
+// planGate 옵션 (G6). 파일을 바꾸는 도구만 막는다: Bash 는 조사·테스트에 쓰여 막으면 잡음이 크다.
+export const GATED_TOOLS: readonly string[] = ['Edit', 'Write', 'NotebookEdit']
+/** 한 턴에 이만큼 거부하면 그 턴은 풀어 준다. 도구를 못 부르는 환경에서 작업이 멈추지 않게. */
+export const GATE_OPEN_AFTER = 3
+
+export const GATE_RULE =
+  'Plan gate is on: in every turn, Edit, Write and NotebookEdit are refused until you send plan_update in that turn, even for a single edit. Put plan_update before your first edit in the same response: tools run in order as the response arrives.'
+
+export const GATE_DENY =
+  'Refused by the work-plan plan gate: no plan_update in this turn yet. Send plan_update with every step of this task, placed before this call in the same response (tools run in order as the response arrives), then make this call again.'

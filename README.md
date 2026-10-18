@@ -30,6 +30,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 세션 표시 이름 | team-board | `/board name <이름>` | 세션 이름 → 브랜치 → 폴더 |
 | 다른 mod보다 앞에 두기 | team-board | `~/.claude/settings.json` 의 `prependPlugins` | 없음 |
 | 작업 계획 보고 | work-plan | `claude plugin disable work-plan@devflow-mods` | 켜짐 |
+| 계획 전 수정 막기 `planGate` | work-plan | `claude plugin configure work-plan@devflow-mods` | 꺼짐 |
 | 용어 풀이 | plain-terms | `claude plugin disable plain-terms@devflow-mods` | 켜짐 |
 | 다음 요청 제안 | next-steps | `/next on\|off` | 켜짐 |
 
@@ -106,6 +107,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 - 보고는 모델이 하므로 짧은 작업에서는 빠질 수 있습니다.
 
 - 비용: 요청마다 도구 설명 약 560 토큰이 들어갑니다. 보고는 작업 도구와 같은 응답에 실려 요청 수는 늘지 않았습니다(3단계 작업 2회 측정, API 환산 +22%).
+- 선택: `planGate` 를 켜면 한 턴에서 계획을 보고하기 전의 파일 수정(Edit, Write, NotebookEdit)을 거부합니다. 기본은 꺼짐입니다.
 
 동작, 조직 관리 환경(Team, Enterprise)에서의 제약, 알아둘 것은 [work-plan/README.md](work-plan/README.md)를 보세요.
 

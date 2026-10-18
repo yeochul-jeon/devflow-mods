@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { contextFor, emptyPlan, MAX_STEPS, normalizeSteps, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
+import { contextFor, emptyPlan, GATE_DENY, GATE_RULE, MAX_STEPS, normalizeSteps, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
 
 const NOW = 1_800_000_000_000
 
@@ -69,6 +69,12 @@ describe('plan (순수 함수)', () => {
     expect(RULE).toContain('language the user writes in')
     expect(TOOL_DESCRIPTION).toContain('never alone')
     expect(TOOL_DESCRIPTION).toContain('language the user writes in')
+  })
+
+  test('게이트: 문맥에 한 줄 더한다', async () => {
+    const plan = withSteps(emptyPlan(NOW), [{ title: 'a', status: 'doing' }], NOW)
+    expect(contextFor(plan, 'start', true)).toBe(`${RULE}\n${GATE_RULE}`)
+    expect(contextFor(plan, 'compact', true).startsWith(`${RULE}\n${GATE_RULE}\n\n`)).toBe(true)
   })
 })
 
@@ -178,5 +184,65 @@ describe('work-plan (hook)', () => {
     expect(await plan()).toMatchObject({ v: 1, steps: [], stale: false, ended: null })
     await submit('새 작업')
     expect(contexts.at(-1)).toEqual([RULE])
+  })
+})
+
+describe('work-plan planGate (hook)', () => {
+  // 엔진 바닥: 도구는 그대로 답한다
+  function engine(on: any) {
+    mock.clock(on, { now: NOW })
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+    on('tool.register', ($: any, e: any) => ({ value: { tool: `mcp__work-plan__${e.name}` } }))
+    on('prompt.submit', ($: any, e: any) => ({ text: e.text, context: e.context }))
+    on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
+    for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash']) on('tool.call', { tool: t }, () => ({ result: `${t} ok` }))
+  }
+  const call = ($: any, tool: string, agentId?: string) => $.tool.call({ tool, tool_use_id: tool, ...(agentId ? { agentId } : {}) } as any)
+  const start = ($: any, turnId: string, agentId?: string) => $.turn.start({ text: '', turnId, ...(agentId ? { agentId } : {}) } as any)
+  const report = ($: any, steps: unknown, agentId?: string) => $.tool.call({ tool: TOOL, steps, tool_use_id: 'p', ...(agentId ? { agentId } : {}) } as any)
+
+  test('기본값(꺼짐): 계획 없이도 Edit 를 막지 않고 규칙에 게이트 줄이 없다', async ($, on) => {
+    engine(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    const r: any = await $.prompt.submit({ text: '고쳐 줘', origin: { kind: 'composer' }, wait: false } as any)
+    expect(r.context).toEqual([RULE])
+    await start($, 't1')
+    expect(((await call($, 'Edit')) as any).result).toBe('Edit ok')
+  })
+
+  test('켜짐: 이번 턴 계획 보고 전 파일 변경 도구만 거부, 보고 뒤 풀림, 턴마다 다시, 3번 거부 뒤 풀림', { options: { planGate: true } }, async ($, on) => {
+    engine(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    const r: any = await $.prompt.submit({ text: '고쳐 줘', origin: { kind: 'composer' }, wait: false } as any)
+    expect(r.context).toEqual([`${RULE}\n${GATE_RULE}`])
+
+    await start($, 't1')
+    expect(await call($, 'Edit')).toEqual({ deny: GATE_DENY })
+    expect(((await call($, 'Bash')) as any).result).toBe('Bash ok')
+    expect(((await call($, 'Edit', 'sub-1')) as any).result).toBe('Edit ok') // 서브에이전트는 막지 않는다
+
+    // 빈 계획 보고, 잘못된 보고, 서브의 보고는 풀지 않는다
+    await report($, [])
+    await report($, 'x')
+    await report($, STEPS, 'sub-1')
+    expect(await call($, 'Write')).toEqual({ deny: GATE_DENY })
+
+    // 메인의 보고 뒤로는 통과
+    await report($, STEPS)
+    expect(((await call($, 'Edit')) as any).result).toBe('Edit ok')
+    expect(((await call($, 'NotebookEdit')) as any).result).toBe('NotebookEdit ok')
+
+    // 서브의 턴 시작은 메인 판정을 지우지 않고, 메인의 새 턴은 지운다
+    await start($, 's1', 'sub-1')
+    expect(((await call($, 'Edit')) as any).result).toBe('Edit ok')
+    await start($, 't2')
+    expect(await call($, 'Edit')).toEqual({ deny: GATE_DENY })
+
+    // fail-open: 이 턴에서 세 번째 거부 뒤에는 통과
+    expect(await call($, 'Write')).toEqual({ deny: GATE_DENY })
+    expect(await call($, 'Edit')).toEqual({ deny: GATE_DENY })
+    expect(((await call($, 'Edit')) as any).result).toBe('Edit ok')
+    await start($, 't3')
+    expect(await call($, 'Edit')).toEqual({ deny: GATE_DENY })
   })
 })

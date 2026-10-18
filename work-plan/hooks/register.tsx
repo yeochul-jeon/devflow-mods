@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { WorkPlan } from '../types'
-import { contextFor, emptyPlan, normalizeSteps, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from './plan'
+import { contextFor, emptyPlan, GATE_DENY, GATE_OPEN_AFTER, GATED_TOOLS, normalizeSteps, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from './plan'
 
 const TOOL = 'mcp__work-plan__plan_update'
 const plan = atom({ plugin: 'work-plan', key: 'plan' } as const, emptyPlan(0) as WorkPlan)
@@ -12,7 +12,12 @@ const plan = atom({ plugin: 'work-plan', key: 'plan' } as const, emptyPlan(0) as
 // 다음 프롬프트에 붙일 문맥. 대화 첫 프롬프트, compaction 뒤, /clear·/resume 뒤에 한 번씩.
 let pending: 'start' | 'compact' | null = 'start'
 
-export const register: Register = on => {
+// planGate: 이번 메인 턴에 계획 보고가 있었나, 몇 번 거부했나. 메인 turn.start 마다 새로.
+// 보고 여부는 plan_update 호출로 정한다. 엔진은 응답이 다 오기 전에 도구를 차례로 돌리므로 turn.step 결과는 늦다 (2026-10-18 실측).
+let gateTurn = { planned: false, denied: 0 }
+
+export const register: Register = (on, options) => {
+  const gate = options.planGate === true
   on('session.start', async ($, e, next) => {
     await $.tool.register({
       name: 'plan_update',
@@ -45,7 +50,7 @@ export const register: Register = on => {
     if (!pending || e.text.trim().startsWith('/')) return next(e)
     const why = pending
     pending = null
-    return next({ ...e, context: [...(e.context ?? []), contextFor(await read($, plan), why)] })
+    return next({ ...e, context: [...(e.context ?? []), contextFor(await read($, plan), why, gate)] })
   })
 
   // 서브에이전트의 계획은 메인 진행 줄이 아니므로 받기만 하고 저장하지 않는다.
@@ -53,6 +58,7 @@ export const register: Register = on => {
     const steps = normalizeSteps((e as unknown as { steps?: unknown }).steps)
     if (!steps) return { deny: 'plan_update: steps must be an array of { title, status }' }
     if (!e.agentId) {
+      if (steps.length > 0) gateTurn.planned = true
       const now = await $.clock.now()
       await update($, plan, p => withSteps(p, steps, now))
     }
@@ -91,4 +97,18 @@ export const register: Register = on => {
     }
     return next(e)
   })
+
+  // 게이트는 켰을 때만 hook 을 단다. 끄면 0.1.1 과 같은 체인이다.
+  if (!gate) return
+
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) gateTurn = { planned: false, denied: 0 }
+    return next(e)
+  })
+
+  on('tool.call', async ($, e, next) => {
+    if (e.agentId || !GATED_TOOLS.includes(e.tool) || gateTurn.planned || gateTurn.denied >= GATE_OPEN_AFTER) return next(e)
+    gateTurn.denied += 1
+    return { deny: GATE_DENY }
+  }).catch(($, e, next) => next(e)) // 게이트가 고장 나면 막지 않고 통과시킨다
 }
