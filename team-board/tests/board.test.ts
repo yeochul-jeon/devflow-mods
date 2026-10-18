@@ -23,6 +23,7 @@ import {
   describeTool,
   looksLikeQuestion,
   normalize,
+  notificationTokens,
   progress,
   questionSummary,
   recentTurns,
@@ -40,6 +41,9 @@ import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutp
 
 const NOW = 1_800_000_000_000
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+/** 실세션에서 받은 뒤에서 돈 보조 에이전트의 작업 알림 꼴 (2026-10-18 devflow-sub) */
+const NOTIFY = (id: string, tokens: number) =>
+  `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n<summary>Agent "x" finished</summary>\n<usage><subagent_tokens>${tokens}</subagent_tokens><tool_uses>6</tool_uses><duration_ms>48056</duration_ms></usage>\n</task-notification>`
 const beat = (over: Record<string, unknown>) => normalize({ id: 'x', name: 'x', cwd: '/r', contextPct: 10, updatedAt: NOW, ...over } as any)
 
 describe('diagram (ASCII 그림)', () => {
@@ -462,6 +466,12 @@ describe('보조 에이전트 장부', () => {
 
   test('토큰을 짧게 쓴다', async () => {
     expect([tokensText(950), tokensText(41_200), tokensText(1_234_567)]).toEqual(['950', '41k', '1.2M'])
+  })
+
+  test('작업 알림에서 보조 에이전트의 토큰을 읽는다: 여러 개, 토큰 없는 알림은 빼고', () => {
+    expect(notificationTokens(NOTIFY('a1', 36863) + '\n' + NOTIFY('b2', 12))).toEqual([{ id: 'a1', tokens: 36863 }, { id: 'b2', tokens: 12 }])
+    expect(notificationTokens('<task-notification><task-id>sh1</task-id><status>completed</status></task-notification>')).toEqual([])
+    expect(notificationTokens('그냥 글')).toEqual([])
   })
 })
 
@@ -1594,7 +1604,8 @@ describe('보조 에이전트 (hook)', () => {
     on('prompt.submit', ($, e: any) => ({ text: e.text }))
     on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
     on('turn.complete', () => ({ text: '' }))
-    on('tool.call', () => ({ result: 'ok', text: 'ok' }) as any)
+    // 앞에서 돈 Agent 는 결과에 엔진이 센 토큰이 온다
+    on('tool.call', ($, e: any) => (e.tool === 'Agent' ? { result: { status: 'completed', agentId: e.description, totalTokens: 4200 }, text: 'ok' } : { result: 'ok', text: 'ok' }) as any)
     on('ui.open', () => ({ value: { isPlaced: true } }))
     let spawned = 0
     on('agent.spawn', () => {
@@ -1615,14 +1626,13 @@ describe('보조 에이전트 (hook)', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
 
-    // 첫 요청이 spawn 결과보다 먼저 와도 토큰을 잃지 않는다
+    // 도는 동안의 요청 토큰은 세지 않는다. 엔진이 센 수는 끝날 때 온다
     await step('sub-1')
     await $.agent.spawn({ prompt: '표본 고르기', description: 'G4 표본 고르기', subagentType: 'Explore' } as any)
     await $.turn.start({ turnId: 's1', agentId: 'sub-1' } as any)
     await $.tool.call({ tool: 'Grep', pattern: 'flowArt', agentId: 'sub-1', tool_use_id: 'g1' } as any)
     await clock.advance(3_000)
-    const per = USAGE.input_tokens + USAGE.output_tokens + USAGE.cache_read_input_tokens + USAGE.cache_creation_input_tokens
-    expect(mine().agents).toMatchObject([{ id: 'sub-1', desc: 'G4 표본 고르기', type: 'Explore', model: 'claude-haiku-5-5', status: 'working', tokens: per }])
+    expect(mine().agents).toMatchObject([{ id: 'sub-1', desc: 'G4 표본 고르기', type: 'Explore', model: 'claude-haiku-5-5', status: 'working', tokens: 0 }])
     expect(mine().agents[0].tool).toContain('flowArt')
     // 서브의 시작과 도구는 메인 상태·단계를 바꾸지 않는다
     expect(mine().state).toBe('idle')
@@ -1648,9 +1658,14 @@ describe('보조 에이전트 (hook)', () => {
     expect(await detail.find({ type: 'Text', text: /Explore · haiku-5-5 · 끝 · 0:03/ })).toBeDefined()
     await detail.unmount()
 
-    // 작업 알림은 지우지 않고, 사람이 보낸 프롬프트에 끝난 에이전트를 지운다
+    // 작업 알림은 지우지 않고 엔진이 센 토큰을 쓴다. 사람이 보낸 프롬프트에 끝난 에이전트를 지운다
     await $.prompt.submit({ text: '<task-notification>done</task-notification>', origin: { kind: 'task-notification' } } as any)
     expect(mine().agents.length).toBe(1)
+    await $.prompt.submit({ text: NOTIFY('sub-1', 36863), origin: { kind: 'task-notification' } } as any)
+    expect(mine().agents[0].tokens).toBe(36863)
+    // 장부에 없는 에이전트의 알림은 무시한다
+    await $.prompt.submit({ text: NOTIFY('zz', 5), origin: { kind: 'task-notification' } } as any)
+    expect(mine().agents).toMatchObject([{ id: 'sub-1', tokens: 36863 }])
     await $.prompt.submit({ text: '다음으로 가자', origin: { kind: 'composer' } } as any)
     expect(mine().agents).toEqual([])
 
@@ -1670,5 +1685,11 @@ describe('보조 에이전트 (hook)', () => {
       $.turn.complete({ reason: 'error', answer: '', durationMs: 1, isAborted: false, turnId: 's4', agentId: 'sub-4' } as any),
     ])
     expect(mine().agents.map((a: any) => `${a.id}:${a.status}`)).toEqual(['sub-2:failed', 'sub-3:done', 'sub-4:failed'])
+
+    // 앞에서 돈 보조는 Agent 도구 결과의 totalTokens 를 쓴다. 보조 안에서 부른 Agent 는 메인 장부를 건드리지 않는다
+    await $.tool.call({ tool: 'Agent', description: 'sub-3', agentId: 'sub-4', tool_use_id: 'x0' } as any)
+    expect(mine().agents.find((a: any) => a.id === 'sub-3').tokens).toBe(0)
+    await $.tool.call({ tool: 'Agent', description: 'sub-3', tool_use_id: 'x1' } as any)
+    expect(mine().agents.find((a: any) => a.id === 'sub-3').tokens).toBe(4200)
   })
 })

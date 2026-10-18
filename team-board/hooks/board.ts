@@ -547,6 +547,15 @@ export function agentSummary(list: readonly SubAgent[]): string {
   return parts.join(' · ')
 }
 
+/** 뒤에서 돈 보조 에이전트의 작업 알림에서 엔진이 센 토큰을 읽는다. 한 프롬프트에 알림이 여럿 올 수 있다 */
+export function notificationTokens(text: string): { id: string; tokens: number }[] {
+  return text.split('<task-notification>').slice(1).flatMap(block => {
+    const id = /<task-id>([^<]+)<\/task-id>/.exec(block)?.[1]
+    const n = /<subagent_tokens>(\d+)<\/subagent_tokens>/.exec(block)?.[1]
+    return id && n ? [{ id, tokens: Number(n) }] : []
+  })
+}
+
 /** 토큰을 짧게: 950, 41k, 1.2M */
 export function tokensText(n: number): string {
   if (n < 1000) return String(n)

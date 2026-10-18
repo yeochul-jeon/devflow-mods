@@ -37,6 +37,7 @@ import {
   MAX_DECISIONS,
   MAX_TIMELINE,
   normalize,
+  notificationTokens,
   oneLine,
   progress,
   pushCapped,
@@ -118,13 +119,6 @@ const self = {
   undo: null as { question: string; decisions: Decision[]; decide: Event } | null,
   /** 마지막 결정 요청의 직전 대화. 질문을 되돌릴 때(htmlKeep, undo) 함께 되돌린다 */
   lastRecent: [] as RecentLine[],
-  /** 보조 에이전트가 장부에 오르기 전에 쓴 토큰 (첫 요청이 agent.spawn 결과보다 먼저 올 수 있다) */
-  earlyTokens: {} as Record<string, number>,
-}
-
-/** 요청 하나가 처리한 토큰: 입력·캐시 읽기·캐시 쓰기·출력의 합 */
-function stepTokens(u: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }): number {
-  return u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -481,6 +475,9 @@ export const register: Register = (on, options) => {
     } else if (e.origin.kind === 'plugin' && e.origin.name === 'team-board' && self.beat?.state === 'asking' && self.beat.question) {
       // HTML 버튼이 보낸 요청: 결정은 아직 남아 있다
       self.htmlKeep = self.beat.question
+    } else if (e.origin.kind === 'task-notification' && self.beat) {
+      // 뒤에서 돈 보조 에이전트의 토큰은 엔진이 작업 알림에 적어 준 수를 쓴다
+      for (const n of notificationTokens(text)) await setAgents($, list => agentPatch(list, n.id, a => ({ ...a, tokens: n.tokens })), true)
     }
     return next(e)
   })
@@ -504,14 +501,7 @@ export const register: Register = (on, options) => {
   // 도구 호출 기록처럼 1.5초에 한 번까지만 쓰고, 미룬 것은 다음 틱에 쓴다.
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId) await save($, { cacheAt: await $.clock.now() })
-    const r = yield* next(e)
-    const id = e.agentId
-    if (id && r.usage && self.beat) {
-      const n = stepTokens(r.usage)
-      if (self.beat.agents.some(a => a.id === id)) await setAgents($, list => agentPatch(list, id, a => ({ ...a, tokens: a.tokens + n })))
-      else self.earlyTokens[id] = (self.earlyTokens[id] ?? 0) + n
-    }
-    return r
+    return yield* next(e)
   })
 
   // 보조 에이전트(서브에이전트·워크플로·팀원)의 시작. 관찰만 하므로 실패해도 띄우기를 막지 않는다
@@ -522,9 +512,7 @@ export const register: Register = (on, options) => {
     const type = e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : e.subagentType || 'agent'
     const id = r.agentId
     const at = await $.clock.now()
-    const early = self.earlyTokens[id] ?? 0
-    delete self.earlyTokens[id]
-    await setAgents($, list => agentPatch(agentStart(list, { id, desc, type, model: r.model, at }), id, a => ({ ...a, tokens: a.tokens + early })), true)
+    await setAgents($, list => agentStart(list, { id, desc, type, model: r.model, at }), true)
     return r
   }).catch(($, e, next) => next(e))
 
@@ -609,6 +597,15 @@ export const register: Register = (on, options) => {
       // 보조 에이전트의 도구는 메인 단계를 덮지 않고 그 에이전트 줄에만 쓴다
       const id = e.agentId
       await setAgents($, list => agentPatch(list, id, a => ({ ...a, tool: step })))
+    }
+    if (e.tool === 'Agent' && main) {
+      // 앞에서 돈 보조 에이전트는 도구 결과에 엔진이 센 토큰이 온다 (뒤에서 도는 것은 async_launched 라 없다)
+      const r = await next(e)
+      const out = (r as { result?: { agentId?: unknown; totalTokens?: unknown } }).result
+      const id = out?.agentId
+      const tokens = out?.totalTokens
+      if (typeof id === 'string' && typeof tokens === 'number') await setAgents($, list => agentPatch(list, id, a => ({ ...a, tokens })), true)
+      return r
     }
     return next(e)
   })
