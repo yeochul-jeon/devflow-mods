@@ -3,9 +3,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
-import type { DayFile, Entry, LookView, Period, ProjectReport } from '../types'
+import type { DayFile, Decision, Entry, LookView, Period, ProjectReport } from '../types'
 import {
-  buildReport, clockText, dayOf, dayStartIso, durationText, END_MARK, nextDay, parseGitLog, parseOffset, periodDays,
+  buildReport, clipText, clockText, questionText, dayOf, dayStartIso, decisionsIn, durationText, END_MARK, nextDay, parseGitLog, parseOffset, periodDays, repoKey,
   requestText, summaryPrompt, tokensText, upsert,
 } from './ledger'
 
@@ -20,6 +20,7 @@ const PERIODS: { key: Period; label: string }[] = [
 ]
 const MAX_REQUESTS = 12
 const MAX_COMMITS = 8
+const MAX_DECISIONS = 8
 
 const IDLE: LookView = { status: 'idle', report: null, text: '', summaries: {}, loadedAt: 0 }
 const view = atom({ plugin: 'look-back', key: 'view' } as const, IDLE)
@@ -27,6 +28,7 @@ const view = atom({ plugin: 'look-back', key: 'view' } as const, IDLE)
 // 이 프로세스의 기록 상태. 같은 세션이 두 프로세스에서 돌 수 있어(재개, 상위 세션이 띄운 세션) 파일 이름에 꼬리표를 붙인다.
 const self = {
   on: false,
+  home: '',
   dir: '',
   root: '',
   offset: 0,
@@ -85,7 +87,8 @@ async function load($: EngineInterface, period: Period): Promise<void> {
   const since = dayStartIso(days[0]!, self.offset)
   const until = dayStartIso(nextDay(days[days.length - 1]!), self.offset)
   const commits: Record<string, { commits: ReturnType<typeof parseGitLog>; error: string }> = {}
-  for (const root of new Set(entries.map(e => e.root))) {
+  const decisions = await teamBoardDecisions($, entries, Date.parse(since), Date.parse(until))
+  for (const root of new Set([...entries.map(e => e.root), ...Object.keys(decisions)])) {
     const r = await $.process
       .run(['git', '-C', root, 'log', `--since=${since}`, `--until=${until}`, '--format=%ct%x09%h%x09%s'], { timeoutMs: 5000 })
       .catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: err instanceof Error ? err.message : String(err) }))
@@ -94,8 +97,39 @@ async function load($: EngineInterface, period: Period): Promise<void> {
     else if (/not a git repository/.test(r.stderr)) commits[root] = { commits: [], error: '' }
     else commits[root] = { commits: [], error: '커밋 못 읽음' }
   }
-  const report = buildReport(period, days, entries, commits)
+  const report = buildReport(period, days, entries, commits, decisions)
   await update($, view, (): LookView => ({ status: 'done', report, text: '', summaries: {}, loadedAt: now }))
+}
+
+/**
+ * team-board 가 세션마다 남긴 결정 기록에서 [from, to) 안의 것을 저장소 루트별로 모은다. 감지 규칙은 team-board 의 것을 그대로 쓴다.
+ * team-board 가 없으면 빈 목록. 세션 파일은 결정을 최근 20개만 둔다.
+ */
+async function teamBoardDecisions($: EngineInterface, entries: readonly Entry[], from: number, to: number): Promise<Record<string, Decision[]>> {
+  const base = `${self.home}/.claude/team-board`
+  const rootOf = new Map(entries.map(e => [repoKey(e.root), e.root]))
+  const out: Record<string, Decision[]> = {}
+  for (const dir of await $.fs.list(base).catch(() => [])) {
+    if (dir.kind !== 'dir') continue
+    for (const f of await $.fs.list(`${base}/${dir.name}`).catch(() => [])) {
+      // 기간 시작 전에 마지막으로 쓴 파일에는 기간 안의 결정이 없다
+      if (f.kind !== 'file' || !f.name.endsWith('.json') || f.mtimeMs < from) continue
+      let beat: unknown
+      try {
+        beat = JSON.parse(await $.fs.read(`${base}/${dir.name}/${f.name}`))
+      } catch {
+        continue
+      }
+      const found = decisionsIn(beat, from, to)
+      if (!found.length) continue
+      // look-back 기록이 없는 저장소는 그 세션의 작업 폴더를 루트로 쓴다
+      const cwd = (beat as { cwd?: unknown }).cwd
+      const root = rootOf.get(dir.name) ?? (typeof cwd === 'string' && cwd ? cwd : dir.name)
+      rootOf.set(dir.name, root)
+      out[root] = [...(out[root] ?? []), ...found]
+    }
+  }
+  return out
 }
 
 async function summarize($: EngineInterface, root: string): Promise<void> {
@@ -136,6 +170,7 @@ export const register: Register = on => {
     })
     const cwd = await $.session.cwd()
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? cwd
+    self.home = home
     self.dir = `${home}/.claude/look-back`
     self.root = (await $.session.repo())?.root ?? cwd
     // 모드 런타임의 시간대를 믿지 않고 시스템 시간대를 묻는다 (날짜 경계)
@@ -278,6 +313,9 @@ export const register: Register = on => {
     const reqs = rep.projects.reduce((n, p) => n + p.entries.length, 0)
     const ms = rep.projects.reduce((n, p) => n + p.ms, 0)
     const commits = rep.projects.reduce((n, p) => n + p.commits.length, 0)
+    // 0.2.0 전에 만든 화면 상태에는 decisions 가 없다
+    const decisionsOf = (p: ProjectReport) => p.decisions ?? []
+    const decided = rep.projects.reduce((n, p) => n + decisionsOf(p).length, 0)
 
     const project = (p: ProjectReport, i: number) => {
       const shown = p.entries.slice(-MAX_REQUESTS)
@@ -286,7 +324,11 @@ export const register: Register = on => {
         <Box key={`p${i}`} flexDirection="column" marginTop={1}>
           <Box flexDirection="row" gap={1}>
             <Text bold color="cyan">{p.name}</Text>
-            <Text dimColor>{`요청 ${p.entries.length} · ${durationText(p.ms)} · 커밋 ${p.commits.length} · 토큰 ${tokensText(p.tokens)}`}</Text>
+            <Text dimColor>
+              {p.entries.length ? `요청 ${p.entries.length} · ${durationText(p.ms)} · ` : ''}
+              {`결정 ${decisionsOf(p).length} · 커밋 ${p.commits.length}`}
+              {p.entries.length ? ` · 토큰 ${tokensText(p.tokens)}` : ''}
+            </Text>
             {sum === undefined || sum.startsWith('요약 실패') ? <Button key={`sum-${i}`} label="요약" variant="secondary" onPress={noop} /> : null}
           </Box>
           {sum !== undefined ? <Text color={sum.startsWith('요약 실패') ? 'red' : undefined}>{sum === '…' ? '요약하는 중…' : sum}</Text> : null}
@@ -298,6 +340,16 @@ export const register: Register = on => {
             </Text>
           ))}
           {p.commits.length > MAX_COMMITS ? <Text dimColor>{`  … 커밋 ${p.commits.length - MAX_COMMITS}개 더`}</Text> : null}
+          {decisionsOf(p).length > MAX_DECISIONS ? <Text dimColor>{`  … 앞선 결정 ${decisionsOf(p).length - MAX_DECISIONS}개`}</Text> : null}
+          {decisionsOf(p).slice(-MAX_DECISIONS).map(d => (
+            <Text key={`d${d.at}`} wrap="truncate-end">
+              <Text dimColor>{`  ${clockText(d.at, off)} `}</Text>
+              <Text color="yellow">{'? '}</Text>
+              {clipText(questionText(d.question), 60)}
+              <Text color="yellow">{' → '}</Text>
+              {clipText(d.answer, 40)}
+            </Text>
+          ))}
           {p.entries.length > MAX_REQUESTS ? <Text dimColor>{`  … 앞선 요청 ${p.entries.length - MAX_REQUESTS}개`}</Text> : null}
           {shown.map(r => (
             <Text key={`r${r.at}`} wrap="truncate-end">
@@ -315,12 +367,12 @@ export const register: Register = on => {
       <Box flexDirection="column" paddingX={1}>
         {chips}
         <Text bold>{`돌아보기 · ${range}`}</Text>
-        <Text>{`요청 ${reqs} · Claude 작업 ${durationText(ms)} · 커밋 ${commits} · 프로젝트 ${rep.projects.length}`}</Text>
+        <Text>{`요청 ${reqs} · Claude 작업 ${durationText(ms)} · 결정 ${decided} · 커밋 ${commits} · 프로젝트 ${rep.projects.length}`}</Text>
         {rep.projects.length === 0 ? <Text dimColor>이 기간에 기록된 요청이 없어요. 기록은 look-back 을 설치한 뒤 대화형 세션에서 보낸 요청부터 남아요.</Text> : null}
         {rep.projects.map(project)}
         {self.writeError ? <Text color="red">{`기록 쓰기 실패: ${self.writeError}`}</Text> : null}
         <Box marginTop={1}>
-          <Text dimColor>✓ 답함 · ■ 중단 · ✗ 오류 · 점(·)은 결과 모름(턴 중에 보낸 요청 등) · 시간은 Claude 가 일한 시간, 토큰은 캐시 읽기 포함</Text>
+          <Text dimColor>✓ 답함 · ■ 중단 · ✗ 오류 · 점(·)은 결과 모름(턴 중에 보낸 요청 등) · ? 결정(team-board 기록) · 시간은 Claude 가 일한 시간, 토큰은 캐시 읽기 포함</Text>
         </Box>
       </Box>
     )

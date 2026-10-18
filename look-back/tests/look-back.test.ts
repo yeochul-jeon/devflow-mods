@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import type { Entry } from '../types'
 import {
-  buildReport, clockText, dayOf, summaryPrompt, dayStartIso, durationText, nextDay, parseGitLog, parseOffset, periodDays, requestText, tokensText, upsert,
+  buildReport, clockText, dayOf, questionText, summaryPrompt, dayStartIso, durationText, nextDay, parseGitLog, parseOffset, periodDays, requestText, tokensText, upsert,
 } from '../hooks/ledger'
 
 const KST = 540
@@ -67,6 +67,15 @@ describe('ledger (순수 함수)', () => {
     expect(p).toContain('- [답함] cart 만들기\n- [중단] README 쓰기\n- [결과 모름] 배포')
     expect(p).toContain('커밋:\n- add cart')
     expect(p).toContain('"shop" 프로젝트에서 오늘')
+    expect(p).toContain('결정:\n(없음)')
+    expect(summaryPrompt({ ...rep.projects[0]!, decisions: [{ at: 1, question: 'A 로 할까요?', answer: 'A' }] }, '오늘')).toContain('결정:\n- A 로 할까요? → A')
+  })
+
+  test('결정 질문 앞 목록 기호를 뗀다', async () => {
+    expect(questionText('2. claude-mods-setup 을 넣을까요?')).toBe('claude-mods-setup 을 넣을까요?')
+    expect(questionText('- D3: 안 A 로 할까요?')).toBe('D3: 안 A 로 할까요?')
+    expect(questionText('1) - 진행할까요?')).toBe('진행할까요?')
+    expect(questionText('3.5 버전으로 올릴까요?')).toBe('3.5 버전으로 올릴까요?')
   })
 
   test('시간과 토큰 표기', async () => {
@@ -85,6 +94,7 @@ const USAGE = { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 1
 
 function boot(on: any, interactive = true) {
   const files = new Map<string, string>()
+  const mtimes = new Map<string, number>()
   const gitCalls: string[][] = []
   const clock = mock.clock(on, { now: NOW })
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
@@ -95,9 +105,16 @@ function boot(on: any, interactive = true) {
   on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
   on('fs.write', ($: any, e: any) => { files.set(e.path, e.text); return { value: undefined } })
   on('fs.read', ($: any, e: any) => ({ value: files.get(e.path) ?? '' }))
-  on('fs.list', ($: any, e: any) => ({
-    value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
-  }))
+  // 바로 아래 항목만: 더 깊은 경로가 있으면 폴더
+  on('fs.list', ($: any, e: any) => {
+    const seen = new Map<string, 'file' | 'dir'>()
+    for (const k of files.keys()) {
+      if (!k.startsWith(e.path + '/')) continue
+      const [name, ...rest] = k.slice(e.path.length + 1).split('/')
+      seen.set(name!, rest.length ? 'dir' : 'file')
+    }
+    return { value: [...seen].map(([name, kind]) => ({ name, kind, mtimeMs: mtimes.get(`${e.path}/${name}`) ?? NOW, size: 0, isLink: false })) }
+  })
   on('process.run', ($: any, e: any) => {
     if (e.argv[0] === 'date') return { value: { stdout: '+0900\n', stderr: '', exitCode: 0, isStdoutTruncated: false, isStderrTruncated: false } }
     gitCalls.push(e.argv)
@@ -112,7 +129,7 @@ function boot(on: any, interactive = true) {
   on('tool.call', { tool: 'Read' }, () => ({ result: 'ok' }))
   on('turn.complete', () => ({ text: '' }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  return { files, gitCalls, clock, interactive }
+  return { files, mtimes, gitCalls, clock, interactive }
 }
 
 const submit = ($: any, text: string, kind = 'composer', turnId?: string) => $.prompt.submit({ text, origin: { kind }, wait: false, ...(turnId ? { turnId } : {}) } as any)
@@ -209,7 +226,7 @@ describe('look-back (hook)', () => {
 
     const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /^돌아보기 · 2026-10-18$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 5분 · 커밋 1 · 프로젝트 1$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 5분 · 결정 0 · 커밋 1 · 프로젝트 1$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^order-svc$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /abc1234.*add order api/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /10\/18 22:59 .*■ .*결제 버그 고쳐 줘/ })).toBeDefined()
@@ -222,6 +239,34 @@ describe('look-back (hook)', () => {
     expect(await ui2.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
     expect(await ui2.find({ type: 'Text', text: /어제 요청/ })).toBeDefined()
     await ui2.unmount()
+  })
+
+  test('/lookback: team-board 가 기록한 결정을 기간으로 걸러 프로젝트별로 보인다', async ($, on) => {
+    const { files, mtimes } = boot(on)
+    const tb = '/home/me/.claude/team-board'
+    files.set('/home/me/.claude/look-back/2026-10-18/s1-aaaa.json', JSON.stringify({ v: 1, entries: [entry(NOW - 600_000, '/repo/order-svc', { text: '배포 준비' })] }))
+    // look-back 기록이 있는 저장소: 오늘 결정 1, 어제 결정 1(기간 밖)
+    files.set(`${tb}/repo-order-svc/s1.json`, JSON.stringify({ cwd: '/repo/order-svc/sub', decisions: [
+      { at: NOW - 86_400_000, question: '어제 질문', answer: '어제 답' },
+      { at: NOW - 300_000, question: '커밋, push, 설치를 진행할까요?', answer: '커밋하고 push 후 설치까지 진행해주세요' },
+    ] }))
+    // look-back 기록이 없는 저장소(설치 전 세션): 그 세션 폴더를 루트로
+    files.set(`${tb}/repo-wiki/s2.json`, JSON.stringify({ cwd: '/repo/wiki', decisions: [{ at: NOW - 120_000, question: 'A 로 할까요?', answer: 'A' }] }))
+    // 기간 전에 마지막으로 쓴 파일은 읽지 않는다, 모양이 다른 파일은 건너뛴다
+    files.set(`${tb}/repo-old/s3.json`, JSON.stringify({ cwd: '/repo/old', decisions: [{ at: NOW - 60_000, question: '안 읽힘', answer: 'x' }] }))
+    mtimes.set(`${tb}/repo-old/s3.json`, NOW - 3 * 86_400_000)
+    files.set(`${tb}/repo-wiki/broken.json`, '{"dec')
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'lookback', args: '' } as any)
+
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 1초 · 결정 2 · 커밋 2 · 프로젝트 2$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /23:54 \? 커밋, push, 설치를 진행할까요\? → 커밋하고 push 후 설치까지 진행해주세요/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^결정 1 · 커밋 1$/ })).toBeDefined() // 요청 기록이 없으면 요청·시간·토큰을 빼고
+    expect(await ui.find({ type: 'Text', text: /A 로 할까요\? → A/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /어제 질문|안 읽힘/ })).toBeUndefined()
+    await ui.unmount()
   })
 
   test('/lookback: 기록이 없으면 빈 상태 안내', async ($, on) => {

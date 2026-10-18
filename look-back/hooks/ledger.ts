@@ -1,6 +1,6 @@
 // 순수 함수만 둔다: $ 에 의존하지 않아 테스트하기 쉽다.
 
-import type { Commit, Entry, Period, ProjectReport, Report } from '../types'
+import type { Commit, Decision, Entry, Period, ProjectReport, Report } from '../types'
 
 export const MAX_TEXT = 200
 const DAY_MS = 86_400_000
@@ -59,10 +59,37 @@ export function requestText(text: string): string {
   return chars.length > MAX_TEXT ? chars.slice(0, MAX_TEXT - 1).join('') + '…' : flat
 }
 
+/** 줄바꿈을 펴고 n 자(코드 포인트)로 자른다. */
+export function clipText(text: string, n: number): string {
+  const chars = [...text.replace(/\s+/g, ' ').trim()]
+  return chars.length > n ? chars.slice(0, n - 1).join('') + '…' : chars.join('')
+}
+
+/** 결정 질문 앞의 목록 기호('- ', '2. ', '1) ')를 뗀다: team-board 는 답변의 한 줄을 그대로 질문으로 남긴다. */
+export function questionText(text: string): string {
+  return text.replace(/^\s*(?:[-*•]\s+|\d+[.)]\s+)+/, '')
+}
+
 /** 같은 요청(같은 at)이면 바꾸고, 없으면 더한다. 시각 순. */
 export function upsert(entries: readonly Entry[], entry: Entry): Entry[] {
   const rest = entries.filter(e => e.at !== entry.at)
   return [...rest, entry].sort((a, b) => a.at - b.at)
+}
+
+// team-board/hooks/board.ts 에서 복사: team-board 상태 폴더 이름.
+/** 저장소 루트를 폴더 이름으로 쓸 수 있게 바꾼다. */
+export function repoKey(root: string): string {
+  return root.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'no-repo'
+}
+
+/** team-board 상태 파일(세션 하나)에서 [from, to) 안의 결정. 모양이 다르면 빈 목록. */
+export function decisionsIn(beat: unknown, from: number, to: number): Decision[] {
+  const list = (beat as { decisions?: unknown } | null)?.decisions
+  if (!Array.isArray(list)) return []
+  return list.filter(
+    (d): d is Decision =>
+      typeof d?.at === 'number' && d.at >= from && d.at < to && typeof d.question === 'string' && typeof d.answer === 'string',
+  )
 }
 
 export function basename(path: string): string {
@@ -85,9 +112,12 @@ export function buildReport(
   days: readonly string[],
   entries: readonly Entry[],
   commits: Readonly<Record<string, { commits: Commit[]; error: string }>>,
+  decisions: Readonly<Record<string, Decision[]>> = {},
 ): Report {
   const roots = new Map<string, Entry[]>()
   for (const e of entries) roots.set(e.root, [...(roots.get(e.root) ?? []), e])
+  // 요청 기록이 없어도(look-back 설치 전 세션) 결정이 있으면 프로젝트로 보인다
+  for (const root of Object.keys(decisions)) if (!roots.has(root)) roots.set(root, [])
   const projects: ProjectReport[] = [...roots].map(([root, list]) => {
     const sorted = [...list].sort((a, b) => a.at - b.at)
     const c = commits[root] ?? { commits: [], error: '' }
@@ -97,11 +127,12 @@ export function buildReport(
       entries: sorted,
       commits: [...c.commits].sort((a, b) => a.at - b.at),
       commitError: c.error,
+      decisions: [...(decisions[root] ?? [])].sort((a, b) => a.at - b.at),
       ms: sorted.reduce((n, e) => n + e.ms, 0),
       tokens: sorted.reduce((n, e) => n + e.tokens, 0),
     }
   })
-  const latest = (p: ProjectReport) => Math.max(p.entries.at(-1)?.at ?? 0, p.commits.at(-1)?.at ?? 0)
+  const latest = (p: ProjectReport) => Math.max(p.entries.at(-1)?.at ?? 0, p.commits.at(-1)?.at ?? 0, p.decisions.at(-1)?.at ?? 0)
   projects.sort((a, b) => latest(b) - latest(a))
   return { period, from: days[0] ?? '', to: days[days.length - 1] ?? '', projects }
 }
@@ -135,14 +166,18 @@ const END_WORD: Record<string, string> = { answer: '답함', aborted: '중단', 
 export function summaryPrompt(p: ProjectReport, periodLabel: string): string {
   const reqs = p.entries.map(e => `- [${e.end ? END_WORD[e.end] : '결과 모름'}] ${e.text}`).join('\n')
   const commits = p.commits.map(c => `- ${c.subject}`).join('\n')
+  const decisions = (p.decisions ?? []).map(d => `- ${d.question} → ${d.answer}`).join('\n')
   return [
-    `아래는 "${p.name}" 프로젝트에서 ${periodLabel} 동안 사용자가 Claude 에게 보낸 요청과 그 기간의 git 커밋 제목이다.`,
+    `아래는 "${p.name}" 프로젝트에서 ${periodLabel} 동안 사용자가 Claude 에게 보낸 요청, 사용자가 내린 결정(질문 → 답), 그 기간의 git 커밋 제목이다.`,
     '이 기간에 무엇을 했는지 한국어 문장 3개 이하로 적는다. 각 문장은 한 줄.',
     '요청·커밋에 있는 낱말과 식별자를 그대로 쓴다. 없는 일을 지어내지 않는다. 요청 앞 [ ] 는 그 요청의 결과다: 중단·오류면 그렇게 쓰고, 결과 모름이면 "요청했다" 로 쓴다.',
     '문장만 답한다. 머리말·목록 기호·코드 블록은 쓰지 않는다.',
     '',
     '요청:',
     reqs || '(없음)',
+    '',
+    '결정:',
+    decisions || '(없음)',
     '',
     '커밋:',
     commits || '(없음)',

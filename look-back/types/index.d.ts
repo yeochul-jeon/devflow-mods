@@ -24,6 +24,9 @@ export type Period = 'today' | 'yesterday' | 'week' | 'month'
 
 export type Commit = { at: number; hash: string; subject: string }
 
+/** team-board 가 기록한 결정: 무엇을 물었고 무엇으로 정했는지. */
+export type Decision = { at: number; question: string; answer: string }
+
 export type ProjectReport = {
   root: string
   name: string
@@ -31,6 +34,8 @@ export type ProjectReport = {
   commits: Commit[]
   /** git log 을 못 읽었으면 이유 */
   commitError: string
+  /** team-board 상태 파일에서 읽은 결정 (0.2.0 전 화면 상태에는 없음) */
+  decisions: Decision[]
   ms: number
   tokens: number
 }
