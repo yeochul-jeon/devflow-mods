@@ -1,0 +1,13 @@
+{
+  "name": "look-back",
+  "version": "0.1.0",
+  "description": "/lookback: 오늘·어제·7일·30일 동안 프로젝트별로 한 요청과 커밋을 옆 패널에 (기록은 토큰 0, 요약은 누를 때만 Haiku 1회)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "types": "./types/index.d.ts",
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/look-back",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT"
+}
