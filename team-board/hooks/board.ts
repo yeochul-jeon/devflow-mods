@@ -68,6 +68,11 @@ export function stripMarkdown(text: string): string {
     .replace(/`([^`\n]+)`/g, '$1')
 }
 
+/** 붙여 넣은 글을 감싼 엔진 태그(`<pasted_content id="…">`, `</pasted_content id="…">`)를 빼고 글만 남긴다. 태그에 붙은 줄바꿈 하나도 함께 뺀다 */
+export function unwrapPaste(text: string): string {
+  return text.replace(/<pasted_content(?: id="[^"]*")?>\n?/g, '').replace(/\n?<\/pasted_content(?: id="[^"]*")?>/g, '')
+}
+
 export function oneLine(text: string, max: number): string {
   const flat = stripMarkdown(text).replace(/\s+/g, ' ').trim()
   return flat.length > max ? flat.slice(0, max - 1) + '…' : flat

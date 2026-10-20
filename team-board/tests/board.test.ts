@@ -1848,6 +1848,13 @@ describe('흐름 복사', () => {
     await $.prompt.submit({ text: '다음 요청', origin: { kind: 'composer' } } as any)
     expect(files.get(flowPath)).toContain('가'.repeat(300))
 
+    // 붙여 넣은 글을 감싼 엔진 태그는 장부 줄에도 원문에도 남기지 않는다 (2026-10-21 시험 F7)
+    await $.prompt.submit({ text: '<pasted_content id="1f0b">\n붙인 첫 줄\n붙인 둘째 줄\n</pasted_content id="1f0b">', origin: { kind: 'composer' } } as any)
+    expect(files.get(flowPath)).toContain(JSON.stringify('붙인 첫 줄\n붙인 둘째 줄'))
+    expect(files.get(flowPath)).not.toContain('pasted_content')
+    expect(files.get(beatPath)).not.toContain('pasted_content')
+    expect(files.get(beatPath)).toContain('붙인 첫 줄 붙인 둘째 줄')
+
     // 원문도 장부처럼 비밀 값을 가린다
     await $.prompt.submit({ text: 'DB_PASSWORD=hunter2 로 접속해 줘', origin: { kind: 'composer' } } as any)
     expect(files.get(flowPath)).not.toContain('hunter2')

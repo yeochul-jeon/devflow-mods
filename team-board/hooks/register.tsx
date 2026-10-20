@@ -56,6 +56,7 @@ import {
   routeLine,
   stripMarkdown,
   tasksFromPlan,
+  unwrapPaste,
   visible,
 } from './board'
 import { commandKey, formatAlert, judge, masksIn, noteForClaude, redact, signLine } from './failure'
@@ -519,7 +520,7 @@ export const register: Register = (on, options) => {
 
   // 사용자가 직접 보낸 요청. 결정을 기다리던 중이면 이것이 그 결정의 답이다.
   on('prompt.submit', async ($, e, next) => {
-    const text = typeof e.text === 'string' ? e.text.trim() : ''
+    const text = typeof e.text === 'string' ? unwrapPaste(e.text).trim() : ''
     // next(e) 안에서 턴이 시작되며 결정 대기 상태가 지워지므로, 넘기기 전에 기록한다.
     // ' /lookback' 처럼 앞에 공백이 있으면 엔진이 일반 메시지로 보낸다. 그래서 / 는 다듬기 전 글로 본다
     if (text && !e.text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
