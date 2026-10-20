@@ -193,6 +193,16 @@ describe('look-back (hook)', () => {
     expect(rows()).toEqual(['A 해 줘:t1:answer:10000', 'B 도 같이::null:0', 'C 해 줘:t3:aborted:3000'])
   })
 
+  test('앞에 공백이 있는 / 글은 엔진이 일반 메시지로 보내므로 요청으로 남긴다 (2026-10-20 시험 F5)', async ($, on) => {
+    const { files } = boot(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await submit($, ' /lookback 오늘')
+    await start($, 't1', ' /lookback 오늘')
+    await complete($, 't1', 'answer', 5_000)
+
+    expect(JSON.parse([...files.values()][0]!).entries.map((e: Entry) => `${e.text}:${e.turnId}:${e.end}`)).toEqual(['/lookback 오늘:t1:answer'])
+  })
+
   test('다른 mod 가 글을 바꿔도 쉬는 중에 보낸 요청 하나면 그 턴에 잇는다', async ($, on) => {
     const { files } = boot(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)

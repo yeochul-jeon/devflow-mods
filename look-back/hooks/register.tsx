@@ -183,7 +183,8 @@ export const register: Register = on => {
 
   on('prompt.submit', async ($, e, next) => {
     const text = e.text.trim()
-    if (!(self.on && text && !text.startsWith('/') && USER_ORIGINS.has(e.origin.kind))) return next(e)
+    // ' /lookback' 처럼 앞에 공백이 있으면 엔진이 명령이 아닌 일반 메시지로 보낸다. 그래서 / 는 다듬기 전 글로 본다
+    if (!(self.on && text && !e.text.startsWith('/') && USER_ORIGINS.has(e.origin.kind))) return next(e)
     // 쉬는 중에 보낸 요청이면, 아직 턴을 못 만난 앞 요청들은 더 이상 자기 턴이 오지 않는다 (진행 중인 턴 안으로 전달됐다)
     if (!e.turnId) self.pending = []
     const p = { entry: { at: await $.clock.now(), text: requestText(text), root: self.root, turnId: '', end: null, ms: 0, tokens: 0, files: [] } as Entry, raw: text, during: !!e.turnId }
