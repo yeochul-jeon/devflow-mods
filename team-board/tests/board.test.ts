@@ -16,6 +16,8 @@ import {
   cacheMinutes,
   cacheText,
   cacheWarn,
+  headParts,
+  steStacked,
   emptyBeat,
   dedupeNames,
   lastCustomTitle,
@@ -447,6 +449,36 @@ describe('board (순수 함수)', () => {
       NOW,
     )
     expect(list.map(b => b.id).sort()).toEqual(['a', 'b', 'new'])
+  })
+})
+
+describe('좁은 폭 (N2)', () => {
+  // 카드 머리 한 줄: 배지는 줄지 않고, 오른쪽은 막대 → 몇 초 전 → 캐시(경고 아닐 때) → ctx 순으로 덜어 낸다. 좁으면 (이 세션) 대신 *
+  const P = { badge: '결정 필요', name: 'devflow-sub', me: true, pct: 6, cache: '캐시 60분', cacheHot: false, ago: '40초 전' }
+  test('폭마다 고르는 칸', async () => {
+    const shown = (avail: number, p = P) => {
+      const h = headParts(avail, p)
+      return [h.me, h.bar ? 'bar' : '', h.ctx ? 'ctx' : '', h.cache ? 'cache' : '', h.ago ? 'ago' : ''].filter(Boolean).join(' ')
+    }
+    expect(shown(90)).toBe('(이 세션) bar ctx cache ago')
+    expect(shown(64)).toBe('* bar ctx cache ago')
+    expect(shown(50)).toBe('* ctx cache')
+    expect(shown(40)).toBe('* ctx')
+    expect(shown(30)).toBe('* ctx')
+    expect(shown(26)).toBe('*') // 오른쪽을 다 덜어도 넘치면 비운다
+    // 캐시가 곧 끝나면(경고) ctx 보다 오래 남긴다
+    expect(shown(38, { ...P, cache: '캐시 3분', cacheHot: true })).toBe('* cache')
+    expect(shown(38, { ...P, cache: '캐시 3분' })).toBe('* ctx')
+    // 이 세션이 아니면 표시 없음
+    expect(shown(90, { ...P, me: false })).toBe('bar ctx cache ago')
+    // 고른 칸의 합이 폭을 넘지 않는다 (배지 + 이름 최소 8칸 + 표시 + 오른쪽)
+    for (const w of [30, 34, 40, 44, 50, 56, 64, 72, 90]) expect(headParts(w, P).width).toBeLessThanOrEqual(w)
+  })
+
+  test('STE 선택지 이름이 상자 안쪽 폭의 40% 를 넘으면 이름을 위에 두고 글을 아래에 쓴다', async () => {
+    expect(steStacked(8, 72)).toBe(false) // 8+7=15 ≤ 28.8
+    expect(steStacked(8, 30)).toBe(true) // 15 > 12
+    expect(steStacked(24, 72)).toBe(true) // 31 > 28.8
   })
 })
 
@@ -1841,6 +1873,17 @@ describe('흐름 복사', () => {
     expect(copies.at(-1).text.length).toBe(10_000)
     expect(copies.at(-1).text.endsWith('…')).toBe(true)
     await pane.unmount()
+
+    // 좁은 패널: (이 세션) 대신 *, ctx 막대는 빼고 % 만 (N2). 넓으면 그대로
+    const narrow = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 40 } } as any)
+    expect(await narrow.find({ type: 'Text', text: /^\*$/ })).toBeDefined()
+    expect(await narrow.find({ type: 'Text', text: /\(이 세션\)/ })).toBeUndefined()
+    expect(await narrow.find({ type: 'Text', text: /^ctx \d+%$/ })).toBeDefined()
+    await narrow.unmount()
+    const wide = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 120 } } as any)
+    expect(await wide.find({ type: 'Text', text: /\(이 세션\)/ })).toBeDefined()
+    expect(await wide.find({ type: 'Text', text: /^ctx [▰▱]{5} \d+%$/ })).toBeDefined()
+    await wide.unmount()
 
     // 모듈을 다시 불러도(session.start 다시) 앞 원문이 지워지지 않는다
     await clock.advance(1_000)

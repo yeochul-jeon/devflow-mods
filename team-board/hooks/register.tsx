@@ -55,6 +55,8 @@ import {
   projectDirName,
   routeLine,
   stripMarkdown,
+  headParts,
+  steStacked,
   tasksFromPlan,
   unwrapPaste,
   visible,
@@ -1058,22 +1060,30 @@ export const register: Register = (on, options) => {
     const titleRow = (b: Beat) => {
       const tone = stateTone(b)
       const badge = isStale(b, now) ? '소식없음' : b.state !== 'asking' && b.fail?.level === 'high' ? '숨은 실패' : label(b, now)
+      const cache = b.cacheAt != null ? cacheText(cacheLeft(b.cacheAt, now)) : null
+      const hot = cacheWarn(b, now)
+      // 좁으면 배지가 두 줄로 깨지지 않게 오른쪽부터 덜어 낸다 (N2)
+      const fit = headParts(rightWidth, { badge, name: b.name, me: b.id === self.beat?.id, pct: b.contextPct, cache, cacheHot: hot, ago: ago(now - b.updatedAt) })
       return (
         <Box flexDirection="row" justifyContent="space-between" columnGap={1}>
           <Box flexDirection="row" columnGap={1} flexShrink={1}>
-            <Text backgroundColor={tone === pal.frame ? pal.dim : tone} color={pal.onBadge} bold>{` ${badge} `}</Text>
+            <Box flexShrink={0}>
+              <Text backgroundColor={tone === pal.frame ? pal.dim : tone} color={pal.onBadge} bold>{` ${badge} `}</Text>
+            </Box>
             <Text color={pal.text} bold wrap="truncate-end">{b.name}</Text>
-            {b.id === self.beat?.id ? <Text color={pal.dim}>(이 세션)</Text> : null}
+            {fit.me ? <Box flexShrink={0}><Text color={pal.dim}>{fit.me}</Text></Box> : null}
           </Box>
-          <Box flexDirection="row" columnGap={1} flexShrink={0}>
-            <Text color={contextTone(b.contextPct, pal)}>
-              {b.contextPct === null ? 'ctx --' : `ctx ${bar(b.contextPct, 100, 5)} ${b.contextPct}%`}
-            </Text>
-            {b.cacheAt != null ? (
-              <Text color={cacheWarn(b, now) ? pal.ask : pal.dim}>{`· ${cacheText(cacheLeft(b.cacheAt, now))}`}</Text>
-            ) : null}
-            <Text color={pal.dim}>{`· ${ago(now - b.updatedAt)}`}</Text>
-          </Box>
+          {fit.ctx || fit.cache || fit.ago ? (
+            <Box flexDirection="row" columnGap={1} flexShrink={0}>
+              {fit.ctx ? (
+                <Text color={contextTone(b.contextPct, pal)}>
+                  {b.contextPct === null ? 'ctx --' : fit.bar ? `ctx ${bar(b.contextPct, 100, 5)} ${b.contextPct}%` : `ctx ${b.contextPct}%`}
+                </Text>
+              ) : null}
+              {fit.cache && cache ? <Text color={hot ? pal.ask : pal.dim}>{fit.ctx ? `· ${cache}` : cache}</Text> : null}
+              {fit.ago ? <Text color={pal.dim}>{`· ${ago(now - b.updatedAt)}`}</Text> : null}
+            </Box>
+          ) : null}
         </Box>
       )
     }
@@ -1283,15 +1293,26 @@ export const register: Register = (on, options) => {
                   </Box>
                 ) : null}
                 {/* 0.14 가 만들어 둔 설명(상태는 모듈을 다시 불러와도 남는다)에는 options 가 없다 */}
-                {(it.options ?? []).map(op => (
-                  // 이름 칸 폭은 항목에서 가장 긴 선택지 이름에 맞춘다: 문장이 같은 줄에서 시작한다
-                  <Box flexDirection="row">
-                    <Box width={Math.max(...it.options.map(o => widthOf(o.label))) + 7} flexShrink={0}><Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text></Box>
-                    <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-                      {op.ste.map(l => <Text color={pal.text} wrap="wrap">{l}</Text>)}
+                {(it.options ?? []).map(op => {
+                  // 이름 칸 폭은 항목에서 가장 긴 선택지 이름에 맞춘다: 문장이 같은 줄에서 시작한다.
+                  // 좁아서 이름 칸이 글 칸을 누르면 이름을 위에 두고 글을 아래에 들여 쓴다 (N2)
+                  const labelW = Math.max(...it.options.map(o => widthOf(o.label)))
+                  return steStacked(labelW, artWidth) ? (
+                    <Box flexDirection="column">
+                      <Text color={pal.work} bold wrap="wrap">{`   ▸ ${op.label}`}</Text>
+                      <Box flexDirection="column" paddingLeft={5}>
+                        {op.ste.map(l => <Text color={pal.text} wrap="wrap">{l}</Text>)}
+                      </Box>
                     </Box>
-                  </Box>
-                ))}
+                  ) : (
+                    <Box flexDirection="row">
+                      <Box width={labelW + 7} flexShrink={0}><Text color={pal.work} bold>{`   ▸ ${op.label}`}</Text></Box>
+                      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+                        {op.ste.map(l => <Text color={pal.text} wrap="wrap">{l}</Text>)}
+                      </Box>
+                    </Box>
+                  )
+                })}
                 {it.suggest ? (
                   <Box flexDirection="row">
                     <Box width={2} flexShrink={0}><Text color={pal.ask}>★</Text></Box>

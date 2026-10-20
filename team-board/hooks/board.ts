@@ -1,7 +1,8 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
 import type { Beat, Decision, Event, ExplainKind, RecentLine, SubAgent, Task, WorkPlan } from '../types'
-import { EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
+import { cells, EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
+import { bar } from './palette'
 
 // 살아 있는 세션은 1분마다 기록하므로, 3분 넘게 소식이 없으면 흐리게 표시한다.
 export const STALE_MS = 3 * 60_000
@@ -625,4 +626,42 @@ export function agentMeta(a: SubAgent, now: number): string {
   const doing = a.status === 'working' ? a.tool || '시작' : a.status === 'done' ? '끝' : '실패'
   const span = spanText((a.endedAt ?? now) - a.startedAt)
   return [a.type, a.model.replace(/^claude-/, ''), doing, span, a.tokens ? tokensText(a.tokens) : ''].filter(Boolean).join(' · ')
+}
+
+/** 카드 머리 한 줄에 무엇을 그릴지. 배지는 줄지 않고 이름은 8칸까지 줄어든다. 넘치면 (이 세션) → *, 그 다음 오른쪽을
+ * 막대 → 몇 초 전 → 캐시(경고가 아닐 때) → ctx 순으로 덜어 낸다. 경고인 캐시는 ctx 보다 오래 남긴다. width 는 고른 것의 칸 수 합. */
+export function headParts(
+  avail: number,
+  p: { badge: string; name: string; me: boolean; pct: number | null; cache: string | null; cacheHot: boolean; ago: string },
+): { me: string; bar: boolean; ctx: boolean; cache: boolean; ago: boolean; width: number } {
+  const ctxW = (withBar: boolean) => cells(p.pct === null ? 'ctx --' : withBar ? `ctx ${bar(p.pct, 100, 5)} ${p.pct}%` : `ctx ${p.pct}%`)
+  const cacheW = p.cache === null ? 0 : 1 + cells(`· ${p.cache}`)
+  const agoW = 1 + cells(`· ${p.ago}`)
+  const hasCache = p.cache !== null
+  const rungs = [
+    { bar: true, ctx: true, cache: hasCache, ago: true },
+    { bar: false, ctx: true, cache: hasCache, ago: true },
+    { bar: false, ctx: true, cache: hasCache, ago: false },
+    p.cacheHot && hasCache ? { bar: false, ctx: false, cache: true, ago: false } : { bar: false, ctx: true, cache: false, ago: false },
+    { bar: false, ctx: false, cache: false, ago: false },
+  ]
+  const marks = p.me ? ['(이 세션)', '*'] : ['']
+  const leftOf = (me: string) => cells(` ${p.badge} `) + 1 + Math.min(cells(p.name), 8) + (me ? 1 + cells(me) : 0)
+  const rightOf = (r: (typeof rungs)[number]) => {
+    const parts = (r.ctx ? ctxW(r.bar) : 0) + (r.cache ? (r.ctx ? cacheW : cells(p.cache!)) : 0) + (r.ago ? agoW : 0)
+    return parts ? 1 + parts : 0 // 왼쪽과 사이 한 칸
+  }
+  for (const me of marks) {
+    for (const r of me === marks[0] && marks.length > 1 ? rungs.slice(0, 1) : rungs) {
+      const width = leftOf(me) + rightOf(r)
+      if (width <= avail) return { me, ...r, width }
+    }
+  }
+  const me = marks[marks.length - 1]!
+  return { me, ...rungs[rungs.length - 1]!, width: leftOf(me) }
+}
+
+/** STE 선택지 이름 칸(가장 긴 이름 + 7)이 상자 안쪽 폭의 40% 를 넘으면 이름을 위에, 글을 아래에 쓴다 */
+export function steStacked(labelW: number, artW: number): boolean {
+  return labelW + 7 > artW * 0.4
 }
