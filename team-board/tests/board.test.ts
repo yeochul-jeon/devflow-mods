@@ -1233,6 +1233,10 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /^◉$/ })).toBeDefined() // 지금 위치
     expect(await pane.find({ type: 'Text', text: /PR38 래퍼/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /결정을 기다려요/ })).toBeDefined() // 주의 띠
+    // 질문 줄과 탭 줄 사이 흐린 가로줄 (카드 테두리 노랑과 겹치지 않게 흐린 색)
+    const sep = await pane.find({ key: 'sep-peer' })
+    expect(sep?.text).toMatch(/^─+$/)
+    expect(JSON.stringify(sep)).toContain(paletteOf('night').dim)
 
     // 12살 탭: 지난 결정까지 맥락으로 넘긴다
     expect(await pane.find({ key: 'regen-kid-peer' })).toBeUndefined() // 만들기 전에는 재생성 없음
@@ -1777,5 +1781,77 @@ describe('보조 에이전트 (hook)', () => {
     listed = [{ id: 'sub-6', status: 'running' }]
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
     expect(mine().agents.filter((a: any) => ['sub-5', 'sub-6'].includes(a.id)).map((a: any) => `${a.id}:${a.status}`)).toEqual(['sub-5:failed', 'sub-6:working'])
+  })
+})
+
+describe('흐름 복사', () => {
+  test('자세히의 흐름 줄을 누르면 원문을 클립보드로. 원문은 몇 초마다 읽는 장부와 따로 둔다', async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    const copies: any[] = []
+    const toasts: string[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => {
+      if (!files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
+      return { value: files.get(e.path)! }
+    })
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    let copyOk = true
+    on('ui.copy', ($, e: any) => { copies.push(e); return { value: copyOk ? { isCopied: true } : { isCopied: false, reason: 'no-clipboard' } } })
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    on('turn.complete', () => ({ text: '' }))
+    on('ui.toast', ($, e: any) => { toasts.push(e.text); return { value: undefined } })
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    const long = '첫 줄 요청입니다.\n' + '가'.repeat(300)
+    await $.prompt.submit({ text: long, origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '**끝났습니다.**\n' + '나'.repeat(20_000), durationMs: 1, isAborted: false, turnId: 't1' } as any)
+
+    const beatPath = [...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!
+    const id = beatPath.split('/').pop()!.replace(/\.json$/, '')
+    // 몇 초마다 모든 세션이 읽는 장부에는 원문이 없다. 원문 파일은 .json 이 아니라 옛 판의 scan 도 읽지 않는다
+    expect(files.get(beatPath)).not.toContain('가'.repeat(300))
+    const flowPath = beatPath.replace(/\.json$/, '.flow')
+    expect(files.get(flowPath)).toContain('가'.repeat(300))
+
+    await $.command.run({ command: 'board', args: 'order-svc' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    await pane.press({ key: `flow-${id}-${NOW}-prompt` })
+    expect(copies.at(-1)).toMatchObject({ text: long, surface: 'terminal' })
+    expect(toasts.at(-1)).toBe('복사함')
+    // 원문은 1만 자까지
+    await pane.press({ key: `flow-${id}-${NOW}-done` })
+    expect(copies.at(-1).text.startsWith('**끝났습니다.**\n나')).toBe(true)
+    expect(copies.at(-1).text.length).toBe(10_000)
+    expect(copies.at(-1).text.endsWith('…')).toBe(true)
+    await pane.unmount()
+
+    // 모듈을 다시 불러도(session.start 다시) 앞 원문이 지워지지 않는다
+    await clock.advance(1_000)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.prompt.submit({ text: '다음 요청', origin: { kind: 'composer' } } as any)
+    expect(files.get(flowPath)).toContain('가'.repeat(300))
+
+    // 원문이 없는 줄(이전 판이 쓴 줄)은 장부의 줄을 복사한다. 복사가 안 되면 엔진 이유를 그대로
+    files.set(flowPath, '{}')
+    copyOk = false
+    const pane2 = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    await pane2.press({ key: `flow-${id}-${NOW}-prompt` })
+    expect(toasts.at(-1)).toBe('복사 못 함: no-clipboard')
+    await pane2.unmount()
   })
 })

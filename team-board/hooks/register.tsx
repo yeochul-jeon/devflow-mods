@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
 import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, SubAgent, WorkPlan } from '../types'
 import {
@@ -38,6 +38,9 @@ import {
   looksLikeQuestion,
   MAX_DECISIONS,
   MAX_TIMELINE,
+  flowKeep,
+  flowKey,
+  flowText,
   normalize,
   notificationTokens,
   oneLine,
@@ -57,7 +60,7 @@ import {
 } from './board'
 import { commandKey, formatAlert, judge, masksIn, noteForClaude, signLine } from './failure'
 import { bar, contextTone, paletteOf } from './palette'
-import { cells as widthOf, flowArt, parseExplain, parseSte } from './diagram'
+import { cells as widthOf, clip as widthClip, flowArt, parseExplain, parseSte } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
 
 const PANE = 'team-board'
@@ -123,6 +126,16 @@ const self = {
   undo: null as { question: string; decisions: Decision[]; decide: Event } | null,
   /** 마지막 결정 요청의 직전 대화. 질문을 되돌릴 때(htmlKeep, undo) 함께 되돌린다 */
   lastRecent: [] as RecentLine[],
+  /** 흐름 줄 원문 (flowKey → 글). 장부와 따로 <id>.flow 에 쓴다: 모든 세션이 몇 초마다 읽는 <id>.json 을 키우지 않고, 옛 판의 scan(*.json)도 읽지 않게 */
+  flow: {} as Record<string, string>,
+  flowDirty: false,
+}
+
+/** 흐름 줄의 원문을 남긴다. 장부의 줄은 100자로 줄인 한 줄이다 */
+function keepFull(ev: Event, raw: string): Event {
+  self.flow[flowKey(ev)] = flowText(raw)
+  self.flowDirty = true
+  return ev
 }
 
 async function save($: EngineInterface, patch: Partial<Beat>, force = false): Promise<void> {
@@ -144,6 +157,11 @@ async function save($: EngineInterface, patch: Partial<Beat>, force = false): Pr
   const snapshot: Beat = { ...self.beat }
   await update($, me, () => snapshot)
   await $.fs.write(`${self.dir}/${self.beat.id}.json`, JSON.stringify(snapshot))
+  if (self.flowDirty) {
+    self.flowDirty = false
+    self.flow = flowKeep(self.flow, snapshot.timeline)
+    await $.fs.write(`${self.dir}/${self.beat.id}.flow`, JSON.stringify(self.flow))
+  }
 }
 
 /**
@@ -179,10 +197,29 @@ async function syncPlan($: EngineInterface, plan?: unknown): Promise<void> {
   await save($, r.step && self.beat.state === 'working' ? { tasks: r.tasks, step: r.step } : { tasks: r.tasks })
 }
 
-async function note($: EngineInterface, kind: Parameters<typeof event>[1], text: string, patch: Partial<Beat> = {}, force = false) {
+async function note($: EngineInterface, kind: Parameters<typeof event>[1], text: string, patch: Partial<Beat> = {}, force = false, full = text) {
   if (!self.beat) return
   const at = await $.clock.now()
-  await save($, { ...patch, timeline: pushCapped(self.beat.timeline, event(at, kind, text), MAX_TIMELINE) }, force)
+  await save($, { ...patch, timeline: pushCapped(self.beat.timeline, keepFull(event(at, kind, text), full), MAX_TIMELINE) }, force)
+}
+
+/** 한 세션의 흐름 원문 파일. 없거나 깨졌으면 빈 것 (그 줄은 장부의 줄로 복사한다) */
+async function readFlow($: EngineInterface, dir: string, id: string): Promise<Record<string, string>> {
+  try {
+    const v: unknown = JSON.parse(await $.fs.read(`${dir}/${id}.flow`))
+    return v && typeof v === 'object' ? (v as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** 흐름 줄을 누르면 원문을 클립보드로. 원문이 없으면 장부의 줄 */
+async function copyFlow($: EngineInterface, id: string, at: number, kind: string, surface: RenderSurface): Promise<void> {
+  const ev = (await read($, beats)).find(b => b.id === id)?.timeline.find(t => t.at === at && t.kind === kind)
+  if (!ev || !self.dir) return
+  const text = (await readFlow($, self.dir, id))[flowKey(ev)] ?? ev.text
+  const r = await $.ui.copy({ text, surface })
+  await $.ui.toast(r.isCopied ? '복사함' : `복사 못 함: ${r.reason}`)
 }
 
 async function scan($: EngineInterface): Promise<void> {
@@ -421,6 +458,8 @@ export const register: Register = (on, options) => {
     self.beat = prev
       ? { ...prev, state: prev.state === 'ended' ? 'idle' : prev.state }
       : emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd)
+    // 앞서 남긴 원문을 이어 쓴다 (없으면 처음부터)
+    self.flow = prev ? await readFlow($, self.dir, self.beat.id) : {}
     // 다시 시작했으면 앞 프로세스의 보조 에이전트는 끝났다. 모듈만 다시 로드됐으면 엔진 목록에 남아 있다
     if (self.beat.agents.some(a => a.status === 'working')) {
       const infos = await $.agent.list().catch(() => null)
@@ -484,12 +523,12 @@ export const register: Register = (on, options) => {
       self.undo = null
       if (self.beat.state === 'asking' && self.beat.question) {
         const d = { at, question: questionSummary(self.beat.question), answer: oneLine(text, 120) }
-        const decide = event(at, 'decide', `${d.question} → ${d.answer}`)
+        const decide = keepFull(event(at, 'decide', `${d.question} → ${d.answer}`), `${d.question} → ${text}`)
         self.undo = { question: self.beat.question, decisions, decide }
         decisions = pushCapped(decisions, d, MAX_DECISIONS)
         timeline = pushCapped(timeline, decide, MAX_TIMELINE)
       }
-      timeline = pushCapped(timeline, event(at, 'prompt', text), MAX_TIMELINE)
+      timeline = pushCapped(timeline, keepFull(event(at, 'prompt', text), text), MAX_TIMELINE)
       // 결정과 새 요청을 한 번에 쓴다. 답을 보냈으니 더 이상 결정 대기가 아니다.
       self.htmlKeep = ''
       self.beat.agents = agentClearEnded(self.beat.agents)
@@ -592,7 +631,7 @@ export const register: Register = (on, options) => {
       const asked = askUserText(input)
       // 질문은 도구 입력에만 있고, 앞선 안내 글은 직전 대화로 둔다
       self.lastRecent = recentTurns(await $.session.messages(), false)
-      await note($, 'ask', asked.split('\n')[0] ?? '', { state: 'asking', step: '질문 중', question: asked, recent: self.lastRecent }, true)
+      await note($, 'ask', asked.split('\n')[0] ?? '', { state: 'asking', step: '질문 중', question: asked, recent: self.lastRecent }, true, asked)
       const r = await next(e)
       const answers = (r as { result?: { answers?: unknown } }).result?.answers
       const at = await $.clock.now()
@@ -682,7 +721,7 @@ export const register: Register = (on, options) => {
     } else if (looksLikeQuestion(answer)) {
       const q = questionText(answer)
       self.lastRecent = recentTurns(await $.session.messages(), true)
-      await note($, 'ask', questionSummary(q), { state: 'asking', step: '', contextPct, last: oneLine(answer, 100), question: q, recent: self.lastRecent })
+      await note($, 'ask', questionSummary(q), { state: 'asking', step: '', contextPct, last: oneLine(answer, 100), question: q, recent: self.lastRecent }, false, q)
     } else {
       await note($, 'done', answer, { state: 'idle', step: '', contextPct, last: oneLine(answer, 100), question: '' })
     }
@@ -779,10 +818,12 @@ export const register: Register = (on, options) => {
     if (e.plugin !== 'team-board') return next(e)
     const key = String(e.element ?? '')
     const tabKey = /^(tab|regen)-(kid|ste)-(.+)$/.exec(key)
+    const flowPress = /^flow-(.+)-(\d+)-([a-z]+)$/.exec(key)
     if (tabKey) await pressExplain($, tabKey[1] as 'tab' | 'regen', tabKey[2] as ExplainKind, tabKey[3]!)
     else if (key.startsWith('html-')) await pressHtml($, key.slice('html-'.length))
     else if (key.startsWith('detail-')) await update($, focus, () => key.slice('detail-'.length))
     else if (key === 'back') await update($, focus, () => null)
+    else if (flowPress) await copyFlow($, flowPress[1]!, Number(flowPress[2]), flowPress[3]!, e.surface)
     else if (key === 'band-board') await $.command.run({ command: 'board', args: '' })
     else return next(e)
     return { element: key }
@@ -1285,7 +1326,7 @@ export const register: Register = (on, options) => {
     const tabRow = (b: Beat) => {
       const shown = hasAny(b)
       return (
-        <Box flexDirection="row" columnGap={1} marginTop={1}>
+        <Box flexDirection="row" columnGap={1}>
           {TABS.flatMap((t, i) => {
             const picked = shown && tabNow === t.kind
             const out = [
@@ -1330,6 +1371,11 @@ export const register: Register = (on, options) => {
               </Box>
             </Box>
           ))}
+          {/* 질문과 탭 줄을 나눈다. 카드 테두리가 이미 노랑이라 흐리게. truncate 는 끝에 … 를 붙여서,
+              줄바꿈시키고 한 줄 높이 Box 가 넘친 줄을 숨긴다 */}
+          <Box key={`sep-${b.id}`} height={1} overflow="hidden" marginTop={1}>
+            <Text color={pal.dim} wrap="wrap">{'─'.repeat(cols)}</Text>
+          </Box>
           {tabRow(b)}
           {explainBox(b)}
         </Box>
@@ -1417,11 +1463,13 @@ export const register: Register = (on, options) => {
                   <Box width={10} flexShrink={0}>
                     <Text color={pal.dim}>{`  ${ago(now - ev.at)}`}</Text>
                   </Box>
-                  <Box flexGrow={1} flexShrink={1}>
-                    <Text wrap="truncate-end">
+                  {/* 누르면 원문 복사. 마우스를 올리면 엔진이 Button 을 반전한다 */}
+                  <Box flexGrow={1} flexShrink={1} height={1} overflow="hidden">
+                    <Button key={`flow-${b.id}-${ev.at}-${ev.kind}`} plain onPress={noop}>
                       <Text color={c}>{`${EVENT_MARK[ev.kind]}  `}</Text>
-                      <Text color={pal.text}>{ev.text}</Text>
-                    </Text>
+                      {/* Button 글에는 truncate 가 걸리지 않아 칸 수로 직접 자른다: 바깥 여백 2 · 시각 10 · 표시 · 반전 끝 한 칸 */}
+                      <Text color={pal.text}>{widthClip(ev.text, cols - 13 - widthOf(`${EVENT_MARK[ev.kind]}  `))}</Text>
+                    </Button>
                   </Box>
                 </Box>
               )

@@ -194,6 +194,29 @@ export function event(at: number, kind: Event['kind'], text: string): Event {
   return { at, kind, text: oneLine(text, 100) }
 }
 
+/** 흐름 줄 원문의 상한. 넘으면 끝을 … 로 바꾼다 */
+export const FLOW_MAX = 10_000
+
+/** 흐름 줄 하나의 이름. 결정과 그 답 요청은 같은 시각이라 종류까지 붙인다 */
+export function flowKey(ev: Pick<Event, 'at' | 'kind'>): string {
+  return `${ev.at}:${ev.kind}`
+}
+
+/** 원문을 상한까지 자른다. 줄바꿈은 그대로 둔다 */
+export function flowText(text: string): string {
+  return text.length > FLOW_MAX ? text.slice(0, FLOW_MAX - 1) + '…' : text
+}
+
+/** 흐름에 남은 줄의 원문만 남긴다 */
+export function flowKeep(flow: Record<string, string>, timeline: readonly Event[]): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const ev of timeline) {
+    const k = flowKey(ev)
+    if (k in flow) out[k] = flow[k]!
+  }
+  return out
+}
+
 /** TaskCreate / TaskUpdate / TodoWrite 를 할 일 목록에 반영한다. */
 export function applyTaskTool(
   tasks: readonly Task[],
