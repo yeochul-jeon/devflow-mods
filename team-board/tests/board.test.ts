@@ -1798,9 +1798,11 @@ describe('흐름 복사', () => {
     on('session.id', () => ({ value: 'me' }))
     on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
-    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    const mtimes = new Map<string, number>()
+    const writes: string[] = []
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); writes.push(e.path); return { value: undefined } })
     on('fs.list', ($, e: any) => ({
-      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: mtimes.get(k) ?? NOW, size: files.get(k)!.length, isLink: false })),
     }))
     on('fs.read', ($, e: any) => {
       if (!files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
@@ -1845,6 +1847,23 @@ describe('흐름 복사', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
     await $.prompt.submit({ text: '다음 요청', origin: { kind: 'composer' } } as any)
     expect(files.get(flowPath)).toContain('가'.repeat(300))
+
+    // 원문도 장부처럼 비밀 값을 가린다
+    await $.prompt.submit({ text: 'DB_PASSWORD=hunter2 로 접속해 줘', origin: { kind: 'composer' } } as any)
+    expect(files.get(flowPath)).not.toContain('hunter2')
+    expect(files.get(flowPath)).toContain('DB_PASSWORD=***')
+
+    // 지울 수 없어(fs 에 삭제 없음) 12시간 넘은 다른 세션의 원문 파일은 비운다. 비운 뒤에는 다시 쓰지 않는다
+    const dir = flowPath.slice(0, flowPath.lastIndexOf('/'))
+    files.set(`${dir}/old-1.flow`, JSON.stringify({ '1:prompt': '오래된 원문' }))
+    mtimes.set(`${dir}/old-1.flow`, NOW - 13 * 60 * 60_000)
+    files.set(`${dir}/new-1.flow`, JSON.stringify({ '1:prompt': '최근 원문' }))
+    await clock.advance(3_000)
+    expect(files.get(`${dir}/old-1.flow`)).toBe('{}')
+    expect(files.get(`${dir}/new-1.flow`)).toContain('최근 원문')
+    const emptied = writes.filter(w => w.endsWith('/old-1.flow')).length
+    await clock.advance(3_000)
+    expect(writes.filter(w => w.endsWith('/old-1.flow')).length).toBe(emptied)
 
     // 원문이 없는 줄(이전 판이 쓴 줄)은 장부의 줄을 복사한다. 복사가 안 되면 엔진 이유를 그대로
     files.set(flowPath, '{}')

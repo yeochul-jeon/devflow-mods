@@ -58,7 +58,7 @@ import {
   tasksFromPlan,
   visible,
 } from './board'
-import { commandKey, formatAlert, judge, masksIn, noteForClaude, signLine } from './failure'
+import { commandKey, formatAlert, judge, masksIn, noteForClaude, redact, signLine } from './failure'
 import { bar, contextTone, paletteOf } from './palette'
 import { cells as widthOf, clip as widthClip, flowArt, parseExplain, parseSte } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
@@ -131,9 +131,9 @@ const self = {
   flowDirty: false,
 }
 
-/** 흐름 줄의 원문을 남긴다. 장부의 줄은 100자로 줄인 한 줄이다 */
+/** 흐름 줄의 원문을 남긴다. 장부의 줄은 100자로 줄인 한 줄이다. 실패 기록처럼 비밀 값은 가린다 */
 function keepFull(ev: Event, raw: string): Event {
-  self.flow[flowKey(ev)] = flowText(raw)
+  self.flow[flowKey(ev)] = flowText(redact(raw))
   self.flowDirty = true
   return ev
 }
@@ -229,6 +229,11 @@ async function scan($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const found: Beat[] = []
   for (const entry of entries) {
+    // 12시간 넘은 원문 파일은 비운다. fs 에 삭제가 없어 '{}' 로 덮고, 이미 비었으면(2바이트) 두어 틱마다 다시 쓰지 않는다
+    if (entry.kind === 'file' && entry.name.endsWith('.flow') && now - entry.mtimeMs >= HIDE_MS && entry.size > 2) {
+      await $.fs.write(`${self.dir}/${entry.name}`, '{}')
+      continue
+    }
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
     // 어차피 숨길 오래된 기록은 읽지 않는다
     if (now - entry.mtimeMs >= HIDE_MS) continue
