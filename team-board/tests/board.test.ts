@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import {
   agentClearEnded,
   agentEnd,
+  agentGone,
   agentPatch,
   agentStart,
   agentSummary,
@@ -33,6 +34,8 @@ import {
   tasksFromPlan,
   tokensText,
   visible,
+  waitsOnAgents,
+  label,
 } from '../hooks/board'
 import { bar, contextTone, paletteOf } from '../hooks/palette'
 import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
@@ -420,6 +423,19 @@ describe('board (순수 함수)', () => {
     expect(list.map(b => b.name)).toEqual(['ars2', 'main', 'ars1'])
   })
 
+  test('턴은 끝났지만 보조 에이전트가 도는 세션은 대기가 아니라 보조 기다림이다', async () => {
+    const run = { id: 's', desc: '', type: 'Explore', model: 'm', status: 'working', tool: '', startedAt: 1, endedAt: null, tokens: 0 }
+    const waits = beat({ id: 'g', name: 'ars0', state: 'idle', agents: [run] })
+    expect(waitsOnAgents(waits)).toBe(true)
+    expect(waitsOnAgents(beat({ state: 'idle', agents: [{ ...run, status: 'done' }] }))).toBe(false)
+    expect(waitsOnAgents(beat({ state: 'working', agents: [run] }))).toBe(false)
+    expect(waitsOnAgents(beat({ state: 'asking', agents: [run] }))).toBe(false)
+    expect(label(waits, NOW)).toBe('보조 기다림')
+    expect(label(beat({ state: 'idle' }), NOW)).toBe('대기')
+    const list = visible([beat({ id: 'i', name: 'a-idle', state: 'idle' }), waits, beat({ id: 'w', name: 'z-work', state: 'working' })], NOW)
+    expect(list.map(b => b.name)).toEqual(['z-work', 'ars0', 'a-idle'])
+  })
+
   test('닫힌 탭의 잔재는 숨기고, 같은 폴더의 살아 있는 두 세션은 둘 다 보인다', async () => {
     const list = visible(
       [
@@ -460,6 +476,18 @@ describe('보조 에이전트 장부', () => {
     l = agentSync(l, [{ id: 'a', status: 'completed' }, { id: 'b', status: 'killed' }, { id: 'c', status: 'running' }], 7)
     expect(l.map(a => a.status)).toEqual(['done', 'failed', 'working'])
     expect(agentClearEnded(l).map(a => a.id)).toEqual(['c'])
+  })
+
+  test('턴이 끝났어도 엔진이 아직 돈다(running·waiting·pending)고 하면 다시 작업 중이다: 제 백그라운드 셸을 기다리는 보조 (T15 실화면)', async () => {
+    let l = agentEnd(agentEnd(agentEnd(agentStart(agentStart(agentStart([], start('a')), start('b')), start('c')), 'a', true, 5), 'b', true, 5), 'c', true, 5)
+    l = agentSync(l, [{ id: 'a', status: 'waiting' }, { id: 'b', status: 'idle' }, { id: 'c', status: 'completed' }], 7)
+    expect(l.map(a => `${a.id}:${a.status}:${a.endedAt}`)).toEqual(['a:working:null', 'b:done:5', 'c:done:5'])
+  })
+
+  test('엔진 목록에 없는 작업 중 에이전트는 끝(실패)으로 본다: 재시작 전 프로세스의 것', async () => {
+    let l = agentEnd(agentStart(agentStart(agentStart([], start('a')), start('b')), start('c')), 'c', true, 3)
+    l = agentGone(l, [{ id: 'b' }], 9)
+    expect(l.map(a => `${a.id}:${a.status}:${a.endedAt}`)).toEqual(['a:failed:9', 'b:working:null', 'c:done:3'])
   })
 
   test('12개를 넘으면 끝난 것부터 버리고, 같은 id 는 다시 작업 중으로', async () => {
@@ -755,15 +783,16 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
     expect(bandLayout(30, 150, 10)).toMatchObject({ mode: 'compact', slotW: 20, shown: 20 })
   })
 
-  test('먼저 보일 세션: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기', async () => {
+  test('먼저 보일 세션: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 보조 기다림 > 대기', async () => {
     const now = 1_000_000
     const mk = (id: string, patch: object) => ({ ...emptyBeat(id, id, '/r'), updatedAt: now, ...patch })
     const fail = { at: 1, command: 'x', key: 'x', level: 'high' as const, signs: [], masks: [] }
     const order = bandOrder([
       mk('idle', {}), mk('work', { state: 'working' }), mk('me', {}), mk('fail', { fail }), mk('ask', { state: 'asking' }),
       mk('old', { updatedAt: 0 }),
+      mk('help', { agents: [{ id: 's', desc: '', type: 'Explore', model: 'm', status: 'working', tool: '', startedAt: 1, endedAt: null, tokens: 0 }] }),
     ], now, 'me').map(b => b.id)
-    expect(order).toEqual(['ask', 'fail', 'me', 'work', 'idle', 'old'])
+    expect(order).toEqual(['ask', 'fail', 'me', 'work', 'help', 'idle', 'old'])
   })
 })
 
@@ -1635,6 +1664,7 @@ describe('보조 에이전트 (hook)', () => {
     // 앞에서 돈 Agent 는 결과에 엔진이 센 토큰이 온다
     on('tool.call', ($, e: any) => (e.tool === 'Agent' ? { result: { status: 'completed', agentId: e.description, totalTokens: 4200 }, text: 'ok' } : { result: 'ok', text: 'ok' }) as any)
     on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     let spawned = 0
     on('agent.spawn', () => {
       const n = ++spawned
@@ -1671,7 +1701,16 @@ describe('보조 에이전트 (hook)', () => {
     expect(await pane.find({ type: 'Text', text: /^보조$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /● 1 작업 · Explore: / })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /● 보조 1/ })).toBeDefined()
+    // 메인 턴은 끝났어도 보조가 돌면 대기가 아니라 보조 기다림
+    expect(await pane.find({ type: 'Text', text: /^◐ 보조 기다림 1$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^○ 대기 0$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ 보조 기다림 $/ })).toBeDefined()
     await pane.unmount()
+    const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+    expect((await band.find({ type: 'Text', text: /^ 보조 $/ }))?.props.backgroundColor).toBe(paletteOf('night').work)
+    expect(await band.find({ type: 'Text', text: /^보조 1개 기다리는 중$/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /^ 대기 $/ })).toBeUndefined()
+    await band.unmount()
 
     // 끝: 엔진 목록 보정과 turn.complete 둘 다 같은 결과
     await $.turn.complete({ reason: 'answer', answer: '골랐습니다.', durationMs: 1, isAborted: false, turnId: 's1', agentId: 'sub-1' } as any)
@@ -1730,5 +1769,13 @@ describe('보조 에이전트 (hook)', () => {
     // 보조 에이전트 자기 대화의 줄은 메인 장부를 건드리지 않는다
     await $.session.append(row(NOTIFY('sub-2', 9), { agentId: 'sub-3' }))
     expect(mine().agents.find((a: any) => a.id === 'sub-2').tokens).toBe(0)
+
+    // 다시 시작(claude -r)하면 앞 프로세스의 작업 중 에이전트는 엔진 목록에 없다: 끝(실패)으로 바꾼다.
+    // 모듈만 다시 로드된 경우처럼 목록에 있으면 그대로 둔다
+    await $.agent.spawn({ prompt: 'c', description: '셋', subagentType: 'Explore' } as any)
+    await $.agent.spawn({ prompt: 'd', description: '넷', subagentType: 'Explore' } as any)
+    listed = [{ id: 'sub-6', status: 'running' }]
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    expect(mine().agents.filter((a: any) => ['sub-5', 'sub-6'].includes(a.id)).map((a: any) => `${a.id}:${a.status}`)).toEqual(['sub-5:failed', 'sub-6:working'])
   })
 })

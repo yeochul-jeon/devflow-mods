@@ -7,11 +7,13 @@ import {
   agentClearEnded,
   agentCounts,
   agentEnd,
+  agentGone,
   agentMeta,
   agentPatch,
   agentStart,
   agentSummary,
   agentSync,
+  waitsOnAgents,
   ago,
   applyTaskTool,
   askUserText,
@@ -154,9 +156,9 @@ async function setAgents($: EngineInterface, change: (agents: SubAgent[]) => Sub
   await save($, {}, force)
 }
 
-/** 끝난 신호를 놓친 보조 에이전트를 엔진 목록으로 보정한다. 세션이 끝난 뒤의 틱에서는 목록이 거부되므로 무시한다. */
+/** 끝난 신호를 놓친 보조 에이전트와 턴만 끝나고 아직 도는 보조 에이전트를 엔진 목록으로 보정한다. 세션이 끝난 뒤의 틱에서는 목록이 거부되므로 무시한다. */
 async function syncAgents($: EngineInterface): Promise<void> {
-  if (!self.beat || !self.beat.agents.some(a => a.status === 'working')) return
+  if (!self.beat || !self.beat.agents.length) return
   const infos = await $.agent.list().catch(() => null)
   if (!infos) return
   const at = await $.clock.now()
@@ -419,6 +421,11 @@ export const register: Register = (on, options) => {
     self.beat = prev
       ? { ...prev, state: prev.state === 'ended' ? 'idle' : prev.state }
       : emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd)
+    // 다시 시작했으면 앞 프로세스의 보조 에이전트는 끝났다. 모듈만 다시 로드됐으면 엔진 목록에 남아 있다
+    if (self.beat.agents.some(a => a.status === 'working')) {
+      const infos = await $.agent.list().catch(() => null)
+      if (infos) self.beat.agents = agentGone(self.beat.agents, infos, await $.clock.now())
+    }
     await save($, {}, true)
     // 모듈이 다시 로드되기 전에 work-plan 이 써 둔 계획
     await syncPlan($)
@@ -792,8 +799,8 @@ export const register: Register = (on, options) => {
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const asking = list.filter(b => b.state === 'asking' && !isStale(b, now)).length
-    const tone = (b: Beat) => (isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.state === 'working' ? pal.work : pal.dim)
-    const markOf = (b: Beat) => (isStale(b, now) ? '·' : b.state === 'asking' ? '⚑' : b.state === 'working' ? '●' : '○')
+    const tone = (b: Beat) => (isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.state === 'working' || waitsOnAgents(b) ? pal.work : pal.dim)
+    const markOf = (b: Beat) => (isStale(b, now) ? '·' : b.state === 'asking' ? '⚑' : b.state === 'working' ? '●' : waitsOnAgents(b) ? '◐' : '○')
     const isMe = (b: Beat) => b.id === self.beat?.id
     // 숨은 실패: 결정 대기가 아니고 아직 풀리지 않은 실패(high)
     const failed = (b: Beat) => !isStale(b, now) && b.fail?.level === 'high'
@@ -841,7 +848,8 @@ export const register: Register = (on, options) => {
       const p = progress(b.tasks)
       return { done: a.done + p.done, total: a.total + p.total }
     }, { done: 0, total: 0 })
-    const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now)).length
+    // 대기는 보조 기다림을 빼고 센다
+    const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now) && !(st === 'idle' && waitsOnAgents(b))).length
     // 팀 전체에서 지금 도는 보조 에이전트 수
     const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
     const SEG = { done: pal.ok, now: pal.work, left: pal.dim, end: pal.text } as const
@@ -860,6 +868,7 @@ export const register: Register = (on, options) => {
         : s.hot ? [' 결정 ', filled ? pal.onBadge : pal.ask, filled ? pal.ask : pal.onBadge]
           : s.bad ? [' 실패 ', pal.bad, pal.onBadge]
             : b.state === 'working' ? [' 작업 ', pal.work, pal.onBadge]
+              : waitsOnAgents(b) ? [' 보조 ', pal.work, pal.onBadge]
               : s.cool ? [' 캐시 ', pal.ask, pal.onBadge]
                 : [' 대기 ', pal.dim, pal.onBadge]
       return <Text backgroundColor={bg} color={fg} bold>{text}</Text>
@@ -882,6 +891,8 @@ export const register: Register = (on, options) => {
                 <Text color={pal.text}>{` ${done}/${total}`}</Text>
               </Text>
             )
+          : waitsOnAgents(b)
+            ? <Text color={pal.work} wrap="truncate-end">{`보조 ${agentCounts(b.agents).working}개 기다리는 중`}</Text>
           : <Text color={b.state === 'working' ? pal.work : pal.dim} wrap="truncate-end">{b.state === 'working' ? b.step || '생각 중' : b.last || b.prompt || '새 요청 대기'}</Text>
     }
 
@@ -985,7 +996,7 @@ export const register: Register = (on, options) => {
     const noop = () => {}
 
     const stateTone = (b: Beat) =>
-      isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.fail?.level === 'high' ? pal.bad : b.state === 'working' ? pal.work : pal.frame
+      isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.fail?.level === 'high' ? pal.bad : b.state === 'working' || waitsOnAgents(b) ? pal.work : pal.frame
 
     // 라벨 칸 폭을 맞춘 한 줄
     const row = (labelText: string, body: JSX.Element, key?: string) => (
@@ -1045,7 +1056,7 @@ export const register: Register = (on, options) => {
       if (!useTile || !Raster) return null
       const stale = isStale(b, now)
       const broke = !stale && b.state !== 'asking' && b.fail?.level === 'high'
-      const kind = stale ? 'stale' : b.state === 'asking' || broke ? 'asking' : b.state === 'working' ? 'working' : 'idle'
+      const kind = stale ? 'stale' : b.state === 'asking' || broke ? 'asking' : b.state === 'working' || waitsOnAgents(b) ? 'working' : 'idle'
       const bg = stale || kind === 'idle' ? pal.frame : broke ? pal.bad : kind === 'asking' ? pal.ask : pal.work
       const fg = stale ? pal.dim : kind === 'idle' ? pal.ok : pal.onBadge
       return (
@@ -1440,7 +1451,9 @@ export const register: Register = (on, options) => {
       },
       { done: 0, total: 0 },
     )
-    const count = (s: Beat['state']) => list.filter(b => b.state === s && !isStale(b, now)).length
+    // 대기는 보조 기다림을 빼고 센다
+    const count = (s: Beat['state']) => list.filter(b => b.state === s && !isStale(b, now) && !(s === 'idle' && waitsOnAgents(b))).length
+    const waiting = list.filter(b => !isStale(b, now) && waitsOnAgents(b)).length
     const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
     return (
       <Box flexDirection="column" paddingX={1}>
@@ -1449,6 +1462,7 @@ export const register: Register = (on, options) => {
           {count('asking') ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 대기 ${count('asking')} `}</Text> : null}
           {list.some(b => b.fail?.level === 'high' && !isStale(b, now)) ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 숨은 실패 ${list.filter(b => b.fail?.level === 'high' && !isStale(b, now)).length} `}</Text> : null}
           <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
+          {waiting ? <Text color={pal.work}>{`◐ 보조 기다림 ${waiting}`}</Text> : null}
           <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
           {helpers ? <Text color={pal.work}>{`● 보조 ${helpers}`}</Text> : null}
           {sum.total ? (

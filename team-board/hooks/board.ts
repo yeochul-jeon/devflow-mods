@@ -264,10 +264,10 @@ export function progressBar(done: number, total: number, width = 8): string {
   return '■'.repeat(full) + '□'.repeat(width - full)
 }
 
-/** 보여줄 세션만, 보여줄 순서로: 결정 필요 > 작업 중 > 대기 > 오래됨. */
+/** 보여줄 세션만, 보여줄 순서로: 결정 필요 > 작업 중 > 보조 기다림 > 대기 > 오래됨. */
 export function visible(beats: readonly Beat[], now: number): Beat[] {
   const rank = (b: Beat) =>
-    now - b.updatedAt > STALE_MS ? 3 : b.state === 'asking' ? 0 : b.state === 'working' ? 1 : 2
+    now - b.updatedAt > STALE_MS ? 4 : b.state === 'asking' ? 0 : b.state === 'working' ? 1 : waitsOnAgents(b) ? 2 : 3
   // 탭을 그냥 닫으면 종료 기록이 남지 않는다. 같은 폴더·이름의 더 새 기록이 있는 오래된 기록은 그 잔재로 보고 숨긴다.
   const leftover = (b: Beat) =>
     now - b.updatedAt > STALE_MS &&
@@ -288,7 +288,12 @@ export function isStale(b: Beat, now: number): boolean {
 
 export function label(b: Beat, now: number): string {
   if (isStale(b, now)) return '소식없음'
-  return b.state === 'asking' ? '결정 필요' : b.state === 'working' ? '작업중' : '대기'
+  return b.state === 'asking' ? '결정 필요' : b.state === 'working' ? '작업중' : waitsOnAgents(b) ? '보조 기다림' : '대기'
+}
+
+/** 메인 턴은 끝났지만 뒤에서 도는 보조 에이전트가 있다: 대기가 아니라 보조를 기다리는 중 */
+export function waitsOnAgents(b: Beat): boolean {
+  return b.state === 'idle' && b.agents.some(a => a.status === 'working')
 }
 
 export function ago(ms: number): string {
@@ -476,14 +481,15 @@ export function bandLayout(n: number, columns: number, maxRows: number): BandLay
   return { mode: 'compact', slotW: compactW, shown: n <= capacity ? n : Math.max(1, capacity - 1) }
 }
 
-/** 팀 창에 먼저 보일 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 대기 > 소식 없음. */
+/** 팀 창에 먼저 보일 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 보조 기다림 > 대기 > 소식 없음. */
 export function bandOrder(beats: readonly Beat[], now: number, meId: string | undefined): Beat[] {
   const rank = (b: Beat) =>
-    isStale(b, now) ? 5
+    isStale(b, now) ? 6
       : b.state === 'asking' ? 0
         : b.fail?.level === 'high' ? 1
           : b.id === meId ? 2
-            : b.state === 'working' ? 3 : 4
+            : b.state === 'working' ? 3
+              : waitsOnAgents(b) ? 4 : 5
   return [...beats].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
 }
 
@@ -517,13 +523,25 @@ export function agentEnd(list: readonly SubAgent[], id: string, ok: boolean, at:
   return agentPatch(list, id, a => (a.status === 'working' ? { ...a, status: ok ? 'done' : 'failed', tool: '', endedAt: at } : a))
 }
 
-/** 엔진 목록($.agent.list)의 상태로 보정한다: 끝난 신호를 놓쳤을 때를 위해. */
+/**
+ * 엔진 목록($.agent.list)의 상태로 보정한다: 끝난 신호를 놓쳤을 때를 위해.
+ * 턴이 끝났어도 엔진이 아직 돈다고 하면(제 백그라운드 셸을 기다리는 waiting 등) 다시 작업 중으로 돌린다.
+ */
 export function agentSync(list: readonly SubAgent[], infos: readonly { id: string; status: string }[], at: number): SubAgent[] {
   let out = list as SubAgent[]
   for (const i of infos) {
     if (i.status === 'completed') out = agentEnd(out, i.id, true, at)
     else if (i.status === 'failed' || i.status === 'killed') out = agentEnd(out, i.id, false, at)
+    else if (i.status === 'running' || i.status === 'waiting' || i.status === 'pending')
+      out = agentPatch(out, i.id, a => (a.status === 'working' ? a : { ...a, status: 'working', endedAt: null }))
   }
+  return out
+}
+
+/** 엔진 목록에 없는 작업 중 에이전트를 끝(실패)으로: 다시 시작(claude -r)하면 앞 프로세스의 에이전트는 이 프로세스 목록에 없다. */
+export function agentGone(list: readonly SubAgent[], infos: readonly { id: string }[], at: number): SubAgent[] {
+  let out = list as SubAgent[]
+  for (const a of list) if (a.status === 'working' && !infos.some(i => i.id === a.id)) out = agentEnd(out, a.id, false, at)
   return out
 }
 
