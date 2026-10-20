@@ -111,6 +111,8 @@ const self = {
   /** 세션 이름을 마지막으로 확인한 시각, 대화 기록 파일에서 이름을 찾았는지 */
   titleCheckedAt: 0,
   titleDone: false,
+  /** 세션 id 가 바뀌기 직전 session.end 의 이유 ('clear' | 'resume'). 바뀐 id 를 따라갈 때 쓰고 지운다 */
+  switchReason: '',
   /** 숨은 실패 감지를 끔 (/board fail off) */
   failOff: false,
   /** HTML 요청 턴이 끝나면 되돌릴 이 세션의 결정 질문 (요청 턴이 결정 대기를 지우지 않게) */
@@ -313,19 +315,30 @@ const BOARD_HELP = [
 const TITLE_EVERY_MS = 15_000
 
 /**
- * /clear·/resume 뒤에는 세션 id 와 대화 기록 파일이 바뀐다. 바뀌었으면 따라가고,
- * 직접 정한 이름(/board name, /rename)은 새 id 로 옮긴다.
+ * /clear·/resume 뒤에는 세션 id 와 대화 기록 파일이 바뀐다. 바뀌었으면 따라간다.
+ * /clear 는 같은 대화가 이어지므로 직접 정한 이름(/board name, /rename)을 새 id 로 옮긴다.
+ * /resume 은 다른 대화로 옮긴 것이라 그 대화의 이름을 쓴다.
  */
 async function followSessionId($: EngineInterface): Promise<void> {
   if (!self.sessionId) return
   const id = await $.session.id()
   if (!id || id === self.sessionId) return
+  const resumed = self.switchReason === 'resume'
+  self.switchReason = ''
   const pinned = await $.store.get(nameKey(self.sessionId))
-  if (typeof pinned === 'string' && pinned) await $.store.set(nameKey(id), pinned)
+  if (!resumed && typeof pinned === 'string' && pinned) await $.store.set(nameKey(id), pinned)
   self.transcript = self.transcript.replace(`${self.sessionId}.jsonl`, `${id}.jsonl`)
   self.sessionId = id
   self.titleCheckedAt = 0
   self.titleDone = false
+  if (resumed && self.beat) {
+    const repo = await $.session.repo()
+    const name = await defaultName($, self.beat.cwd, repo?.root ?? null)
+    if (name !== self.beat.name) {
+      await save($, { name }, true)
+      await scan($)
+    }
+  }
 }
 
 /**
@@ -440,6 +453,7 @@ export const register: Register = (on, options) => {
   // 그때는 숨기지 않고 대기로 두며, 결정 기록은 남기고 대기 질문과 할 일은 비운다.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
+      self.switchReason = e.reason
       const at = await $.clock.now()
       const timeline = self.beat
         ? pushCapped(self.beat.timeline, event(at, 'clear', e.reason === 'clear' ? '/clear' : '/resume'), MAX_TIMELINE)
@@ -481,6 +495,17 @@ export const register: Register = (on, options) => {
     }
     return next(e)
   })
+
+  // CLI 2.1.304 부터 작업 알림은 prompt.submit 을 거치지 않고 대화 기록에만 붙는다(턴 없음). 엔진이 센 토큰을 여기서도 읽는다
+  on('session.append', async ($, e, next) => {
+    const r = await next(e)
+    if (!e.agentId && self.beat && e.message.type === 'user') {
+      const text = e.message.content.map(b => (b.type === 'text' ? b.text : '')).join('\n')
+      if (text.includes('<subagent_tokens>'))
+        for (const n of notificationTokens(text)) await setAgents($, list => agentPatch(list, n.id, a => ({ ...a, tokens: n.tokens })), true)
+    }
+    return r
+  }).catch(($, e, next) => next(e)) // 토큰 표시가 실패해도 기록은 그대로 남는다
 
   // work-plan 이 계획을 쓰면 할 일로 옮긴다. 기록이 끝난 뒤에 읽고, 쓰기가 거절됐으면 무시한다.
   // 도구 호출 관찰과 달리 hook 순서와 상관없이 불린다.

@@ -1431,6 +1431,19 @@ describe('팀 상황판', () => {
     const cb = await $.ui.mount(BAND)
     expect(await cb.find({ type: 'Text', text: /api-fix\*/ })).toBeDefined()
     await cb.unmount()
+    // /clear 로 id 가 바뀌면 같은 대화가 이어지므로 직접 정한 이름이 새 id 로 따라간다
+    sid = 'me-c'
+    await clock.advance(3_000)
+    expect(mine().name).toBe('api-fix')
+    // /resume 으로 다른 대화로 옮기면 그 대화의 이름을 쓴다. 이 이름을 그 대화에 옮겨 적지 않는다
+    // (2026-10-20 F2: claude -c 가 옆 세션의 대화를 연 뒤 제 대화로 옮겼더니 옆 세션 이름이 남았다)
+    await $.session.end({ reason: 'resume', sessionId: 'me-c', resume: {} } as any)
+    sid = 'other'
+    titleLine = '"customTitle":"devflow1"\n'
+    await clock.advance(3_000)
+    expect(mine().name).toBe('devflow1')
+    await clock.advance(15_000)
+    expect(mine().name).toBe('devflow1')
     // 진짜 종료는 숨김
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 'me', resume: {} } as any)
     expect(mine().state).toBe('ended')
@@ -1691,5 +1704,16 @@ describe('보조 에이전트 (hook)', () => {
     expect(mine().agents.find((a: any) => a.id === 'sub-3').tokens).toBe(0)
     await $.tool.call({ tool: 'Agent', description: 'sub-3', tool_use_id: 'x1' } as any)
     expect(mine().agents.find((a: any) => a.id === 'sub-3').tokens).toBe(4200)
+
+    // CLI 2.1.304: 작업 알림은 prompt.submit 을 거치지 않고 session.append 로만 온다 (2026-10-20 tmux 탐침: door queue/origin engine, 이어 door prompt/origin task-notification)
+    const row = (text: string, over: Record<string, unknown> = {}) =>
+      ({ message: { type: 'user', role: 'user', content: [{ type: 'text', text }] }, door: 'queue', origin: { kind: 'engine' }, uuid: `u${Math.random()}`, ...over }) as any
+    await $.session.append(row(NOTIFY('sub-4', 27708)))
+    expect(mine().agents.find((a: any) => a.id === 'sub-4').tokens).toBe(27708)
+    await $.session.append(row(NOTIFY('sub-4', 27708), { door: 'prompt', origin: { kind: 'task-notification' } }))
+    expect(mine().agents.find((a: any) => a.id === 'sub-4').tokens).toBe(27708)
+    // 보조 에이전트 자기 대화의 줄은 메인 장부를 건드리지 않는다
+    await $.session.append(row(NOTIFY('sub-2', 9), { agentId: 'sub-3' }))
+    expect(mine().agents.find((a: any) => a.id === 'sub-2').tokens).toBe(0)
   })
 })
