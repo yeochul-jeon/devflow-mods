@@ -80,7 +80,7 @@ describe('next-steps', () => {
     let band = await $.ui.mount(BAND)
     expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined() // 다른 mod 의 띠를 가리지 않는다
     expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeDefined()
-    expect(await band.find({ type: 'Text', text: /0 닫기/ })).toBeDefined()
+    expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
     // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
     expect(await band.find({ type: 'Text', text: /^── next-steps ─{106}$/ })).toBeDefined()
     await band.unmount()
@@ -154,9 +154,27 @@ describe('next-steps', () => {
     // 폭이 넘치면 줄어드는 건 라벨·구분 기호뿐이라 사라졌다. 한 줄 전체를 줄지 않는 Box 에 담아 오른쪽 끝에서만 잘리게 한다
     const row = await band.find({ key: 'one-row' })
     expect(row?.props.flexShrink).toBe(0)
-    expect(row?.text).toMatch(/^다음: 1 테스트를 다시 돌려 줘 {2}· {2}2 PR 초안을 만들어 줘 {2}· {2}0 닫기$/)
+    expect(row?.text).toMatch(/^다음: 1 테스트를 다시 돌려 줘 {2}· {2}2 PR 초안을 만들어 줘 {2}· {2}0 닫기 $/)
     await band.press({ key: 'step-1' })
     expect(fills.at(-1)).toEqual({ text: '테스트를 다시 돌려 줘', mode: 'insert' })
+    // 0 닫기도 Button 이라 누르면 닫힌다
+    expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
+    await band.press({ key: 'close' })
+    await band.unmount()
+    band = await $.ui.mount(BAND)
+    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
+    await band.unmount()
+
+    // 여러 줄 모양의 0 닫기도 누를 수 있다. 안내 글은 버튼 밖
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't2' } as any)
+    await settle()
+    band = await $.ui.mount(BAND)
+    expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
+    expect(await band.find({ type: 'Text', text: /클릭이나 빈 입력창에서 숫자/ })).toBeDefined()
+    await band.press({ key: 'close' })
+    await band.unmount()
+    band = await $.ui.mount(BAND)
+    expect(await band.find({ type: 'Text', text: /PR 초안/ })).toBeUndefined()
     await band.unmount()
   })
 

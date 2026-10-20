@@ -85,7 +85,13 @@ export const register: Register = on => {
     if (e.props.hasSurvey || e.props.isWorking || !s || s.items.length === 0) return rest
 
     const { Box, Text, Button } = $.ui.resolve(e)
-    const close = <Text color="cyan" bold>{'0 '}</Text>
+    // 0 닫기도 제안 줄과 같은 Button. 끝 공백은 아래 제안 줄과 같은 까닭
+    const close = (
+      <Button key="close" plain onPress={() => void update($, steps, () => null)}>
+        <Text color="cyan" bold>{'0 '}</Text>
+        <Text dimColor>{'닫기 '}</Text>
+      </Button>
+    )
     // 제안 하나: 번호와 글을 한 Button 으로. 마우스를 올리면 엔진이 Button 전체를 반전한다.
     // 반전이 오른쪽 끝에서 한 칸 모자라 마지막 넓은 글자가 반만 덮이므로 끝에 공백 한 칸을 둔다
     const item = (t: string, i: number, shrink: boolean) => (
@@ -105,7 +111,6 @@ export const register: Register = on => {
           <Text dimColor>{'다음: '}</Text>
           {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{' ·  '}</Text>])}
           {close}
-          <Text dimColor>닫기</Text>
         </Box>
       </Box>
     ) : (
@@ -116,11 +121,11 @@ export const register: Register = on => {
             {item(t, i, true)}
           </Box>
         ))}
-        <Text>
+        <Box height={1} overflow="hidden">
           <Text dimColor>{'      '}</Text>
           {close}
-          <Text dimColor>닫기 · 클릭이나 빈 입력창에서 숫자</Text>
-        </Text>
+          <Text dimColor wrap="truncate-end">· 클릭이나 빈 입력창에서 숫자</Text>
+        </Box>
       </Box>
     )
     return (
