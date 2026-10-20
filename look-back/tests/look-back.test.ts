@@ -35,6 +35,9 @@ describe('ledger (순수 함수)', () => {
     const long = requestText('가'.repeat(300))
     expect([...long]).toHaveLength(200)
     expect(long.endsWith('…')).toBe(true)
+    // 붙여 넣은 글은 엔진이 <pasted_content id="…"> 로 감싸 보낸다. 태그는 빼고 글만 남긴다 (2026-10-21 시험 F7)
+    expect(requestText('<pasted_content id="1f0b">\n시험용 요청\n둘째 줄\n</pasted_content id="1f0b">')).toBe('시험용 요청 둘째 줄')
+    expect(requestText('앞 글 <pasted_content id="a1">붙인 글</pasted_content id="a1"> 뒤 글')).toBe('앞 글 붙인 글 뒤 글')
   })
 
   test('같은 요청은 바꾸고 시각 순으로 둔다, git log 를 읽는다', async () => {

@@ -52,9 +52,14 @@ export function redact(text: string): string {
   return SECRETS.reduce((t, [re, to]) => t.replace(re, to), text)
 }
 
-/** 기록할 요청 글: 줄바꿈을 펴고 비밀 값을 가린 뒤 200자(코드 포인트). */
+/** 붙여 넣은 글을 감싼 엔진 태그(`<pasted_content id="…">`, `</pasted_content id="…">`)를 빼고 글만 남긴다. 태그에 붙은 줄바꿈 하나도 함께 뺀다 */
+export function unwrapPaste(text: string): string {
+  return text.replace(/<pasted_content(?: id="[^"]*")?>\n?/g, '').replace(/\n?<\/pasted_content(?: id="[^"]*")?>/g, '')
+}
+
+/** 기록할 요청 글: 붙여 넣기 태그를 빼고 줄바꿈을 펴고 비밀 값을 가린 뒤 200자(코드 포인트). */
 export function requestText(text: string): string {
-  const flat = redact(text.replace(/\s+/g, ' ').trim())
+  const flat = redact(unwrapPaste(text).replace(/\s+/g, ' ').trim())
   const chars = [...flat]
   return chars.length > MAX_TEXT ? chars.slice(0, MAX_TEXT - 1).join('') + '…' : flat
 }
