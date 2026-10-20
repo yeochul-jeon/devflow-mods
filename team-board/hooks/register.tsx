@@ -470,7 +470,8 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     const text = typeof e.text === 'string' ? e.text.trim() : ''
     // next(e) 안에서 턴이 시작되며 결정 대기 상태가 지워지므로, 넘기기 전에 기록한다.
-    if (text && !text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
+    // ' /lookback' 처럼 앞에 공백이 있으면 엔진이 일반 메시지로 보낸다. 그래서 / 는 다듬기 전 글로 본다
+    if (text && !e.text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
       const at = await $.clock.now()
       let { decisions, timeline } = self.beat
       self.undo = null

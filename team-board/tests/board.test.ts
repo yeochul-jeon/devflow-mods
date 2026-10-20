@@ -262,6 +262,18 @@ describe('board (순수 함수)', () => {
     expect(looksLikeQuestion('진행해도 되면 알려 주세요.')).toBe(true)
   })
 
+  test('결과·끝남·보이는 것을 알려 달라는 부탁은 결정 요청이 아니다 (2026-10-20 시험 F4)', async () => {
+    expect(looksLikeQuestion('두 결과를 함께 알려 주세요. 스크린샷이면 더 좋습니다.')).toBe(false)
+    expect(looksLikeQuestion('시험 결과를 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('실행이 끝나면 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('이상한 동작이 보이면 해당 탭의 화면을 알려 주세요.')).toBe(false)
+    expect(looksLikeQuestion('재시작 뒤 띠가 어떻게 됐는지 알려 주세요.')).toBe(false)
+    // 결과를 보고 고르는 것, 할지 말지는 결정이다
+    expect(looksLikeQuestion('결과를 보고 진행할지 알려 주세요.')).toBe(true)
+    expect(looksLikeQuestion('커밋할지 알려 주세요.')).toBe(true)
+    expect(looksLikeQuestion('어떻게 할지 알려 주세요.')).toBe(true)
+  })
+
   test('한국어 의문 어미 + ? 뒤에 문장이 이어져도 결정 요청이다 (T5 S4 준비 턴). URL·영어 중간의 ? 는 아니다', async () => {
     expect(looksLikeQuestion('파일을 몇 개 만들까요? 답을 받을 때까지 기다리겠습니다.')).toBe(true)
     expect(looksLikeQuestion('이대로 진행해도 되나요? 확인되면 바로 적용합니다.')).toBe(true)
@@ -1095,6 +1107,9 @@ describe('팀 상황판', () => {
     expect(mine().decisions.at(-1)).toMatchObject({ question: '2. PR38 착수 시점을 정해 주십시오.', answer: 'PR38은 10장 수정 뒤에 시작해' })
     expect(mine().recent).toEqual([])
     expect(mine().timeline.map((t: any) => t.kind)).toEqual(['ask', 'decide', 'ask', 'decide', 'prompt'])
+    // 앞에 공백이 있는 / 글은 엔진이 일반 메시지로 보낸다: 사람 요청으로 남긴다 (2026-10-20 시험 F5)
+    await $.prompt.submit({ text: ' /lookback 오늘', origin: { kind: 'composer' } } as any)
+    expect(mine().timeline.at(-1)).toMatchObject({ kind: 'prompt', text: '/lookback 오늘' })
 
     // 바로 답했으니 소리 없음. 결정을 20초 넘게 기다리면 한 번만 알린다.
     await clock.advance(30_000)
