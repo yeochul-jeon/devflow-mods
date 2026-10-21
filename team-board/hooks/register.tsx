@@ -1350,32 +1350,37 @@ export const register: Register = (on, options) => {
 
     // 탭 줄: [ 12살 ▴ ][ 🔄 ] │ [ ASD-STE100 ][ 🔄 ] │ [ HTML ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
     // (초점 반전이 걸린 고른 탭이 안 고른 탭처럼 보일 수 있어 기호로 구분한다).
+    // 좁은 패널에서는 묶음(탭 + 그 🔄) 사이에서만 줄바꿈한다. │ 는 둘째 묶음부터 앞에 붙여 줄 끝에 남지 않게
     const tabRow = (b: Beat) => {
       const shown = hasAny(b)
+      const bar = (k: string) => <Text key={`bar-${k}-${b.id}`} color={pal.dim}>│</Text>
       return (
-        <Box flexDirection="row" columnGap={1}>
-          {TABS.flatMap((t, i) => {
+        <Box key={`tabs-${b.id}`} flexDirection="row" columnGap={1} flexWrap="wrap">
+          {TABS.map((t, i) => {
             const picked = shown && tabNow === t.kind
-            const out = [
-              <Button key={`tab-${t.kind}-${b.id}`} plain onPress={noop}>
-                {picked ? (
-                  <Text color={pal.onBadge} backgroundColor={t.hue} bold>{` ${t.label} ${folded.includes(b.id) ? '▾' : '▴'} `}</Text>
-                ) : (
-                  <Text color={t.hue} bold>{`[ ${t.label} ]`}</Text>
-                )}
-              </Button>,
-            ]
-            // 재생성은 만든 탭에만, 만드는 중에는 숨긴다 (눌러도 무시되므로)
-            if (partOf(b, t.kind) && !makingOf(b, t.kind)) out.push(<Button key={`regen-${t.kind}-${b.id}`} variant="secondary" label="🔄" onPress={noop} />)
-            if (i < TABS.length - 1) out.push(<Text color={pal.dim}>│</Text>)
-            return out
+            return (
+              <Box key={`tabgrp-${t.kind}-${b.id}`} flexDirection="row" columnGap={1} flexShrink={0}>
+                {i > 0 ? bar(t.kind) : null}
+                <Button key={`tab-${t.kind}-${b.id}`} plain onPress={noop}>
+                  {picked ? (
+                    <Text color={pal.onBadge} backgroundColor={t.hue} bold>{` ${t.label} ${folded.includes(b.id) ? '▾' : '▴'} `}</Text>
+                  ) : (
+                    <Text color={t.hue} bold>{`[ ${t.label} ]`}</Text>
+                  )}
+                </Button>
+                {/* 재생성은 만든 탭에만, 만드는 중에는 숨긴다 (눌러도 무시되므로) */}
+                {partOf(b, t.kind) && !makingOf(b, t.kind) ? <Button key={`regen-${t.kind}-${b.id}`} variant="secondary" label="🔄" onPress={noop} /> : null}
+              </Box>
+            )
           })}
-          <Text color={pal.dim}>│</Text>
-          {htmlSent && htmlSent.id === b.id && htmlSent.question === b.question ? (
-            <Text color={pal.dim}>HTML 요청함</Text>
-          ) : (
-            <Button key={`html-${b.id}`} variant="secondary" label="HTML" onPress={noop} />
-          )}
+          <Box key={`tabgrp-html-${b.id}`} flexDirection="row" columnGap={1} flexShrink={0}>
+            {bar('html')}
+            {htmlSent && htmlSent.id === b.id && htmlSent.question === b.question ? (
+              <Text color={pal.dim}>HTML 요청함</Text>
+            ) : (
+              <Button key={`html-${b.id}`} variant="secondary" label="HTML" onPress={noop} />
+            )}
+          </Box>
         </Box>
       )
     }

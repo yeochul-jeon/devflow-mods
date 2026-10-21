@@ -1350,6 +1350,14 @@ describe('팀 상황판', () => {
     await clock.advance(3_000)
     expect(steCalls).toBe(2)
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeDefined()
+    // 좁은 패널(N2b): 탭 줄은 묶음 사이에서 줄바꿈. 탭과 그 🔄 는 한 묶음, │ 는 둘째 묶음부터 앞에
+    const tabs = await pane.find({ key: 'tabs-peer' })
+    expect(tabs?.props).toMatchObject({ flexWrap: 'wrap' })
+    expect(JSON.stringify(await pane.find({ key: 'tabgrp-kid-peer' }))).toContain('regen-kid-peer')
+    const steGrp = JSON.stringify(await pane.find({ key: 'tabgrp-ste-peer' }))
+    expect(steGrp).toContain('regen-ste-peer')
+    expect(steGrp).toContain('│')
+    expect(JSON.stringify(await pane.find({ key: 'tabgrp-html-peer' }))).toContain('html-peer')
     // 예전 형식 답은 · 목록으로 보인다
     expect(await pane.find({ type: 'Text', text: /^예전 형식 문장입니다\.$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^·$/ })).toBeDefined()
