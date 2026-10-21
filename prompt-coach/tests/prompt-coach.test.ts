@@ -193,12 +193,18 @@ describe('prompt-coach 흐름', () => {
     s.box = '세션 만료 에러'
     const r = await $.prompt.submit({ text: '세션 만료 에러', origin: { kind: 'composer' } } as any)
     expect(r).toMatchObject({ drop: 'prompt-coach: 질문의 답으로 받았어요' })
+    await settle()
+    expect(s.asked).toHaveLength(1) // 답은 엔진이 막힌 글을 되돌린 뒤에 넘긴다
     await clock.advance(300)
     await settle()
     expect(s.box).toBe('')
+    // 마지막 질문: 엔진이 되돌린 글을 지운 뒤 다듬은 글을 넣는다 (다듬은 글이 지워지지 않는다)
+    s.box = '인증 전체 다'
     await $.prompt.submit({ text: '인증 전체 다', origin: { kind: 'composer' } } as any)
+    await clock.advance(300)
     await settle()
     expect(s.asked[1].prompt).toContain('- 어떤 에러인가요? → 세션 만료 에러\n- 범위는? → 인증 전체 다')
+    expect(s.box).toBe(REFINED)
     // 질문이 끝난 뒤의 Enter 는 그대로 보낸다
     expect(await $.prompt.submit({ text: s.box, origin: { kind: 'composer' } } as any)).toMatchObject({ text: REFINED })
   })

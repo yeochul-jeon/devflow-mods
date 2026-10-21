@@ -95,9 +95,13 @@ export const register: Register = on => {
     // 질문하는 동안 입력창에 쓴 글은 지금 질문의 직접 답이다. 보내지 않는다.
     const f = await read($, flow)
     if (f.stage === 'questions' && e.origin.kind === 'composer' && !e.command && e.text.trim() !== '') {
-      await answer($, e.text.trim())
-      // 막힌 글은 엔진이 입력창에 다시 넣는다. 숫자 키로 다음 질문에 답하도록 그 뒤에 비운다
-      void $.clock.sleep(300).then(() => clearBox($)).catch(unloaded)
+      // 막힌 글은 엔진이 입력창에 다시 넣는다. 그 뒤에 비우고 답을 넘긴다. 여기서 답하면 마지막 질문의 다듬은 글이
+      // 되돌아온 글에 덮여 지워지고, 바깥 hook(team-board)이 drop 을 보고 되돌릴 때 바뀐 질문도 옛 것으로 돌아간다
+      const typed = e.text.trim()
+      void $.clock.sleep(300).then(async () => {
+        await clearBox($)
+        await answer($, typed)
+      }).catch(unloaded)
       return { drop: 'prompt-coach: 질문의 답으로 받았어요' }
     }
     let text = e.text
