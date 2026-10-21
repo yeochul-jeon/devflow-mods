@@ -1369,7 +1369,7 @@ export const register: Register = (on, options) => {
                   )}
                 </Button>
                 {/* 재생성은 만든 탭에만, 만드는 중에는 숨긴다 (눌러도 무시되므로) */}
-                {partOf(b, t.kind) && !makingOf(b, t.kind) ? <Button key={`regen-${t.kind}-${b.id}`} plain dimColor label="↻" onPress={noop} /> : null}
+                {partOf(b, t.kind) && !makingOf(b, t.kind) ? <Button key={`regen-${t.kind}-${b.id}`} plain dimColor label=" ↻ " onPress={noop} /> : null}
               </Box>
             )
           })}

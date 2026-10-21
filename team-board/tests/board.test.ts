@@ -1302,8 +1302,9 @@ describe('팀 상황판', () => {
     const night = paletteOf('night')
     expect((await pane.find({ type: 'Text', text: /^ 12살 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.ok, color: night.onBadge })
     expect((await pane.find({ type: 'Text', text: /^\[ ASD-STE100 \]$/ }))?.props).toMatchObject({ color: night.work })
-    // 재생성은 괄호 없는 1칸 ↻, 평소 흐리게 (이모지 🔄 는 2칸 고정 색 타일이라 괄호까지 6칸이었다)
-    expect((await pane.find({ key: 'regen-kid-peer' }))?.props).toMatchObject({ plain: true, label: '↻', dimColor: true })
+    // 재생성은 괄호 없는 ↻, 평소 흐리게 (이모지 🔄 는 2칸 고정 색 타일이라 괄호까지 6칸이었다).
+    // 앞뒤 공백까지 3칸: 1칸이면 초점 반전이 눈에 잘 안 띈다 (Orca 실화면)
+    expect((await pane.find({ key: 'regen-kid-peer' }))?.props).toMatchObject({ plain: true, label: ' ↻ ', dimColor: true })
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined()
 
     // 열린 탭을 다시 누르면 접기 / 펼치기
