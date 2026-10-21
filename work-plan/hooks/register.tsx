@@ -72,7 +72,8 @@ export const register: Register = (on, options) => {
     return { result: `ok: ${steps.length} steps` }
   }).catch(($, e, next) => ({ deny: `plan_update failed: ${next.error.message}` }))
 
-  // 턴이 끝났다는 표시만 남긴다. 남은 단계를 완료로 볼지는 읽는 쪽(team-board)이 결정 대기 여부와 함께 정한다.
+  // 턴이 끝났다는 표시만 남긴다. 남은 단계를 완료로 볼지는 읽는 쪽(team-board)이 정한다.
+  // 도구 사용 중 끊긴 턴은 엔진이 reason 'answer' 로 보낸다(T24 재시험: AskUserQuestion 거절). team-board 와 같이 isAborted·빈 답을 중단으로 본다.
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
     if (!e.agentId) {
@@ -80,7 +81,8 @@ export const register: Register = (on, options) => {
       const p = await read($, plan)
       if (p.steps.length > 0) {
         const now = await $.clock.now()
-        await update($, plan, cur => withEnded(cur, e.reason, now))
+        const reason = e.isAborted || !e.answer ? 'aborted' : e.reason
+        await update($, plan, cur => withEnded(cur, reason, now))
       }
     }
     return r

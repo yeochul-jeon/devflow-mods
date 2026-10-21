@@ -158,6 +158,13 @@ describe('work-plan (hook)', () => {
     await complete('aborted')
     expect((await plan()).ended).toEqual({ reason: 'aborted', at: NOW + 1_000 })
     expect((await plan()).steps).toEqual(STEPS)
+    // 도구 사용 중 끊긴 턴은 reason 이 'answer' 로 와도 중단. 빈 답도 중단 (team-board 판정과 같음)
+    await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: true, turnId: 't' } as any)
+    expect((await plan()).ended?.reason).toBe('aborted')
+    await $.turn.complete({ reason: 'answer', answer: '', durationMs: 1, isAborted: false, turnId: 't' } as any)
+    expect((await plan()).ended?.reason).toBe('aborted')
+    await complete('answer')
+    expect((await plan()).ended?.reason).toBe('answer')
 
     // precompute·서브에이전트 compaction 은 대화를 바꾸지 않는다
     await $.session.compact({ trigger: 'precompute', messages: MSGS } as any)
