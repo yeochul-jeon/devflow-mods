@@ -64,6 +64,6 @@ def span(c):
     return f'<span style="{s}">{html.escape(ch) if ch != " " else "&nbsp;"}</span>'
 body = '\n'.join('<div class="r">' + ''.join(span(c) for c in r) + '</div>' for r in rows)
 open(out, 'w', encoding='utf-8').write(f'''<!doctype html><meta charset="utf-8"><style>
-html,body{{margin:0;background:{BG}}} .w{{padding:14px 16px;width:{cols}ch;font:15px/1.35 Menlo,"Apple SD Gothic Neo",monospace}}
-.r{{white-space:pre;height:1.35em}} .r span{{display:inline-block;text-align:center;overflow:visible}}
+html,body{{margin:0;background:{BG}}} .w{{padding:14px 16px;width:{cols}ch;font:15px/1.35 "D2Coding ligature",Menlo,"Apple SD Gothic Neo",monospace}}
+.r{{white-space:pre;height:1.35em;font-variant-ligatures:none}} .r span{{display:inline-block;text-align:center;overflow:visible}}
 </style><div class="w">{body}</div>''')

@@ -77,7 +77,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 ## 🧭 team-board: 팀 상황판
 
-<img src="docs/images/hud.webp" alt="입력창 위 팀 창: 결정 대기 세션은 노란 칸, 할 일은 경로선" width="760">
+<img src="docs/images/hud.webp" alt="팀 창: 결정 대기 sub-2 는 노란 칸, 작업 중 api-fix 는 파란 배지, sub-3 은 할 일 경로선, sub-4 는 캐시 8분 남음" width="760">
 
 같은 저장소에서 실행 중인 Claude Code 세션을 모두 보여 줍니다. 워크트리도 포함합니다.
 
@@ -95,7 +95,45 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 | `/board fail` | 숨은 실패 보고서를 보여 줍니다. |
 | `/board help` | 모든 명령과 예시를 보여 줍니다. |
 
+### 용도별 사용 예
+
+**1. 여러 세션 중 결정을 기다리는 세션 찾기**
+
+세션을 여러 개 돌리면 어느 세션이 내 답을 기다리는지 놓치기 쉽습니다. 입력창 위 팀 창에서 노란 ` 결정 ` 칸을 찾으세요. 질문 앞부분이 칸에 보입니다(절 맨 위 그림의 sub-2). `/board` 를 열면 결정 대기 세션이 맨 위에 옵니다.
+
+**2. 결정이 어려울 때 설명 받기**
+
+결정 대기 카드의 탭을 누르면 Haiku가 그 질문을 풀어 설명합니다. `12살` 은 비유와 선택지별 흐름 그림, `ASD-STE100` 은 "X를 고르면 Y가 일어납니다" 꼴의 짧은 문장입니다. 설명을 다시 받으려면 탭 옆 `↻` 를, 페이지로 보려면 `[ HTML ]` 을 누르세요.
+
+<img src="docs/images/explain.webp" alt="12살 탭: 왜 지금, 비유, 선택지 세 개의 흐름 상자, 맥락과 제안, 먼저 정할 것" width="560">
+
+<img src="docs/images/ste.webp" alt="ASD-STE100 탭: 정할 것, 선택지마다 고르면 일어나는 일, 세션 제안" width="560">
+
+**3. 보조 에이전트에 맡겨 둔 세션 구별하기**
+
+턴은 끝났지만 서브에이전트가 아직 도는 세션은 ` 대기 ` 가 아니라 ` 보조 ` 배지와 `보조 n개 기다리는 중` 으로 보입니다. `/board <세션>` 에서 에이전트마다 하는 일, 지금 도구, 경과 시간, 끝난 뒤 토큰을 봅니다.
+
+<img src="docs/images/agents-band.webp" alt="팀 창: api-fix 칸에 보조 배지와 보조 1개 기다리는 중" width="760">
+
+<img src="docs/images/agents.webp" alt="/board api-fix: 보조 에이전트 두 개, 하나는 Grep 실행 중, 하나는 끝나고 21k 토큰" width="560">
+
+**4. 성공처럼 끝난 실패 찾기**
+
+`./gradlew test 2>&1 | tail -20` 처럼 파이프 때문에 exit 0 으로 끝났지만 출력에 실패가 있으면 카드가 빨갛게 바뀝니다. Claude에게도 알려서 성공이라고 보고하지 않게 합니다.
+
 <img src="docs/images/silent-failure.webp" alt="숨은 실패: 빨간 주의 띠와 함께 명령과 실패 흔적을 보여 주는 카드" width="460">
+
+**5. 한 세션의 흐름을 되짚고 원문 복사하기**
+
+`/board sub-3` 은 할 일, 결정 기록(질문 → 답), 흐름(요청 → 질문 → 결정 → 완료)을 시간 순으로 보여 줍니다. 흐름 줄을 누르면 그 원문 전체가 클립보드에 복사됩니다. 다른 세션에 같은 요청을 다시 보낼 때 씁니다.
+
+<img src="docs/images/flow.webp" alt="/board sub-3: 할 일 4개, 결정 기록 1건, 흐름 여섯 줄" width="560">
+
+**6. 좁은 패널에서 보기**
+
+Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(ctx 막대, 몇 초 전, 캐시)부터 덜어 내 한 줄을 지킵니다. 탭 줄은 탭 단위로 줄을 바꿉니다.
+
+<img src="docs/images/narrow.webp" alt="40칸 패널: 머리줄 한 줄, 탭 줄이 세 줄로 나뉨" width="300">
 
 팀 창 모양, 세션 이름, 카드 기호, 숨은 실패 판정 규칙, 기록하는 내용은 [docs/team-board.md](docs/team-board.md)를 보세요.
 

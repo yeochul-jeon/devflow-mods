@@ -1,4 +1,4 @@
-# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|none(지우기만)>
+# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|none(지우기만)>
 import json, os, sys, time, glob
 d, sc = sys.argv[1], sys.argv[2]
 for f in glob.glob(os.path.join(d, 'peer-*.json')):
@@ -36,3 +36,26 @@ elif sc == 'five':
 elif sc == 'many':
     for i in range(1, 30):
         put(f'{i:02d}', f'sub-{i:02d}')
+elif sc == 'ask':
+    put('2', 'sub-2', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?', prompt='주문 조회 캐시 정리',
+        tasks=t('completed', 'in_progress', 'pending'))
+elif sc == 'agents':
+    ag = lambda id, desc, st, tool='', tok=0, ago=40: {'id': id, 'desc': desc, 'type': 'Explore', 'model': 'claude-haiku-5-5', 'status': st,
+        'tool': tool, 'startedAt': now - ago * 1000, 'endedAt': None if st == 'working' else now - 5_000, 'tokens': tok}
+    put('a', 'api-fix', last='조사 맡겨 둠', agents=[ag('a1', '주문 API 호출처 찾기', 'working', 'Grep', 0, 95),
+        ag('a2', '캐시 설정 위치 찾기', 'done', '', 21_400, 70)])
+    put('3', 'sub-3', last='PR38 래퍼 수정 완료')
+    put('2', 'sub-2', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?')
+elif sc == 'flow':
+    m = lambda s: now - s * 60_000
+    sub = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '주문 수정 때 캐시 무효화', '부하 테스트']
+    put('3', 'sub-3', tasks=[{'id': str(i + 1), 'subject': x, 'status': st} for i, (x, st) in
+        enumerate(zip(sub, ['completed', 'completed', 'in_progress', 'pending']))], last='주문 조회 테스트 통과', edits=4,
+        files=['src/order/OrderService.java', 'src/order/OrderCache.java'],
+        decisions=[{'at': m(20), 'question': '캐시 만료를 5분으로 할까요, 1시간으로 할까요?', 'answer': '5분으로 해 주세요'}],
+        timeline=[{'at': m(32), 'kind': 'prompt', 'text': '주문 조회가 느려요. 캐시를 붙여 주세요'},
+                  {'at': m(21), 'kind': 'ask', 'text': '캐시 만료를 5분으로 할까요, 1시간으로 할까요?'},
+                  {'at': m(20), 'kind': 'decide', 'text': '캐시 만료를 5분으로 할까요, 1시간으로 할까요? → 5분으로 해 주세요'},
+                  {'at': m(20), 'kind': 'prompt', 'text': '5분으로 해 주세요'},
+                  {'at': m(9), 'kind': 'done', 'text': '주문 조회에 5분 캐시를 붙였고 테스트가 통과했습니다.'},
+                  {'at': m(3), 'kind': 'prompt', 'text': '캐시 무효화도 주문 수정 때 하게 해 줘'}])
