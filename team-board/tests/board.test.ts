@@ -2212,7 +2212,7 @@ describe('prompt-coach 연동', () => {
 })
 
 describe('자기 세션 표시', () => {
-  test('띠와 보드는 자기 세션의 상태를 다음 파일 읽기(3초)를 기다리지 않고 바로 보인다. 이름(·2)은 그대로', { plugins: [PROMPT_COACH] }, async ($, on) => {
+  test('띠와 보드는 자기 세션의 상태를 다음 파일 읽기(3초)를 기다리지 않고 바로 보인다. 이름(·2)은 그대로', { plugins: [PROMPT_COACH, WORK_PLAN] }, async ($, on) => {
     const files = new Map<string, string>()
     const clock = mock.clock(on, { now: NOW })
     mock.store(on)
@@ -2265,5 +2265,13 @@ describe('자기 세션 표시', () => {
     await pane.unmount()
     await pending(null)
     expect(await bandHas(/prompt-coach: 범위는/)).toBe(false)
+
+    // 계획 보고도 바로: 다음 파일 읽기 전에도 칸이 단계 글이 아니라 막대(지금 단계 알약)로 보인다
+    await $.prompt.submit({ text: '두 번째 요청', origin: { kind: 'composer' } } as any)
+    await $.turn.start({ text: '두 번째 요청', turnId: 't2' } as any)
+    const plan = { v: 1, steps: [{ title: '읽기', status: 'doing' }, { title: '고치기', status: 'todo' }], updatedAt: NOW, stale: false, ended: null }
+    await $.tool.call({ tool: 'SetPlan', plan, tool_use_id: 'sp' } as any)
+    expect(await bandHas(/^ 읽기 $/)).toBe(true)
+    expect(await bandHas(/할 일: 읽기/)).toBe(false)
   })
 })

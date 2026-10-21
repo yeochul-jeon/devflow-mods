@@ -294,10 +294,11 @@ export function progressBar(done: number, total: number, width = 8): string {
   return '■'.repeat(full) + '□'.repeat(width - full)
 }
 
-/** 자기 세션 칸에 방금 바뀐 상태·단계·질문을 덮는다. 목록은 3초마다 파일을 읽어 만들어 자기 변화도 늦게 보인다. 이름(·2)은 목록의 것을 둔다. */
+/** 자기 세션 칸에 방금 바뀐 상태·단계·질문·할 일을 덮는다. 목록은 3초마다 파일을 읽어 만들어 자기 변화도 늦게 보인다. 이름(·2)은 목록의 것을 둔다.
+ * 할 일을 덮지 않으면 첫 계획 보고 뒤 몇 초 동안 칸이 막대 대신 단계 글로 보였다 (T24 재시험). */
 export function withMe(beats: readonly Beat[], mine: Beat | null): Beat[] {
   if (!mine) return [...beats]
-  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question } : b))
+  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question, tasks: mine.tasks } : b))
 }
 
 /** 보여줄 세션만, 보여줄 순서로: 결정 필요 > 작업 중 > 보조 기다림 > 대기 > 오래됨. */
