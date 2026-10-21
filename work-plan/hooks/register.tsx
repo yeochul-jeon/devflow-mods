@@ -79,7 +79,8 @@ export const register: Register = (on, options) => {
     if (!e.agentId) {
       unplanned = 0
       const p = await read($, plan)
-      if (p.steps.length > 0) {
+      // 이미 끝난 계획은 뒤 턴이 덮지 않는다. 답만 한 다음 턴이 중단된 계획을 다 끝난 것으로 바꿨다 (T26)
+      if (p.steps.length > 0 && !p.ended) {
         const now = await $.clock.now()
         const reason = e.isAborted || !e.answer ? 'aborted' : e.reason
         await update($, plan, cur => withEnded(cur, reason, now))
