@@ -5,6 +5,7 @@ import {
   soundCommands,
   soundOs,
   pillBar,
+  pillToneOf,
   took,
   turnTook,
   agentClearEnded,
@@ -179,7 +180,21 @@ describe('자세히 할 일 띠 (T25)', () => {
     ])
     expect(todoStrips(tasks, 'asking')[1]).toMatchObject({ end: '질문 대기', tone: 'ask' })
     // 중단·오류로 끝난 턴 (work-plan 0.4.1 은 남은 단계를 그대로 둔다)
-    expect(todoStrips(tasks, 'idle')[1]).toMatchObject({ end: '멈춤', tone: 'ask' })
+    expect(todoStrips(tasks, 'idle')[1]).toMatchObject({ end: '멈춤', tone: 'stop' })
+  })
+
+  test('막대 알약 색 (T25): 작업 중이 아닌데 진행 중 단계가 남으면 멈춤. 결정·실패가 먼저', async () => {
+    const doing = [{ id: '1', subject: '읽기', status: 'completed' }, { id: '2', subject: '고치기', status: 'in_progress' }] as any
+    const done = [{ id: '1', subject: '읽기', status: 'completed' }] as any
+    expect(pillToneOf({ state: 'working', tasks: doing, fail: null } as any, false)).toBe('run')
+    expect(pillToneOf({ state: 'idle', tasks: doing, fail: null } as any, false)).toBe('stop')
+    expect(pillToneOf({ state: 'idle', tasks: done, fail: null } as any, false)).toBe('run')
+    expect(pillToneOf({ state: 'asking', tasks: doing, fail: null } as any, false)).toBe('ask')
+    expect(pillToneOf({ state: 'idle', tasks: doing, fail: { level: 'high' } } as any, false)).toBe('err')
+    expect(pillToneOf({ state: 'asking', tasks: doing, fail: null } as any, true)).toBe('stop') // 오래된 결정 대기는 멈춤으로
+    const pb = pillBar(doing, 40, 'stop')!
+    expect(pb.pill).toBe(' 멈춤: 고치기 ')
+    expect(pb.tone).toBe('stop')
   })
 })
 
@@ -1778,6 +1793,17 @@ describe('work-plan 연동', () => {
     await flush()
     expect(mine().state).toBe('idle')
     expect(statuses()).toEqual(['completed', 'completed', 'completed'])
+
+    // 중단된 턴 (T25): 남은 단계를 그대로 두고, 띠 알약은 작업색이 아니라 노랑 '멈춤'
+    await $.turn.start({ text: '다시', turnId: 't3' } as any)
+    await setPlan(plan(STEPS))
+    await $.turn.complete({ reason: 'aborted', answer: '', durationMs: 1, isAborted: true, turnId: 't3' } as any)
+    await setPlan(plan(STEPS, { ended: { reason: 'aborted', at: NOW + 2 } }))
+    await flush()
+    expect(mine().state).toBe('idle')
+    expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
+    const stopped = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, bodyColumns: 120, maxRows: 10 } } as any)
+    expect((await stopped.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
   })
 })
 

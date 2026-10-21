@@ -47,6 +47,7 @@ import {
   notificationTokens,
   oneLine,
   pillBar,
+  pillToneOf,
   progress,
   soundCommands,
   soundOs,
@@ -488,7 +489,7 @@ export const register: Register = (on, options) => {
 
   // 알약 막대 한 줄 (T24 B안). Text 는 그리는 화면의 것. 채움은 상태색을 카드 바탕 쪽으로 흐리게.
   // 이름 색 팔레트(theme)는 섞을 수 없어 흐린 글자(dimColor)로: 같은 색이면 채움과 알약이 붙어 보인다 (밝은 테마 실화면)
-  const PILL_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok }
+  const PILL_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok, stop: pal.ask }
   const pillOf = (Text: any, pb: PillBar) => (
     <Text wrap="truncate-end">
       <Text color={mix(PILL_HUE[pb.tone], pal.card || '#000000', 0.45)} dimColor={!pal.isRaw}>{pb.fill}</Text>
@@ -1002,9 +1003,9 @@ export const register: Register = (on, options) => {
     }
     const minutesOf = (b: Beat) => <Text color={pal.ask}>{cacheMinutes(cacheLeft(b.cacheAt, now)!)}</Text>
 
-    // 띠 칸의 알약 막대. 결정·실패는 secondOf 가 먼저 글로 보이므로 여기는 작업·끝남만. 좁으면 null (경로선으로)
+    // 띠 칸의 알약 막대. 결정·실패는 secondOf 가 먼저 글로 보이므로 여기는 작업·멈춤·끝남만. 좁으면 null (경로선으로)
     const pillBarOf = (b: Beat, width: number) => {
-      const pb = pillBar(b.tasks, width - 8, 'run', turnTook(b.timeline))
+      const pb = pillBar(b.tasks, width - 8, pillToneOf(b, isStale(b, now)), turnTook(b.timeline))
       return pb ? pillOf(Text, pb) : null
     }
 
@@ -1137,7 +1138,7 @@ export const register: Register = (on, options) => {
 
     // 자세히의 할 일 한 줄 (T25, plan-progress 띠 모양): 줄 끝까지 상태색을 옅게 깐 바탕, 점, 순번, 이름, 오른쪽 끝 상태 글.
     // 이름 색 팔레트(theme)는 섞을 수 없어 바탕 없이 점과 끝 글 색으로만 나눈다
-    const STRIP_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok }
+    const STRIP_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok, stop: pal.ask }
     const todoRowOf = (r: TodoStrip, width: number) => {
       const hue = r.tone === 'todo' ? pal.dim : STRIP_HUE[r.tone]
       const bg = r.tone !== 'todo' && pal.isRaw ? { backgroundColor: mix(hue, pal.card || '#000000', 0.78) } : {}
@@ -1205,8 +1206,7 @@ export const register: Register = (on, options) => {
       const { done, total, current } = progress(b.tasks)
       if (!total) return null
       const stale = isStale(b, now)
-      const tone: PillTone = b.state === 'asking' && !stale ? 'ask' : b.fail?.level === 'high' && !stale ? 'err' : 'run'
-      const pb = pillBar(b.tasks, Math.min(46, rightWidth - 6 - 6), tone, turnTook(b.timeline))
+      const pb = pillBar(b.tasks, Math.min(46, rightWidth - 6 - 6), pillToneOf(b, stale), turnTook(b.timeline))
       if (pb) return row('진행', pillOf(Text, pb))
       const segs = routeLine(b.tasks, Math.min(34, Math.max(10, rightWidth - 6 - 6)))
       return row(

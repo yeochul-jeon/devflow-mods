@@ -466,7 +466,7 @@ export function routeLine(tasks: readonly Task[], width: number): Seg[] {
  * 알약 글은 상태로 정한다: 작업 = 지금 단계, 결정 = ? 단계, 실패 = ✕ 단계, 끝남 = ✓ 걸린 시간(없으면 도착).
  * 폭 1 BMP 문자만 쓴다. width 는 채움 + 알약 + 남은 구간의 칸 수. 너무 좁으면 null (부르는 쪽이 경로선으로).
  */
-export type PillTone = 'run' | 'ask' | 'err' | 'ok'
+export type PillTone = 'run' | 'ask' | 'err' | 'ok' | 'stop'
 export type PillBar = { fill: string; pill: string; rest: string; pct: number; tone: PillTone }
 
 export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, took = ''): PillBar | null {
@@ -476,7 +476,7 @@ export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, t
   const tn: PillTone = allDone && tone === 'run' ? 'ok' : tone
   const step = current ?? tasks.find(t => t.status !== 'completed')
   // 다 끝난 계획의 결정 대기는 단계 이름 대신 '질문 대기': 초록 ✓ 로 그리면 일을 멈추고 묻는 세션과 구별되지 않는다
-  const label = tn === 'ok' ? `✓ ${took || '도착'}` : `${tn === 'ask' ? '? ' : tn === 'err' ? '✕ ' : ''}${step?.subject ?? (tn === 'ask' ? '질문 대기' : '')}`
+  const label = tn === 'ok' ? `✓ ${took || '도착'}` : `${tn === 'ask' ? '? ' : tn === 'err' ? '✕ ' : tn === 'stop' ? '멈춤: ' : ''}${step?.subject ?? (tn === 'ask' ? '질문 대기' : '')}`
   const pill = ` ${clip(label, Math.max(4, Math.floor(width / 2) - 2))} `
   const room = Math.max(0, width - cells(pill))
   const filled = tn === 'ok' ? room : Math.min(room, Math.round((done / total) * room))
@@ -484,6 +484,17 @@ export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, t
   let rest = ''
   for (let i = filled; i < room; i++) rest += ticks.has(i) && i > filled ? '│' : '·'
   return { fill: '█'.repeat(filled), pill, rest, pct: Math.round((done / total) * 100), tone: tn }
+}
+
+/**
+ * 세션 막대의 알약 색. 결정 대기 노랑 ?, 숨은 실패 빨강 ✕, 작업 중이 아닌데 진행 중 단계가 남았으면(중단·오류로 끝난 턴) 노랑 '멈춤',
+ * 그 밖은 작업색 (다 끝났으면 pillBar 가 초록 ✓). 자세히의 할 일 띠 '멈춤' 과 같은 판정.
+ */
+export function pillToneOf(b: Pick<Beat, 'state' | 'tasks' | 'fail'>, stale: boolean): PillTone {
+  if (b.state === 'asking' && !stale) return 'ask'
+  if (b.fail?.level === 'high' && !stale) return 'err'
+  if (b.state !== 'working' && b.tasks.some(t => t.status === 'in_progress')) return 'stop'
+  return 'run'
 }
 
 /** 마지막 요청에서 턴 끝까지 걸린 시간 (흐름의 prompt → done). 끝나지 않았으면 '' */
@@ -535,7 +546,7 @@ export function todoStrips(tasks: readonly Task[], state: Beat['state']): TodoSt
     if (t.status === 'in_progress') {
       return state === 'working' ? { n, label: t.subject, end: '진행 중', tone: 'run' }
         : state === 'asking' ? { n, label: t.subject, end: '질문 대기', tone: 'ask' }
-        : { n, label: t.subject, end: '멈춤', tone: 'ask' }
+        : { n, label: t.subject, end: '멈춤', tone: 'stop' }
     }
     return t.subject.startsWith('막힘: ') ? { n, label: t.subject.slice(4), end: '막힘', tone: 'err' } : { n, label: t.subject, end: '', tone: 'todo' }
   })
