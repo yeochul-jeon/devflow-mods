@@ -40,6 +40,7 @@ import {
   routeLine,
   stripMarkdown,
   tasksFromPlan,
+  todoStrips,
   tokensText,
   visible,
   waitsOnAgents,
@@ -159,6 +160,26 @@ describe('경로선과 픽셀', () => {
     expect([r.columns, r.rows]).toEqual([6, 3])
     const bytes = Uint8Array.from(atob(r.cells), c => c.charCodeAt(0))
     expect(bytes.length).toBe(6 * 3 * 3 * 4)
+  })
+})
+
+describe('자세히 할 일 띠 (T25)', () => {
+  test('끝남 초록, 지금 단계는 상태에 따라 진행 중·질문 대기·멈춤, 막힘 빨강, 남은 단계는 끝 글 없음', async () => {
+    const tasks = [
+      { id: '1', subject: '읽기', status: 'completed' },
+      { id: '2', subject: '고치기', status: 'in_progress' },
+      { id: '3', subject: '막힘: 배포 승인', status: 'pending' },
+      { id: '4', subject: '확인', status: 'pending' },
+    ] as any
+    expect(todoStrips(tasks, 'working')).toEqual([
+      { n: 1, label: '읽기', end: '끝남', tone: 'ok' },
+      { n: 2, label: '고치기', end: '진행 중', tone: 'run' },
+      { n: 3, label: '배포 승인', end: '막힘', tone: 'err' },
+      { n: 4, label: '확인', end: '', tone: 'todo' },
+    ])
+    expect(todoStrips(tasks, 'asking')[1]).toMatchObject({ end: '질문 대기', tone: 'ask' })
+    // 중단·오류로 끝난 턴 (work-plan 0.4.1 은 남은 단계를 그대로 둔다)
+    expect(todoStrips(tasks, 'idle')[1]).toMatchObject({ end: '멈춤', tone: 'ask' })
   })
 })
 
@@ -1343,8 +1364,8 @@ describe('팀 상황판', () => {
     // 기본은 HUD 창: 머리줄 + 세션 칸
     expect(await band.find({ type: 'Text', text: /◆ TEAM 2/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
-    // 결정 대기 세션이 있으면 머리줄 전체 막대는 노랑 (질문으로 끝난 턴도 단계는 완료로 세기 때문)
-    expect((await band.find({ type: 'Text', text: /^[▰▱]{8}$/ }))?.props.color).toBe(paletteOf('night').ask)
+    // 머리줄에 세션 단계 합계 막대는 없다 (T25: 서로 다른 작업의 단계를 더한 수라 뜻이 없었다)
+    expect(await band.find({ type: 'Text', text: /^[▰▱]{8}$/ })).toBeUndefined()
     // 결정 대기 칸: 칸이 노랗게 칠해져 있어 배지는 반전색. 이름 앞 표시(⚑)는 배지로 바뀌었다
     const askBadge = await band.find({ type: 'Text', text: /^ 결정 $/ })
     expect(askBadge?.props).toMatchObject({ color: paletteOf('night').ask, backgroundColor: paletteOf('night').onBadge })
@@ -1379,7 +1400,7 @@ describe('팀 상황판', () => {
     const PANE = { plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any
     let pane = await $.ui.mount(PANE)
     expect(await pane.find({ type: 'Text', text: /결정 대기 1/ })).toBeDefined()
-    expect((await pane.find({ type: 'Text', text: /^[▰▱]+$/ }))?.props.color).toBe(paletteOf('night').ask)
+    expect(await pane.find({ type: 'Text', text: /^[▰▱]+$/ })).toBeUndefined()
     expect(await pane.find({ type: 'Text', text: /→ 예, release 만/ })).toBeDefined()
     // 알약 막대 (T24 B안): 채움 끝에 결정을 기다리는 지금 단계, 남은 구간, %
     expect((await pane.find({ type: 'Text', text: /^ \? PR38 래퍼 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
@@ -1542,6 +1563,11 @@ describe('팀 상황판', () => {
     pane = await $.ui.mount(PANE)
     expect(await pane.find({ type: 'Text', text: /✓ 완료|▷ 요청/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /JOIN 감시 규칙/ })).toBeDefined()
+    // 자세히의 할 일 (T25): plan-progress 띠 모양. 줄 끝까지 옅은 작업색 바탕, 오른쪽 끝 상태 글, 취소선 없음
+    const strip = await pane.find({ type: 'Text', text: /^ ● 1  JOIN 감시 규칙 +진행 중 $/ })
+    expect(strip).toBeDefined()
+    expect(JSON.stringify(strip)).toContain('backgroundColor')
+    expect(JSON.stringify(strip)).not.toContain('strikethrough')
     // 버튼으로 전체 보기 ↔ 자세히
     await pane.press({ key: 'back' })
     expect(await pane.find({ key: 'detail-peer' })).toBeDefined()

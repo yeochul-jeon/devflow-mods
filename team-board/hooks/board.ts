@@ -522,6 +522,25 @@ export function agentStrips(list: readonly SubAgent[], now: number, max = 3): St
   return rest.length ? [...rows, { more: rest.length, done: rest.filter(r => r.a.status !== 'working').length }] : rows
 }
 
+/**
+ * /board 자세히의 할 일 한 줄 (T25, plan-progress 의 보조 띠 모양). 끝남 초록, 막힘 빨강.
+ * 지금 단계는 작업 중이면 '진행 중', 결정 대기면 '질문 대기', 그 밖(중단·오류로 끝난 턴)이면 '멈춤'.
+ */
+export type TodoStrip = { n: number; label: string; end: string; tone: PillTone | 'todo' }
+
+export function todoStrips(tasks: readonly Task[], state: Beat['state']): TodoStrip[] {
+  return tasks.map((t, i): TodoStrip => {
+    const n = i + 1
+    if (t.status === 'completed') return { n, label: t.subject, end: '끝남', tone: 'ok' }
+    if (t.status === 'in_progress') {
+      return state === 'working' ? { n, label: t.subject, end: '진행 중', tone: 'run' }
+        : state === 'asking' ? { n, label: t.subject, end: '질문 대기', tone: 'ask' }
+        : { n, label: t.subject, end: '멈춤', tone: 'ask' }
+    }
+    return t.subject.startsWith('막힘: ') ? { n, label: t.subject.slice(4), end: '막힘', tone: 'err' } : { n, label: t.subject, end: '', tone: 'todo' }
+  })
+}
+
 /** 같은 이름의 세션이 여럿이면 화면용 이름 뒤에 ·2, ·3 을 붙인다 (기록은 그대로). */
 export function dedupeNames<T extends { id: string; name: string }>(list: readonly T[]): T[] {
   const groups = new Map<string, T[]>()

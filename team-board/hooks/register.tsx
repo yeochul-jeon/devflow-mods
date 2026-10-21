@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { PillBar, PillTone, SoundOs, Strip } from './board'
+import type { PillBar, PillTone, SoundOs, Strip, TodoStrip } from './board'
 import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, SubAgent, WorkPlan } from '../types'
 import {
   EVENT_MARK,
@@ -63,6 +63,7 @@ import {
   headParts,
   steStacked,
   tasksFromPlan,
+  todoStrips,
   turnTook,
   unwrapPaste,
   visible,
@@ -974,10 +975,6 @@ export const register: Register = (on, options) => {
     const ordered = bandOrder(list, now, self.beat?.id)
     const shown = ordered.slice(0, layout.shown)
     const hidden = ordered.length - shown.length
-    const sum = list.reduce((a, b) => {
-      const p = progress(b.tasks)
-      return { done: a.done + p.done, total: a.total + p.total }
-    }, { done: 0, total: 0 })
     // 대기는 보조 기다림을 빼고 센다
     const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now) && !(st === 'idle' && waitsOnAgents(b))).length
     // 팀 전체에서 지금 도는 보조 에이전트 수
@@ -1064,12 +1061,6 @@ export const register: Register = (on, options) => {
             {count('working') ? <Text backgroundColor={pal.work} color={pal.onBadge} bold>{` 작업 ${count('working')} `}</Text> : null}
             {count('idle') ? <Text backgroundColor={pal.dim} color={pal.onBadge} bold>{` 대기 ${count('idle')} `}</Text> : null}
             {helpers ? <Text color={pal.work} bold>{`보조 ${helpers}`}</Text> : null}
-            {sum.total ? (
-              <Text>
-                <Text color={asking ? pal.ask : pal.ok}>{bar(sum.done, sum.total, 8)}</Text>
-                <Text color={pal.text}>{` ${sum.done}/${sum.total}`}</Text>
-              </Text>
-            ) : null}
           </Box>
           <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
         </Box>
@@ -1139,11 +1130,30 @@ export const register: Register = (on, options) => {
     const folded = await read($, collapsed)
     const focused = focusId ? list.find(b => b.id === focusId) : undefined
     const cols = Math.max(30, e.props.bodyColumns ?? 60)
-    const cells = cols >= 80 ? 12 : cols >= 56 ? 8 : 5
     const noop = () => {}
 
     const stateTone = (b: Beat) =>
       isStale(b, now) ? pal.dim : b.state === 'asking' ? pal.ask : b.fail?.level === 'high' ? pal.bad : b.state === 'working' || waitsOnAgents(b) ? pal.work : pal.frame
+
+    // 자세히의 할 일 한 줄 (T25, plan-progress 띠 모양): 줄 끝까지 상태색을 옅게 깐 바탕, 점, 순번, 이름, 오른쪽 끝 상태 글.
+    // 이름 색 팔레트(theme)는 섞을 수 없어 바탕 없이 점과 끝 글 색으로만 나눈다
+    const STRIP_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok }
+    const todoRowOf = (r: TodoStrip, width: number) => {
+      const hue = r.tone === 'todo' ? pal.dim : STRIP_HUE[r.tone]
+      const bg = r.tone !== 'todo' && pal.isRaw ? { backgroundColor: mix(hue, pal.card || '#000000', 0.78) } : {}
+      const head = ` ● ${r.n}  `
+      const tail = r.end ? `  ${r.end} ` : ' '
+      const room = Math.max(4, width - widthOf(head) - widthOf(tail))
+      const label = widthClip(r.label, room)
+      return (
+        <Text key={`todo-${r.n}`} wrap="truncate-end">
+          <Text color={hue} {...bg}>{' ● '}</Text>
+          <Text color={pal.dim} {...bg}>{`${r.n}  `}</Text>
+          <Text color={pal.text} {...bg}>{label + ' '.repeat(Math.max(0, room - widthOf(label)))}</Text>
+          <Text color={hue} {...bg}>{tail}</Text>
+        </Text>
+      )
+    }
 
     // 라벨 칸 폭을 맞춘 한 줄
     const row = (labelText: string, body: JSX.Element, key?: string) => (
@@ -1536,16 +1546,7 @@ export const register: Register = (on, options) => {
                 <Text color={pal.accent} bold>할 일 </Text>
                 <Text color={pal.dim}>{`${done}/${total}`}</Text>
               </Text>
-              {b.tasks.map(t => (
-                <Text wrap="truncate-end">
-                  <Text color={t.status === 'completed' ? pal.ok : t.status === 'in_progress' ? pal.work : pal.dim}>
-                    {t.status === 'completed' ? '  ✓ ' : t.status === 'in_progress' ? '  ▶ ' : '  · '}
-                  </Text>
-                  <Text color={t.status === 'completed' ? pal.dim : t.status === 'in_progress' ? pal.work : pal.text} strikethrough={t.status === 'completed'}>
-                    {t.subject}
-                  </Text>
-                </Text>
-              ))}
+              {todoStrips(b.tasks, b.state).map(r => todoRowOf(r, cols - 2))}
             </Box>
           ) : null}
 
@@ -1626,13 +1627,6 @@ export const register: Register = (on, options) => {
     }
 
     // 전체 보기
-    const sum = list.reduce(
-      (acc, b) => {
-        const p = progress(b.tasks)
-        return { done: acc.done + p.done, total: acc.total + p.total }
-      },
-      { done: 0, total: 0 },
-    )
     // 대기는 보조 기다림을 빼고 센다
     const count = (s: Beat['state']) => list.filter(b => b.state === s && !isStale(b, now) && !(s === 'idle' && waitsOnAgents(b))).length
     const waiting = list.filter(b => !isStale(b, now) && waitsOnAgents(b)).length
@@ -1647,13 +1641,6 @@ export const register: Register = (on, options) => {
           {waiting ? <Text color={pal.work}>{`◐ 보조 기다림 ${waiting}`}</Text> : null}
           <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
           {helpers ? <Text color={pal.work}>{`● 보조 ${helpers}`}</Text> : null}
-          {sum.total ? (
-            <Text>
-              <Text color={pal.dim}>전체 </Text>
-              <Text color={count('asking') ? pal.ask : pal.ok}>{bar(sum.done, sum.total, cells)}</Text>
-              <Text color={pal.text}>{` ${sum.done}/${sum.total}`}</Text>
-            </Text>
-          ) : null}
         </Box>
 
         {list.map(b => {
