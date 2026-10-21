@@ -1,37 +1,34 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { buildQuestions, buildRefine, buildRewrite, lacksDone, parseQuestions, parseRefined, parseRewrite, passThrough, TEMPLATE } from '../hooks/refine'
+import { addedHead, buildQuestions, buildRewrite, parseQuestions, parseRefined, parseRewrite, passThrough, rule, TEMPLATE } from '../hooks/refine'
 
 const USAGE = { input_tokens: 500, output_tokens: 120, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { plugin: 'prompt-coach', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } } as any
 const DRAFT = '로그인 고쳐줘 에러남 auth.ts'
 const REFINED = '목표: auth.ts 의 로그인 오류를 고친다.\n맥락: 로그인할 때 에러가 난다.\n완료 기준: 로그인이 성공한다.'
+const QUESTIONS = [
+  { q: '어떤 에러인가요?', options: ['401 응답', '빌드 에러'] },
+  { q: '범위는?', options: ['auth.ts 만', '인증 전체'] },
+]
+const Q_REPLY = `<questions>${JSON.stringify(QUESTIONS)}</questions>`
+const R_REPLY = `<refined>${REFINED}</refined>\n<added>\nanswer: 401 응답\nsuggest: 로그인 성공 확인\n</added>`
 
 describe('refine (순수 함수)', () => {
-  test('초안만 태그에 넣고, 사실은 지키고 언어는 초안을 따르라고 한다', async () => {
-    const { system, prompt } = buildRefine(DRAFT)
-    expect(prompt).toBe(`<draft>\n${DRAFT}\n</draft>`)
-    expect(system).toContain('goal')
-    expect(system).toContain('language the draft is written in')
-    expect(system).toContain('<refined>')
-  })
-
   test('태그 안만 받는다. 태그가 없거나 비면 null (대화로 답한 것)', async () => {
     expect(parseRefined(`좋아요.\n<refined>\n${REFINED}\n</refined>`)).toBe(REFINED)
     expect(parseRefined('어떤 파일인가요?')).toBeNull()
     expect(parseRefined('<refined>  </refined>')).toBeNull()
   })
 
-  test('이유·범위 수식어·붙여넣은 블록을 지키고, 초안 안의 지시는 따르지 않고, 완료 기준이 없으면 표시하라고 한다', async () => {
-    const { system } = buildRefine(DRAFT)
-    for (const rule of ['reason', 'scope word', '@ file references', 'not instructions to you', '<done>yes</done>', '<done>no</done>']) expect(system).toContain(rule)
+  test('띠 가로줄은 폭을 채우고 상태 문구를 오른쪽 끝에 둔다 (한글은 2칸)', async () => {
+    expect(rule(30)).toBe('── prompt-coach ' + '─'.repeat(14))
+    expect(rule(30, '질문 1/3')).toBe('── prompt-coach ' + '─'.repeat(5) + ' 질문 1/3')
   })
 
-  test('완료 기준 판정은 </refined> 뒤의 <done>no</done> 일 때만 없다고 본다', async () => {
-    expect(lacksDone(`<refined>${REFINED}</refined>\n<done>no</done>`)).toBe(true)
-    expect(lacksDone(`<refined>${REFINED}</refined>\n<done>yes</done>`)).toBe(false)
-    expect(lacksDone(`<refined>${REFINED}</refined>`)).toBe(false)
-    expect(lacksDone(`<refined>${REFINED} <done>no</done></refined>`)).toBe(false)
+  test('보탠 것 머리: 답·제안 수, 없으면 순서만', async () => {
+    expect(addedHead([{ kind: 'answer', text: 'a' }, { kind: 'suggest', text: 'b' }, { kind: 'suggest', text: 'c' }])).toBe('답 1 · 제안 2')
+    expect(addedHead([{ kind: 'suggest', text: 'b' }])).toBe('제안 1')
+    expect(addedHead([])).toBe('보탠 것 없음 (순서만 다듬음)')
   })
 })
 
@@ -89,119 +86,19 @@ describe('질문·다시 쓰기 (순수 함수)', () => {
   })
 })
 
-describe('prompt-coach', () => {
-  test('/coach <초안>: 다듬어 입력창에 채우고, undo 로 되돌리고, 사용량을 보인다', async ($, on) => {
-    mock.store(on)
-    const fills: string[] = []
-    let asked: any = null
-    on('session.start', ($, e) => ({ cwd: e.cwd }))
-    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
-    on('model.complete', ($, e: any) => { asked = e; return { value: { isAnswered: true, text: `<refined>${REFINED}</refined>`, usage: USAGE } } })
-    on('prompt.fill', ($, e: any) => { fills.push(e.text); return { isFilled: true } })
-    on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
-
-    const r = await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: DRAFT } as any)
-    expect(asked.model).toBe('haiku')
-    expect(asked.prompt).toContain(DRAFT)
-    expect(fills).toEqual([REFINED])
-    expect(r.text).toContain('입력창')
-
-    await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: 'undo' } as any)
-    expect(fills.at(-1)).toBe(DRAFT)
-
-    const status = await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: '' } as any)
-    expect(status.text).toContain('1회')
-    expect(status.text).toContain('500')
-
-    // 너무 짧으면 부르지 않는다
-    const short = await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: '고쳐' } as any)
-    expect(short.text).toContain('짧')
-    expect(fills).toHaveLength(2)
-  })
-
-  test('[다듬기]: 초안이 있을 때만 버튼, 누르면 지금 초안을 다듬고, 그사이 바뀌었으면 덮지 않는다', async ($, on) => {
-    mock.store(on)
-    const fills: string[] = []
-    const toasts: string[] = []
-    let box = ''
-    let changeWhileThinking = false
-    on('session.start', ($, e) => ({ cwd: e.cwd }))
-    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
-    on('model.complete', () => {
-      if (changeWhileThinking) box = DRAFT + ' 그리고 테스트도'
-      return { value: { isAnswered: true, text: `<refined>${REFINED}</refined>`, usage: USAGE } }
-    })
-    on('prompt.fill', ($, e: any) => { fills.push(e.text); box = e.text; return { isFilled: true } })
-    on('prompt.read', () => ({ value: { text: box, cursor: box.length } }))
-    on('prompt.edit', ($, e: any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
-    on('prompt.submit', ($, e: any) => ({ text: e.text }))
-    on('ui.toast', ($, e: any) => { toasts.push(e.text); return { value: undefined } })
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
-    // prompt.edit 은 testing 의 Engine 타입(EventCalls)에 빠져 있다. 실행은 된다
-    const type = (text: string) => { box = text; return ($ as any).prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: text }) }
-
-    // 빈 입력창: 버튼 없음
-    let band = await $.ui.mount(BAND)
-    expect(await band.find({ key: 'coach-refine' })).toBeUndefined()
-    expect(await band.find({ type: 'Text', text: /prompt-coach/ })).toBeUndefined()
-    await band.unmount()
-
-    await type(DRAFT)
-    band = await $.ui.mount(BAND)
-    expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined() // 다른 mod 의 띠를 가리지 않는다
-    // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
-    expect(await band.find({ type: 'Text', text: /^── prompt-coach ─{104}$/ })).toBeDefined()
-    expect(await band.find({ key: 'coach-refine' })).toBeDefined()
-    await band.press({ key: 'coach-refine' })
-    expect(fills).toEqual([REFINED])
-    await band.unmount()
-
-    // 모델이 일하는 동안 초안을 고쳤으면 덮지 않고 알린다
-    await type(DRAFT)
-    changeWhileThinking = true
-    band = await $.ui.mount(BAND)
-    await band.press({ key: 'coach-refine' })
-    await band.unmount()
-    expect(fills).toHaveLength(1)
-    expect(toasts.join('\n')).toContain('바뀌')
-
-    // 보내면 버튼이 사라진다
-    await $.prompt.submit({ text: box, origin: { kind: 'composer' } } as any)
-    band = await $.ui.mount(BAND)
-    expect(await band.find({ key: 'coach-refine' })).toBeUndefined()
-    await band.unmount()
-  })
-
-  test('모델이 태그 없이 답하거나 실패하면 입력창을 그대로 두고 이유를 보인다', async ($, on) => {
-    mock.store(on)
-    const fills: string[] = []
-    let reply: any = { isAnswered: true, text: '어떤 오류인가요?', usage: USAGE }
-    on('session.start', ($, e) => ({ cwd: e.cwd }))
-    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
-    on('model.complete', () => ({ value: reply }))
-    on('prompt.fill', ($, e: any) => { fills.push(e.text); return { isFilled: true } })
-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
-
-    expect((await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: DRAFT } as any)).text).toContain('다듬지 못했')
-    reply = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: USAGE }
-    expect((await $.command.run({ command: 'coach', origin: { kind: 'composer' }, args: DRAFT } as any)).text).toContain('api-error')
-    expect(fills).toEqual([])
-  })
-})
-
-describe('prompt-coach 0.2.0', () => {
-  // 입력창(box), 채운 글, 토스트, 모델 호출 수를 흉내 낸다. reply 로 모델의 답을 바꾼다.
+describe('prompt-coach 흐름', () => {
+  // 입력창(box), 채운 글, 토스트, 모델 호출을 흉내 낸다. qReply·rReply 로 모델의 답을 바꾼다.
   const setup = async ($: any, on: any) => {
     mock.store(on)
-    const s = { box: '', fills: [] as string[], toasts: [] as string[], calls: 0, reply: `<refined>${REFINED}</refined>`, changeWhileThinking: false }
+    const clock = mock.clock(on, { now: 1_800_000_000_000 })
+    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false }
     on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
-    on('model.complete', () => {
-      s.calls++
-      if (s.changeWhileThinking) s.box = DRAFT + ' 그리고 테스트도'
-      return { value: { isAnswered: true, text: s.reply, usage: USAGE } }
+    on('model.complete', ($: any, e: any) => {
+      s.asked.push(e)
+      if (s.hold) return new Promise(() => {})
+      const reply = e.system.includes('<questions>') ? s.qReply : s.rReply
+      return { value: typeof reply === 'string' ? { isAnswered: true, text: reply, usage: USAGE } : reply }
     })
     on('prompt.fill', ($: any, e: any) => { s.fills.push(e.text); s.box = e.text; return { isFilled: true } })
     on('prompt.read', () => ({ value: { text: s.box, cursor: s.box.length } }))
@@ -211,120 +108,208 @@ describe('prompt-coach 0.2.0', () => {
     on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    // 모델 호출은 띠가 뒤에서 기다린다. 몇 번 양보해 끝나게 한다
+    const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => (globalThis as any).setTimeout(r, 0)) }
     const type = (text: string) => { s.box = text; return $.prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: text }) }
     // 사람이 입력창에서 Enter 로 보낸 명령. 보내면 입력창은 빈다.
     const run = (command: string, args = '', origin: any = { kind: 'composer' }) => { if (origin.kind === 'composer') s.box = ''; return $.command.run({ command, args, origin } as any) }
-    const coach = (args: string) => run('coach', args)
-    const press = async (key: string) => { const band = await $.ui.mount(BAND); await band.press({ key }); await band.unmount() }
-    const shows = async (key: string) => { const band = await $.ui.mount(BAND); const found = await band.find({ key }); await band.unmount(); return found !== undefined }
-    return { s, type, run, coach, press, shows }
+    const coach = async (args: string) => { const r = await run('coach', args); await settle(); return r }
+    const mount = (cols = 120) => $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: cols } })
+    const press = async (key: string) => { const band = await mount(); await band.press({ key }); await band.unmount(); await settle() }
+    const shows = async (key: string) => { const band = await mount(); const found = await band.find({ key }); await band.unmount(); return found !== undefined }
+    const text = async (re: RegExp, cols = 120) => { const band = await mount(cols); const found = await band.find({ type: 'Text', text: re }); await band.unmount(); return found !== undefined }
+    return { s, clock, settle, type, run, coach, press, shows, text, mount }
   }
 
-  test('사람이 보낸 다른 명령 뒤에는 띠가 숨는다 (명령은 prompt.submit 을 거치지 않는다)', async ($, on) => {
+  test('/coach <초안>: 질문 → 하나 답하고 하나 건너뛰면, 답한 것만 넘겨 다듬고 보탠 것 줄을 보인다', async ($, on) => {
+    const { s, coach, press, shows, text } = await setup($, on)
+    const r = await coach(DRAFT)
+    expect(r.text).toContain('질문')
+    expect(s.asked[0].model).toBe('haiku')
+    expect(s.asked[0].prompt).toContain(DRAFT)
+    expect(await text(/질문 1\/2$/)).toBe(true)
+    expect(await text(/^어떤 에러인가요\?$/)).toBe(true)
+    expect(await text(new RegExp(`^초안  ${DRAFT}$`))).toBe(true) // 입력창이 비어 있어 무엇을 다듬는지 띠에 보인다
+    await press('coach-opt-0')
+    expect(await text(/질문 2\/2$/)).toBe(true)
+    await press('coach-skip')
+    expect(s.asked[1].prompt).toContain('- 어떤 에러인가요? → 401 응답')
+    expect(s.asked[1].prompt).not.toContain('범위는?')
+    expect(s.box).toBe(REFINED)
+    expect(await text(/입력창에 넣음$/)).toBe(true)
+    expect(await text(/^답 1 · 제안 1$/)).toBe(true)
+    expect(await shows('coach-undo')).toBe(true)
+    const status = await coach('')
+    expect(status.text).toContain('2회')
+    expect(status.text).toContain('1,000')
+  })
+  test('[다듬기]: 입력창의 초안을 가져가 입력창을 비우고, [바로 다듬기]는 남은 질문을 건너뛴다. 다른 mod 의 띠는 그대로', async ($, on) => {
+    const { s, type, press, shows, text } = await setup($, on)
+    expect(await shows('coach-refine')).toBe(false) // 빈 입력창: 버튼 없음
+    await type(DRAFT)
+    expect(await text(/OTHER-MOD-BAND/)).toBe(true)
+    expect(await text(/^── prompt-coach ─{104}$/)).toBe(true) // 띠 폭(bodyColumns 120)을 채운다
+    await press('coach-refine')
+    expect(s.box).toBe('') // 숫자 키로 답하도록 비운다
+    expect(await text(/OTHER-MOD-BAND/)).toBe(true)
+    await press('coach-now')
+    expect(s.asked[1].prompt).toContain('<answers>\n\n</answers>')
+    expect(s.box).toBe(REFINED)
+  })
+
+  test('숫자 키: 선택지 1~, 건너뛰기 0, 바로 다듬기 9. 좁은 띠에서는 초안 줄과 직접 쓰기 안내를 뺀다', async ($, on) => {
+    const { coach, mount } = await setup($, on)
+    await coach(DRAFT)
+    const band = await mount()
+    expect((await band.find({ key: 'coach-opt-0' }))?.props).toMatchObject({ hotkey: '1', plain: true })
+    expect((await band.find({ key: 'coach-opt-1' }))?.props).toMatchObject({ hotkey: '2' })
+    expect((await band.find({ key: 'coach-skip' }))?.props).toMatchObject({ hotkey: '0' })
+    expect((await band.find({ key: 'coach-now' }))?.props).toMatchObject({ hotkey: '9' })
+    await band.unmount()
+    const narrow = await mount(40)
+    expect(await narrow.find({ type: 'Text', text: /^초안/ })).toBeUndefined()
+    expect(await narrow.find({ type: 'Text', text: /직접 쓰려면/ })).toBeUndefined()
+    await narrow.unmount()
+  })
+
+  test('물을 게 없으면 바로 다듬는다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    s.qReply = '<questions>[]</questions>'
+    await coach(DRAFT)
+    expect(s.asked).toHaveLength(2)
+    expect(s.box).toBe(REFINED)
+  })
+
+  test('질문 중 입력창에 쓰고 Enter: 보내지 않고 지금 질문의 답으로 받은 뒤 입력창을 비운다', async ($, on) => {
+    const { s, clock, settle, coach } = await setup($, on)
+    await coach(DRAFT)
+    s.box = '세션 만료 에러'
+    const r = await $.prompt.submit({ text: '세션 만료 에러', origin: { kind: 'composer' } } as any)
+    expect(r).toMatchObject({ drop: 'prompt-coach: 질문의 답으로 받았어요' })
+    await clock.advance(300)
+    await settle()
+    expect(s.box).toBe('')
+    await $.prompt.submit({ text: '인증 전체 다', origin: { kind: 'composer' } } as any)
+    await settle()
+    expect(s.asked[1].prompt).toContain('- 어떤 에러인가요? → 세션 만료 에러\n- 범위는? → 인증 전체 다')
+    // 질문이 끝난 뒤의 Enter 는 그대로 보낸다
+    expect(await $.prompt.submit({ text: s.box, origin: { kind: 'composer' } } as any)).toMatchObject({ text: REFINED })
+  })
+
+  test('취소: 초안을 입력창에 돌려놓고 [다듬기] 띠로 돌아간다', async ($, on) => {
+    const { s, type, press, shows } = await setup($, on)
+    await type(DRAFT)
+    await press('coach-refine')
+    await press('coach-cancel')
+    expect(s.box).toBe(DRAFT)
+    expect(await shows('coach-refine')).toBe(true)
+    expect(s.asked).toHaveLength(1)
+  })
+
+  test('/coach cancel 도 그만둔다. 다듬는 중이 아니면 그렇다고 한다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    expect((await coach('cancel')).text).toContain('아니에요')
+    await coach(DRAFT)
+    expect((await coach('cancel')).text).toContain('돌려놓')
+    expect(s.box).toBe(DRAFT)
+  })
+
+  test('모델이 질문 대신 말로 답하거나 실패하면 초안을 입력창에 돌려놓고 이유를 알린다', async ($, on) => {
+    const { s, coach, press } = await setup($, on)
+    s.qReply = '어떤 오류인가요?'
+    await coach(DRAFT)
+    expect(s.box).toBe(DRAFT)
+    expect(s.toasts.at(-1)).toContain('질문을 만들지 못했어요')
+    s.qReply = Q_REPLY
+    s.rReply = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: USAGE }
+    s.box = ''
+    await coach(DRAFT)
+    await press('coach-now')
+    expect(s.box).toBe(DRAFT)
+    expect(s.toasts.at(-1)).toContain('api-error')
+    expect(s.toasts.at(-1)).toContain('초안은 입력창에 그대로')
+  })
+
+  test('질문하는 동안 입력창에 새 글을 썼으면 다듬은 글로 덮지 않는다. 원문은 /coach undo 로', async ($, on) => {
+    const { s, type, coach, press } = await setup($, on)
+    await coach(DRAFT)
+    await type('다른 급한 질문')
+    await press('coach-now')
+    expect(s.box).toBe('다른 급한 질문')
+    expect(s.toasts.at(-1)).toContain('덮지 않았어요')
+    await type('')
+    await coach('undo')
+    expect(s.box).toBe(DRAFT)
+  })
+
+  test('짧은 초안은 부르지 않는다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    expect((await coach('고쳐')).text).toContain('짧')
+    expect(s.asked).toHaveLength(0)
+  })
+
+  test('모듈을 다시 불러 모델 호출이 끊겼으면 초안을 돌려준다', async ($, on) => {
+    const { s, coach, settle } = await setup($, on)
+    s.hold = true
+    await coach(DRAFT)
+    expect(s.box).toBe('')
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await settle()
+    expect(s.box).toBe(DRAFT)
+    expect(s.toasts.at(-1)).toContain('다시 불러와')
+  })
+
+  test('사람이 보낸 다른 명령 뒤에는 띠가 숨는다 (명령은 prompt.submit 을 거치지 않는다). 플러그인이 실행한 명령은 그대로', async ($, on) => {
     const { type, run, shows } = await setup($, on)
     await type(DRAFT)
+    await run('help', '', { kind: 'plugin', name: 'other' })
     expect(await shows('coach-refine')).toBe(true)
     await run('help')
     expect(await shows('coach-refine')).toBe(false)
   })
 
-  test('/coach (사용법) 뒤에도 띠가 숨는다', async ($, on) => {
-    const { type, coach, shows } = await setup($, on)
-    await type(DRAFT)
-    await coach('')
-    expect(await shows('coach-refine')).toBe(false)
-  })
-
-  test('/coach undo 뒤에는 띠가 보인다', async ($, on) => {
-    const { s, type, coach, shows } = await setup($, on)
-    await coach(DRAFT)
-    await type('') // 명령을 치려고 입력창을 비운다
-    await coach('undo')
-    expect(s.fills.at(-1)).toBe(DRAFT)
-    expect(await shows('coach-refine')).toBe(true)
-  })
-
-  test('플러그인이 실행한 명령은 입력창을 비우지 않으므로 띠를 그대로 둔다', async ($, on) => {
-    const { type, run, shows } = await setup($, on)
-    await type(DRAFT)
-    await run('help', '', { kind: 'plugin', name: 'other' })
-    expect(await shows('coach-refine')).toBe(true)
-  })
-
-  test('/coach template: 모델을 부르지 않고 틀을 채운다', async ($, on) => {
+  test('/coach template: 모델을 부르지 않고 틀을 채우고, 이전에 다듬은 원문을 지운다', async ($, on) => {
     const { s, coach, shows } = await setup($, on)
-    await coach('template')
-    expect(s.fills).toEqual([TEMPLATE])
-    expect(s.calls).toBe(0)
-    expect(await shows('coach-refine')).toBe(true) // 채운 뒤 띠가 보인다
-  })
-
-  test('/coach template 은 이전에 다듬은 원문을 지운다 (틀 옆에 [되돌리기]가 남지 않는다)', async ($, on) => {
-    const { coach, shows } = await setup($, on)
     await coach(DRAFT)
-    expect(await shows('coach-undo')).toBe(true)
+    await coach('cancel')
+    s.box = ''
     await coach('template')
-    expect(await shows('coach-undo')).toBe(false)
-  })
-
-  test('/coach <초안> 뒤에도 띠가 보인다', async ($, on) => {
-    const { coach, shows } = await setup($, on)
-    await coach(DRAFT)
+    expect(s.box).toBe(TEMPLATE)
+    expect(s.asked).toHaveLength(1)
     expect(await shows('coach-refine')).toBe(true)
+    expect(await shows('coach-undo')).toBe(false)
   })
 
-  test('완료 기준이 없다는 표시가 오면 /coach 문구와 [다듬기] 토스트로 알린다. 다듬은 글에는 넣지 않는다', async ($, on) => {
-    const { s, type, coach, press } = await setup($, on)
-    s.reply = `<refined>${REFINED}</refined>\n<done>no</done>`
-    expect((await coach(DRAFT)).text).toContain('완료 기준')
-    await type(DRAFT)
-    await press('coach-refine')
-    expect(s.toasts.join('\n')).toContain('완료 기준')
-    expect(s.fills).toEqual([REFINED, REFINED])
-  })
-
-  test('[되돌리기]: 다듬은 뒤에만 보이고, 누르면 원문, 그 뒤엔 사라진다', async ($, on) => {
-    const { s, type, press, shows } = await setup($, on)
+  test('[되돌리기]: 다듬은 뒤에만 보이고, 누르면 원문. 그 뒤 입력창을 고쳤으면 덮지 않는다', async ($, on) => {
+    const { s, type, coach, press, shows } = await setup($, on)
     await type(DRAFT)
     expect(await shows('coach-undo')).toBe(false)
     await press('coach-refine')
-    expect(await shows('coach-undo')).toBe(true)
+    await press('coach-now')
     await press('coach-undo')
-    expect(s.fills.at(-1)).toBe(DRAFT)
+    expect(s.box).toBe(DRAFT)
     expect(await shows('coach-undo')).toBe(false)
-  })
-
-  test('[되돌리기]: 다듬은 뒤 입력창을 고쳤으면 덮지 않고 알린다', async ($, on) => {
-    const { s, type, press } = await setup($, on)
-    await type(DRAFT)
-    await press('coach-refine')
+    s.box = ''
+    await coach(DRAFT)
+    await press('coach-now')
     await type(REFINED + ' 추가')
     await press('coach-undo')
-    expect(s.fills).toEqual([REFINED])
-    expect(s.toasts.join('\n')).toContain('바뀌어')
+    expect(s.box).toBe(REFINED + ' 추가')
+    expect(s.toasts.at(-1)).toContain('바뀌어')
   })
 
-  test('보내면 되돌릴 원문을 비운다', async ($, on) => {
-    const { s, coach } = await setup($, on)
+  test('보내면 되돌릴 원문과 보탠 것 줄을 비운다. /coach undo 는 한 번만', async ($, on) => {
+    const { s, coach, press, text } = await setup($, on)
     await coach(DRAFT)
-    await $.prompt.submit({ text: s.box, origin: { kind: 'composer' } } as any)
-    expect((await coach('undo')).text).toContain('없어요')
-  })
-
-  test('/coach undo 는 한 번만 되돌린다', async ($, on) => {
-    const { s, coach } = await setup($, on)
-    await coach(DRAFT)
+    await press('coach-now')
     await coach('undo')
-    expect(s.fills.at(-1)).toBe(DRAFT)
+    expect(s.box).toBe(DRAFT)
     expect((await coach('undo')).text).toContain('없어요')
-  })
-
-  test('[다듬기]가 초안이 바뀌어 그만두면 되돌릴 원문을 남기지 않는다', async ($, on) => {
-    const { s, type, coach, press } = await setup($, on)
-    await type(DRAFT)
-    s.changeWhileThinking = true
-    await press('coach-refine')
-    expect(s.fills).toEqual([])
+    s.box = ''
+    await coach(DRAFT)
+    await press('coach-now')
+    await $.prompt.submit({ text: s.box, origin: { kind: 'composer' } } as any)
+    expect(await text(/입력창에 넣음$/)).toBe(false)
     expect((await coach('undo')).text).toContain('없어요')
   })
 })
