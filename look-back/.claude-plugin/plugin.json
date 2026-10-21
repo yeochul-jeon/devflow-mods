@@ -1,12 +1,38 @@
 {
   "name": "look-back",
-  "version": "0.2.2",
-  "description": "/lookback: 오늘·어제·7일·30일 동안 프로젝트별로 한 요청, 결정, 커밋을 옆 패널에 (기록은 토큰 0, 요약은 누를 때만 Haiku 1회)",
+  "version": "0.3.0",
+  "description": "/lookback: 오늘·어제·7일·30일·올해 동안 한 일을 옆 패널에. 한눈에 숫자·차트(Work Report)와 프로젝트별 요청·결정·커밋 (기록은 토큰 0, 요약은 누를 때만 Haiku 1회)",
   "author": {
     "name": "yeochul-jeon",
     "url": "https://github.com/yeochul-jeon"
   },
   "types": "./types/index.d.ts",
+  "userConfig": {
+    "minutes_edit": {
+      "type": "number",
+      "title": "Minutes saved: edit",
+      "description": "한눈에 칸의 아낀 시간 추정: 코드 수정 요청 하나를 몇 분으로 칠지",
+      "default": 20
+    },
+    "minutes_run": {
+      "type": "number",
+      "title": "Minutes saved: run",
+      "description": "한눈에 칸의 아낀 시간 추정: 실행 (Bash) 요청 하나를 몇 분으로 칠지",
+      "default": 10
+    },
+    "minutes_research": {
+      "type": "number",
+      "title": "Minutes saved: research",
+      "description": "한눈에 칸의 아낀 시간 추정: 조사 (읽기·검색·웹·보조 에이전트) 요청 하나를 몇 분으로 칠지",
+      "default": 15
+    },
+    "minutes_chat": {
+      "type": "number",
+      "title": "Minutes saved: chat",
+      "description": "한눈에 칸의 아낀 시간 추정: 대화 (도구 없음) 요청 하나를 몇 분으로 칠지",
+      "default": 5
+    }
+  },
   "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/look-back",
   "repository": "https://github.com/yeochul-jeon/devflow-mods",
   "license": "MIT"

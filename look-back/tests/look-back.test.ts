@@ -2,7 +2,8 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import type { Entry } from '../types'
 import {
-  buildReport, clockText, dayOf, questionText, summaryPrompt, dayStartIso, durationText, nextDay, parseGitLog, parseOffset, periodDays, requestText, tokensText, upsert,
+  bigDigits, buildReport, chartOf, clockText, dayOf, kindAfter, MINUTES, modelName, questionText, streakOf, summaryPrompt, dayStartIso, durationText, nextDay, parseGitLog,
+  parseOffset, periodDays, requestText, tokensText, upsert, workOf,
 } from '../hooks/ledger'
 
 const KST = 540
@@ -92,6 +93,92 @@ describe('ledger (순수 함수)', () => {
   })
 })
 
+describe('Work Report (순수 함수)', () => {
+  test('종류: 쓴 도구로 정하고 앞 것(수정 > 실행 > 조사)이 이긴다', async () => {
+    expect(kindAfter(undefined, 'Read', true)).toBe('research')
+    expect(kindAfter('research', 'Bash', true)).toBe('run')
+    expect(kindAfter('run', 'Edit', true)).toBe('edit')
+    expect(kindAfter('edit', 'Grep', true)).toBe('edit')
+    expect(kindAfter(undefined, 'Edit', false)).toBeUndefined() // 거부·실패한 수정은 수정이 아니다
+    expect(kindAfter(undefined, 'WebFetch', true)).toBe('research')
+    expect(kindAfter(undefined, 'Agent', true)).toBe('research')
+    expect(kindAfter(undefined, 'mcp__x__y', true)).toBeUndefined() // 모르는 도구는 종류를 바꾸지 않는다
+  })
+
+  test('올해: 1월 1일부터 오늘까지', async () => {
+    const days = periodDays('year', NOW, KST)
+    expect(days[0]).toBe('2026-01-01')
+    expect(days.at(-1)).toBe('2026-10-18')
+    expect(days).toHaveLength(291)
+  })
+
+  test('모아 보기: 끝낸 요청만 세고, 아낀 시간은 종류별 분, 옛 기록은 기록 전', async () => {
+    const list = [
+      entry(1, '/r', { kind: 'edit', model: 'claude-opus-5-5', ms: 120_000 }),
+      entry(2, '/r', { kind: 'edit', model: 'claude-opus-5-5', ms: 60_000 }),
+      entry(3, '/r', { kind: 'research', model: 'claude-haiku-5-5' }),
+      entry(4, '/r', { kind: 'chat', end: 'aborted' }), // 중단은 세지 않는다
+      entry(5, '/r'), // 0.3.0 전 기록
+    ]
+    const w = workOf(list, MINUTES)
+    expect(w.done).toBe(4)
+    expect(w.ms).toBe(120_000 + 60_000 + 1000 + 1000)
+    expect(w.savedMin).toBe(20 + 20 + 15 + 0)
+    expect(w.byKind).toEqual([
+      { kind: 'edit', count: 2, min: 40 },
+      { kind: 'research', count: 1, min: 15 },
+      { kind: 'unknown', count: 1, min: 0 },
+    ])
+    expect(w.byModel).toEqual([
+      { model: 'claude-opus-5-5', count: 2 },
+      { model: 'claude-haiku-5-5', count: 1 },
+      { model: '', count: 1 },
+    ])
+    expect(workOf(list, { ...MINUTES, edit: 30 }).savedMin).toBe(75)
+    // 기록 전이 더 많아도 맨 뒤
+    expect(workOf([...list, entry(6, '/r'), entry(7, '/r')], MINUTES).byKind.map(k => k.kind)).toEqual(['edit', 'research', 'unknown'])
+  })
+
+  test('연속 일수: 오늘부터(오늘이 비면 어제부터) 끊기지 않은 날', async () => {
+    expect(streakOf(['2026-10-16', '2026-10-17', '2026-10-18'], '2026-10-18')).toBe(3)
+    expect(streakOf(['2026-10-15', '2026-10-17'], '2026-10-18')).toBe(1)
+    expect(streakOf(['2026-10-14'], '2026-10-18')).toBe(0)
+    expect(streakOf(['2026-09-30', '2026-10-01'], '2026-10-01')).toBe(2) // 달 넘김
+  })
+
+  test('차트: 7일은 요일, 30일은 날짜, 올해는 달. 지금(오늘·이번 달)을 표시', async () => {
+    const at = (day: string) => Date.parse(`${day}T03:00:00Z`)
+    const list = [entry(at('2026-10-18'), '/r', { kind: 'edit' }), entry(at('2026-10-18'), '/r', { kind: 'chat' }), entry(at('2026-10-13'), '/r', { kind: 'run' }), entry(at('2026-03-02'), '/r', { kind: 'edit' })]
+    const w = chartOf('week', list, NOW, KST, MINUTES)
+    expect(w.map(b => b.label)).toEqual(['월', '화', '수', '목', '금', '토', '일'])
+    expect(w.map(b => b.min)).toEqual([0, 10, 0, 0, 0, 0, 25])
+    expect(w.map(b => b.now)).toEqual([false, false, false, false, false, false, true])
+    expect(chartOf('today', list, NOW, KST, MINUTES).map(b => b.min)).toEqual(w.map(b => b.min)) // 오늘·어제도 최근 7일
+    const m = chartOf('month', list, NOW, KST, MINUTES)
+    expect(m).toHaveLength(30)
+    expect(m[0]!.label).toBe('19')
+    expect(m.at(-1)).toMatchObject({ label: '18', min: 25, now: true })
+    const y = chartOf('year', list, NOW, KST, MINUTES)
+    expect(y.map(b => b.label)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'])
+    expect(y[2]!.min).toBe(20)
+    expect(y[9]).toMatchObject({ min: 35, now: true })
+    expect(y[10]).toMatchObject({ min: 0, future: true })
+  })
+
+  test('큰 숫자: 3줄, 숫자는 3칸 · 점은 1칸 + 사이 1칸', async () => {
+    expect(bigDigits('6.1')).toEqual(['┌─╴   ╶┐ ', '├─┐    │ ', '└─┘ . ╶┴╴'])
+    expect(bigDigits('10')).toEqual(['╶┐  ┌─┐', ' │  │ │', '╶┴╴ └─┘']) // 1 은 받침이 있어 세로줄 셋(111)과 구별된다
+  })
+
+  test('모델 이름', async () => {
+    expect(modelName('claude-opus-5-5')).toBe('Opus 5.5')
+    expect(modelName('claude-haiku-5-5-20261001')).toBe('Haiku 5.5')
+    expect(modelName('claude-fable-5-1')).toBe('Fable 5.1')
+    expect(modelName('gpt-x')).toBe('gpt-x')
+    expect(modelName('')).toBe('기록 전')
+  })
+})
+
 const PANE = { component: 'Pane', requestId: 'look-back', props: { bodyColumns: 80 } } as any
 const USAGE = { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 1000, cache_creation_input_tokens: 0 }
 
@@ -130,8 +217,12 @@ function boot(on: any, interactive = true) {
   })
   on('tool.call', { tool: 'Edit' }, () => ({ result: 'ok' }))
   on('tool.call', { tool: 'Read' }, () => ({ result: 'ok' }))
+  on('tool.call', { tool: 'Bash' }, ($: any, e: any) => (e.command === 'npm test' ? { result: '1 failed', isError: true } : { result: 'ok' }))
   on('turn.complete', () => ({ text: '' }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
+  const store = new Map<string, unknown>()
+  on('store.get', ($: any, e: any) => ({ value: store.get(e.key) }))
+  on('store.set', ($: any, e: any) => { store.set(e.key, e.value); return { value: undefined } })
   return { files, mtimes, gitCalls, clock, interactive }
 }
 
@@ -171,7 +262,7 @@ describe('look-back (hook)', () => {
     expect([...files.keys()]).toHaveLength(1)
     expect(JSON.parse(files.get(key)!)).toEqual({
       v: 1,
-      entries: [{ at: NOW, text: '주문 API 추가해 줘 TOKEN=***', root: '/repo/order-svc', turnId: 't1', end: 'answer', ms: 90_000, tokens: 1120, files: ['/repo/order-svc/api.ts'] }],
+      entries: [{ at: NOW, text: '주문 API 추가해 줘 TOKEN=***', root: '/repo/order-svc', turnId: 't1', end: 'answer', ms: 90_000, tokens: 1120, files: ['/repo/order-svc/api.ts'], kind: 'edit', model: 'm' }],
     })
   })
 
@@ -232,13 +323,14 @@ describe('look-back (hook)', () => {
     files.set('/home/me/.claude/look-back/2026-10-18/broken-bbbb.json', '{"v":1,"entr')
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc/sub' } as any)
 
-    expect((await $.command.run({ command: 'lookback', args: '지난달' } as any)).text).toBe('/lookback [오늘|어제|7일|30일]')
+    expect((await $.command.run({ command: 'lookback', args: '지난달' } as any)).text).toBe('/lookback [오늘|어제|7일|30일|올해] · /lookback report on|off')
     const { text } = await $.command.run({ command: 'lookback', args: '' } as any)
     expect(text).toContain('옆 패널')
     expect(gitCalls).toEqual([['git', '-C', '/repo/order-svc', 'log', '--since=2026-10-18T00:00:00+09:00', '--until=2026-10-19T00:00:00+09:00', '--format=%ct%x09%h%x09%s']])
 
     const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
-    expect(await ui.find({ type: 'Text', text: /^돌아보기 · 2026-10-18$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^오늘 한 일$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^2026-10-18$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 5분 · 결정 0 · 커밋 1 · 프로젝트 1$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^order-svc$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /abc1234.*add order api/ })).toBeDefined()
@@ -248,7 +340,7 @@ describe('look-back (hook)', () => {
 
     await $.command.run({ command: 'lookback', args: '7일' } as any)
     const ui2 = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
-    expect(await ui2.find({ type: 'Text', text: /^돌아보기 · 2026-10-12 ~ 2026-10-18$/ })).toBeDefined()
+    expect(await ui2.find({ type: 'Text', text: /^2026-10-12 ~ 2026-10-18$/ })).toBeDefined()
     expect(await ui2.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
     expect(await ui2.find({ type: 'Text', text: /어제 요청/ })).toBeDefined()
     await ui2.unmount()
@@ -279,6 +371,79 @@ describe('look-back (hook)', () => {
     expect(await ui.find({ type: 'Text', text: /^결정 1 · 커밋 1$/ })).toBeDefined() // 요청 기록이 없으면 요청·시간·토큰을 빼고
     expect(await ui.find({ type: 'Text', text: /A 로 할까요\? → A/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /어제 질문|안 읽힘/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('종류: 도구를 안 쓴 요청은 대화, Bash 만 쓴 요청은 실행(실패한 명령도). 서브에이전트 도구는 세지 않는다', async ($, on) => {
+    const { files, clock } = boot(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await submit($, '안녕')
+    await start($, 't1', '안녕')
+    await complete($, 't1')
+    await clock.advance(1000)
+    await submit($, '테스트 돌려 줘')
+    await start($, 't2', '테스트 돌려 줘')
+    await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b1' } as any)
+    await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/x.ts', agentId: 'sub-1', tool_use_id: 'b2' } as any)
+    await complete($, 't2')
+    expect(JSON.parse([...files.values()][0]!).entries.map((e: Entry) => `${e.text}:${e.kind}`)).toEqual(['안녕:chat', '테스트 돌려 줘:run'])
+  })
+
+  test('/lookback: 한눈에 칸(타일·종류·모델·차트), /lookback report off 로 끄고 on 으로 켠다', { options: { minutes_edit: 30 } }, async ($, on) => {
+    const { files } = boot(on)
+    files.set('/home/me/.claude/look-back/2026-10-18/s1-aaaa.json', JSON.stringify({ v: 1, entries: [
+      entry(NOW - 600_000, '/repo/order-svc', { text: '수정', kind: 'edit', model: 'claude-opus-5-5', ms: 600_000 }),
+      entry(NOW - 300_000, '/repo/order-svc', { text: '조사', kind: 'research', model: 'claude-opus-5-5', ms: 60_000 }),
+    ] }))
+    files.set('/home/me/.claude/look-back/2026-10-17/s1-aaaa.json', JSON.stringify({ v: 1, entries: [entry(NOW - 86_400_000, '/repo/order-svc', { text: '어제', kind: 'chat' })] }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'lookback', args: '' } as any)
+
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /^오늘 한 일$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^아낀 시간$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^끝낸 요청$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Claude 작업$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /코드 수정 .* 1 +30분$/ })).toBeDefined() // 설정한 분(30)
+    expect(await ui.find({ type: 'Text', text: /조사 .* 1 +15분$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Opus 5\.5 .* 2$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^최근 7일 아낀 시간 50분 · 연속 2일$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /아낀 시간은 추정/ })).toBeDefined()
+    await ui.unmount()
+
+    expect((await $.command.run({ command: 'lookback', args: 'report off' } as any)).text).toContain('껐어요')
+    await $.command.run({ command: 'lookback', args: '' } as any)
+    const off = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    expect(await off.find({ type: 'Text', text: /^아낀 시간$/ })).toBeUndefined()
+    expect(await off.find({ type: 'Text', text: /^돌아보기 · 2026-10-18$/ })).toBeDefined() // 끄면 지금 화면 그대로
+    expect(await off.find({ type: 'Text', text: /수정/ })).toBeDefined()
+    await off.unmount()
+
+    expect((await $.command.run({ command: 'lookback', args: 'report on' } as any)).text).toContain('켰어요')
+    await $.command.run({ command: 'lookback', args: '올해' } as any)
+    const year = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    expect(await year.find({ type: 'Text', text: /^올해 한 일$/ })).toBeDefined()
+    expect(await year.find({ type: 'Text', text: /^가장 많은 달 10월 · 50분 · 일한 날 2일$/ })).toBeDefined()
+    await year.unmount()
+  })
+
+  test('/lookback: 좁은 패널에서도 한눈에 칸을 그리고, 끝낸 요청이 없으면 빈 안내', async ($, on) => {
+    boot(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'lookback', args: '' } as any)
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', component: 'Pane', requestId: 'look-back', props: { bodyColumns: 30 } } as any)
+    expect(await ui.find({ type: 'Text', text: /^오늘 끝낸 요청이 아직 없어요\. 첫 요청이 끝나면 여기에 보여요\.$/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('/lookback 30일: 기록이 모두 0.3.0 전 것이면 가장 많은 날을 고르지 않는다', async ($, on) => {
+    const { files } = boot(on)
+    files.set('/home/me/.claude/look-back/2026-10-17/s1-aaaa.json', JSON.stringify({ v: 1, entries: [entry(NOW - 86_400_000, '/repo/order-svc', { text: '옛 요청' })] }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'lookback', args: '30일' } as any)
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /^일한 날 1일$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /가장 많은/ })).toBeUndefined()
     await ui.unmount()
   })
 

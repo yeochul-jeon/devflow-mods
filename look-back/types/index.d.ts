@@ -16,11 +16,36 @@ export type Entry = {
   tokens: number
   /** Edit·Write·NotebookEdit 로 바꾼 파일 (경로, 겹침 없음) */
   files: string[]
+  /** 쓴 도구로 정한 종류 (0.3.0 부터). 없으면 기록 전 */
+  kind?: Kind
+  /** 메인 요청의 모델 (0.3.0 부터) */
+  model?: string
 }
+
+/** 요청 종류: 앞 것이 이긴다 (수정 > 실행 > 조사 > 대화) */
+export type Kind = 'edit' | 'run' | 'research' | 'chat'
+
+/** 종류별로 아꼈다고 칠 분 */
+export type Minutes = Record<Kind, number>
+
+/** 기간의 Work Report 숫자 */
+export type Work = {
+  /** 끝낸(답한) 요청 수 */
+  done: number
+  /** 끝낸 요청의 Claude 작업 시간 합 */
+  ms: number
+  /** 아낀 시간 추정 (분) */
+  savedMin: number
+  byKind: { kind: Kind | 'unknown'; count: number; min: number }[]
+  byModel: { model: string; count: number }[]
+}
+
+/** 차트 막대 하나 */
+export type Bar = { label: string; min: number; now: boolean; future: boolean }
 
 export type DayFile = { v: 1; entries: Entry[] }
 
-export type Period = 'today' | 'yesterday' | 'week' | 'month'
+export type Period = 'today' | 'yesterday' | 'week' | 'month' | 'year'
 
 export type Commit = { at: number; hash: string; subject: string }
 
@@ -56,10 +81,16 @@ export type LookView = {
   summaries: Record<string, string>
   /** 보고서를 만든 시각. 요약이 끝났을 때 같은 보고서인지 본다 */
   loadedAt: number
+  /** Work Report 숫자 (0.3.0 부터) */
+  work?: Work
+  /** 차트 막대 */
+  bars?: Bar[]
+  /** 요청이 있었던 날 (연속 일수용) */
+  activeDays?: string[]
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    'look-back': { view: LookView }
+    'look-back': { view: LookView; reportOff: boolean }
   }
 }
