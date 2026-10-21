@@ -60,6 +60,7 @@ import {
   tasksFromPlan,
   unwrapPaste,
   visible,
+  withMe,
 } from './board'
 import { commandKey, formatAlert, judge, masksIn, noteForClaude, redact, signLine } from './failure'
 import { bar, contextTone, paletteOf } from './palette'
@@ -876,7 +877,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, bandOff))) return next(e)
     const now = await $.clock.now()
-    const list = visible(await read($, beats), now)
+    const list = visible(withMe(await read($, beats), await read($, me)), now)
     const below = await next(e)
     // 세션 하나: /board band solo off 면 숨김 (기본은 보임)
     if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return below
@@ -1066,7 +1067,7 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = els
     const Raster = 'Raster' in els ? els.Raster : undefined
     const now = await $.clock.now()
-    const list = visible(await read($, beats), now)
+    const list = visible(withMe(await read($, beats), await read($, me)), now)
     const ex = await read($, explain)
     const steEx = await read($, steExplain)
     const tabNow = await read($, tab)

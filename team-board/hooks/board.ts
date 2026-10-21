@@ -293,6 +293,12 @@ export function progressBar(done: number, total: number, width = 8): string {
   return '■'.repeat(full) + '□'.repeat(width - full)
 }
 
+/** 자기 세션 칸에 방금 바뀐 상태·단계·질문을 덮는다. 목록은 3초마다 파일을 읽어 만들어 자기 변화도 늦게 보인다. 이름(·2)은 목록의 것을 둔다. */
+export function withMe(beats: readonly Beat[], mine: Beat | null): Beat[] {
+  if (!mine) return [...beats]
+  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question } : b))
+}
+
 /** 보여줄 세션만, 보여줄 순서로: 결정 필요 > 작업 중 > 보조 기다림 > 대기 > 오래됨. */
 export function visible(beats: readonly Beat[], now: number): Beat[] {
   const rank = (b: Beat) =>

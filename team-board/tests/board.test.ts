@@ -2038,3 +2038,60 @@ describe('prompt-coach 연동', () => {
     expect(mine()).toMatchObject({ state: 'asking', question: '범위는 어느 쪽으로 할까요?' })
   })
 })
+
+describe('자기 세션 표시', () => {
+  test('띠와 보드는 자기 세션의 상태를 다음 파일 읽기(3초)를 기다리지 않고 바로 보인다. 이름(·2)은 그대로', { plugins: [PROMPT_COACH] }, async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    on('turn.complete', () => ({ text: '' }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
+    const bandHas = async (re: RegExp) => {
+      const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+      const found = await band.find({ type: 'Text', text: re })
+      await band.unmount()
+      return found !== undefined
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    // 같은 이름의 다른 세션이 있으면 id 순서로 뒤인 이 세션 이름에 ·2 가 붙는다
+    const mineKey = [...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!
+    const other = { ...JSON.parse(files.get(mineKey)!), id: 'a-other', updatedAt: NOW - 1 }
+    files.set(mineKey.replace(/me-[0-9a-f]{8}\.json$/, 'other-00000000.json'), JSON.stringify(other))
+    await $.prompt.submit({ text: '첫 요청', origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await clock.advance(3_000)
+    expect(await bandHas(/prompt-coach: 범위는/)).toBe(false)
+
+    // 시계를 돌리지 않는다: 다음 파일 읽기 전
+    await pending('prompt-coach: 범위는?')
+    expect(await bandHas(/prompt-coach: 범위는/)).toBe(true)
+    const mineId = JSON.parse(files.get(mineKey)!).id as string
+    expect(mineId > 'a-other').toBe(true)
+    expect(await bandHas(/·2/)).toBe(true)
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    expect(await pane.find({ type: 'Text', text: /prompt-coach: 범위는/ })).toBeDefined()
+    await pane.unmount()
+    await pending(null)
+    expect(await bandHas(/prompt-coach: 범위는/)).toBe(false)
+  })
+})
