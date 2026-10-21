@@ -199,3 +199,65 @@ describe('next-steps', () => {
     await band.unmount()
   })
 })
+
+// prompt-coach 흉내: 도구 호출로 질문 대기 값을 바꾼다
+const PROMPT_COACH = {
+  name: 'prompt-coach',
+  register(on: any) {
+    on('tool.call', { tool: 'SetPending' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'prompt-coach', key: 'pending' }, e.question)
+      return { result: 'ok' }
+    })
+  },
+}
+
+describe('prompt-coach 와 함께', () => {
+  test('prompt-coach 가 질문을 띄우면 제안을 지운다. 숫자는 prompt-coach 의 답으로 남는다', { plugins: [PROMPT_COACH] }, async ($, on) => {
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('agent.list', () => ({ value: [] }))
+    on('session.messages', () => ({ value: [] }))
+    // hold 면 release() 를 부를 때까지 답을 미룬다
+    let hold = false
+    let release = () => {}
+    on('model.complete', () => {
+      if (!hold) return { value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }
+      return new Promise(r => { release = () => r({ value: { isAnswered: true, text: '늦은 제안', usage: USAGE } }) })
+    })
+    on('turn.complete', () => ({ text: '' }))
+    on('prompt.edit', ($, e: any) => ({ text: e.text + e.inputText, cursor: e.text.length + e.inputText.length }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
+    const key = (inputText: string) => ($ as any).prompt.edit({ origin: { kind: 'composer' }, key: { name: inputText }, text: '', cursor: 0, start: 0, end: 0, inputText } as any)
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await settle()
+    let band = await $.ui.mount(BAND)
+    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeDefined()
+    await band.unmount()
+
+    await pending('prompt-coach: 범위는?')
+    band = await $.ui.mount(BAND)
+    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined()
+    await band.unmount()
+    expect((await key('1')).text).toBe('1')
+
+    // 질문이 끝나도(null) 지운 제안은 돌아오지 않는다
+    await pending(null)
+    expect((await key('1')).text).toBe('1')
+
+    // 제안을 만드는 동안 질문이 뜨면, 늦게 온 제안은 버린다
+    hold = true
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't2' } as any)
+    await settle()
+    await pending('prompt-coach: 완료 기준은?')
+    release()
+    await settle()
+    band = await $.ui.mount(BAND)
+    expect(await band.find({ type: 'Text', text: /늦은 제안/ })).toBeUndefined()
+    await band.unmount()
+  })
+})

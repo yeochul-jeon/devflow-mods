@@ -64,6 +64,17 @@ export const register: Register = on => {
     return r
   })
 
+  // prompt-coach 가 질문을 띄우면 숫자는 그 질문의 답이다. 제안을 지우고 만들던 것도 버려 숫자를 넘긴다. 사람이 새 글을 쓰는 중이라 제안은 돌려놓지 않는다.
+  // prompt-coach 가 없으면 오지 않는다. 자동 모드에서는 prompt-coach 가 보내기를 막아 위 prompt.submit 이 오지 않을 수 있다
+  on('state.set', { plugin: 'prompt-coach', key: 'pending' }, async ($, e, next) => {
+    const r = await next(e)
+    if ('value' in r && r.value?.isSet && e.value !== null) {
+      latest = `coach-${++submits}` // 만들고 있던 제안도 버린다
+      if (await read($, steps)) await update($, steps, () => null)
+    }
+    return r
+  }).catch(($, e, next) => next(e)) // 지우지 못해도 prompt-coach 의 기록은 그대로 선다
+
   // 빈 입력창에 친 숫자 하나는 제안 고르기. 붙여 넣기에는 key 가 없어 그대로 들어간다.
   on('prompt.edit', async ($, e, next) => {
     if (hasSurvey || !e.key || e.key.ctrl || e.key.meta || e.text !== '' || e.start !== 0 || e.end !== 0 || !/^[0-9]$/.test(e.inputText)) return next(e)
