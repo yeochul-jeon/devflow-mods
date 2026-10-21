@@ -105,6 +105,18 @@ describe('Work Report (순수 함수)', () => {
     expect(kindAfter(undefined, 'mcp__x__y', true)).toBeUndefined() // 모르는 도구는 종류를 바꾸지 않는다
   })
 
+  test('종류: 읽기만 하는 Bash 는 조사, 하나라도 실행·쓰기가 섞이면 실행', async () => {
+    expect(kindAfter(undefined, 'Bash', true, "cd /r && sed -n 1,40p a.ts | grep -n foo")).toBe('research')
+    expect(kindAfter(undefined, 'Bash', true, 'git log --oneline -5; git status --short')).toBe('research')
+    expect(kindAfter(undefined, 'Bash', true, 'for f in *.ts; do wc -l $f; done')).toBe('research')
+    expect(kindAfter(undefined, 'Bash', true, 'cat a.txt && bun test')).toBe('run')
+    expect(kindAfter(undefined, 'Bash', true, 'git show HEAD > out.txt')).toBe('run') // 파일로 쓰면 읽기만이 아니다
+    expect(kindAfter(undefined, 'Bash', true, "sed -i '' s/a/b/ a.txt")).toBe('run')
+    expect(kindAfter(undefined, 'Bash', true, "python3 -c 'print(1)'")).toBe('run')
+    expect(kindAfter('run', 'Bash', true, 'ls')).toBe('run') // 앞 것이 이긴다
+    expect(kindAfter(undefined, 'Bash', true)).toBe('run') // 명령을 모르면 실행
+  })
+
   test('올해: 1월 1일부터 오늘까지', async () => {
     const days = periodDays('year', NOW, KST)
     expect(days[0]).toBe('2026-01-01')

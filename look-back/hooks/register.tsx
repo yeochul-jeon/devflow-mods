@@ -267,7 +267,10 @@ export const register: Register = (on, options) => {
     const r = await next(e)
     const entry = e.agentId ? undefined : self.open.get(self.current)
     // 거부된 도구는 안 쓴 것. 수정은 성공해야 수정이고, 실패한 명령·검색도 한 일이다
-    if (entry) entry.kind = kindAfter(entry.kind, e.tool, r.deny === undefined && !(EDIT_TOOLS.has(e.tool) && r.isError))
+    if (entry) {
+      const command = (e as { command?: unknown }).command
+      entry.kind = kindAfter(entry.kind, e.tool, r.deny === undefined && !(EDIT_TOOLS.has(e.tool) && r.isError), typeof command === 'string' ? command : undefined)
+    }
     if (entry && EDIT_TOOLS.has(e.tool) && r.deny === undefined && !r.isError) {
       const input = e as { file_path?: unknown; notebook_path?: unknown }
       const path = typeof input.file_path === 'string' ? input.file_path : typeof input.notebook_path === 'string' ? input.notebook_path : ''

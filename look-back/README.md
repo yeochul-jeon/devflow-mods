@@ -44,10 +44,10 @@ claude plugin install look-back@devflow-mods
 |---|---|---|
 | 코드 수정 | Edit · Write · NotebookEdit (성공한 것) | 20분 |
 | 실행 | Bash (실패한 명령 포함) | 10분 |
-| 조사 | Read · Grep · Glob · WebSearch · WebFetch · Agent | 15분 |
-
-거부된 도구는 세지 않습니다.
+| 조사 | Read · Grep · Glob · WebSearch · WebFetch · Agent, 읽기만 하는 Bash (`cat` · `grep` · `sed -n` · `git log` 등) | 15분 |
 | 대화 | 도구 없음 | 5분 |
+
+거부된 도구는 세지 않습니다. Bash 는 이어 붙인 명령이 모두 읽기만 할 때만 조사입니다. 하나라도 다른 명령이나 파일로 쓰는 리다이렉트(`> f`)가 섞이면 실행입니다. 판정은 team-board 의 숨은 실패 감지에 쓰는 규칙과 같습니다.
 
 - 누가 했나: 모델별 막대·건수 (메인 요청의 모델).
 - 차트: 3줄 막대. 오늘·어제·7일은 최근 7일(요일), 30일은 날짜, 올해는 1~12월. 오늘·이번 달은 노랑. 아래 한 줄: 최근 7일 아낀 시간과 연속 일수, 또는 가장 많은 날·달과 일한 날 수.

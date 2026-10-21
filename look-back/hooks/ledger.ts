@@ -206,9 +206,44 @@ const KIND_OF_TOOL: Record<string, Kind> = {
   Read: 'research', Grep: 'research', Glob: 'research', WebSearch: 'research', WebFetch: 'research', Agent: 'research', Task: 'research',
 }
 
-/** 도구 하나를 쓴 뒤의 종류. 앞 것(수정 > 실행 > 조사)이 이긴다. 실패·거부한 도구와 모르는 도구는 바꾸지 않는다 */
-export function kindAfter(prev: Kind | undefined, tool: string, ok: boolean): Kind | undefined {
-  const k = KIND_OF_TOOL[tool]
+// team-board/hooks/failure.ts 에서 복사 (plugin 끼리 의존하지 않는다). 읽기만 하는 Bash 를 조사로 센다.
+/** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. */
+const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed(?![^|;]*\s(?:-i|--in-place)\b)|awk|echo|printf|sort|uniq|cut|tr|column|nl|fold|file|stat)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:-C \S+ )?(?:log|diff|show|blame|grep|status|rev-parse|ls-files|ls-tree|rev-list|describe|cat-file|show-ref)\b|^pwd\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
+
+/** 셸 명령의 단계들 (&&, ||, ;, |, |&, 줄바꿈으로 나눔). cd 단계, 주석 줄, 따로 선 true·:, 변수 대입은 뺀다 ($( ) · ` ` 로 명령을 돌리는 대입은 남김). */
+function steps(command: string): string[] {
+  // 따옴표 안의 | ; 는 구분자가 아니다: 같은 길이로 가린 사본에서 자를 자리를 찾고 원문을 자른다
+  // 주석 줄은 가리기 전에 지운다: 주석 안의 ' 가 뒤의 따옴표와 짝지어지지 않게
+  const src = command.replace(/^[ \t]*#.*$/gm, '')
+  const masked = src.replace(/'[^']*'|"[^"]*"/g, m => '_'.repeat(m.length))
+  const parts: string[] = []
+  let from = 0
+  for (const m of masked.matchAll(/&&|\|\||\|&|;|\n|\|/g)) {
+    parts.push(src.slice(from, m.index))
+    from = m.index + m[0].length
+  }
+  parts.push(src.slice(from))
+  return parts
+    .map(s => s.trim().replace(/^(?:[A-Za-z_]\w*=(?!\S*(?:\$\(|`))\S*(?:\s+|$))+/, ''))
+    // 셸 구문은 건너뛰고 안쪽 명령만 본다: `for f in …; do grep …; done`, `if [ -f x ]; then cat x; fi`
+    .map(s => s.replace(/^(?:do|then|else|elif|if|until)\s+/, '').replace(/^(?:\/usr)?\/bin\//, ''))
+    .filter(s => s && !/^cd\s/.test(s) && !/^(?:true|:)$/.test(s) && !SHELL_SYNTAX.test(s))
+}
+
+/** 실행하는 명령이 아닌 셸 구문: 반복·조건의 머리와 끝, 파일 검사 `[ -f x ]`. */
+const SHELL_SYNTAX = /^(?:for\s+\w+\s+in\b.*|(?:done|fi|esac)(?:\s*[0-9]?>&?\s*\S+)*|\[\[? .*\]\]?|while\s+(?:IFS=\S*\s+)?read\b.*)$/
+
+/** 출력을 파일로 쓰는 리다이렉트: `> f`, `>> f`. `2>&1`, `>&2`, `> /dev/null` 은 아니다. */
+const WRITES_FILE = /(?:^|[^0-9&>])>>?\s*(?!&|\/dev\/null\b)[^\s>&]/
+
+/** 모든 단계가 읽기 전용일 때만 true. `echo x && ./gradlew test` 는 판정한다. 파일로 쓰는 단계(`git show x > f`)는 읽기 전용이 아니다. */
+function isReadOnly(command: string): boolean {
+  return steps(command).every(s => READ_ONLY.test(s) && !WRITES_FILE.test(s.replace(/'[^']*'|"[^"]*"/g, '')))
+}
+
+/** 도구 하나를 쓴 뒤의 종류. 앞 것(수정 > 실행 > 조사)이 이긴다. 실패·거부한 도구와 모르는 도구는 바꾸지 않는다. 읽기만 하는 Bash 명령은 조사 */
+export function kindAfter(prev: Kind | undefined, tool: string, ok: boolean, command?: string): Kind | undefined {
+  const k = tool === 'Bash' && command !== undefined && isReadOnly(command) ? 'research' : KIND_OF_TOOL[tool]
   if (!ok || !k) return prev
   return prev && KIND_RANK[prev] >= KIND_RANK[k] ? prev : k
 }
