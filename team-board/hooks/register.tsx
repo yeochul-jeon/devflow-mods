@@ -218,7 +218,7 @@ async function coachPending($: EngineInterface, question: string | null): Promis
 
 async function syncPlan($: EngineInterface, plan?: unknown): Promise<void> {
   if (!self.beat) return
-  const r = tasksFromPlan(plan === undefined ? await read($, workPlan) : plan, self.beat.state === 'asking')
+  const r = tasksFromPlan(plan === undefined ? await read($, workPlan) : plan)
   if (!r) return
   // 계획 보고는 한 턴에 몇 번뿐이라 바로 쓴다: 묶어 쓰기(1.5초)에 걸리면 띠가 Spinner 보다 한 단계 늦다 (T24 실화면)
   await save($, r.step && self.beat.state === 'working' ? { tasks: r.tasks, step: r.step } : { tasks: r.tasks }, true)
@@ -1117,7 +1117,7 @@ export const register: Register = (on, options) => {
   // work-plan atom 을 읽어 보고가 오면 바로 다시 그린다 (할 일 도구로 만든 목록이면 세션 상태의 것).
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
     if (e.props.message !== null) return next(e)
-    const tasks = tasksFromPlan(await read($, workPlan), false)?.tasks ?? self.beat?.tasks ?? []
+    const tasks = tasksFromPlan(await read($, workPlan))?.tasks ?? self.beat?.tasks ?? []
     const { total, current } = progress(tasks)
     if (!current) return next(e)
     return next({ ...e, props: { ...e.props, message: `${tasks.indexOf(current) + 1}/${total} ${current.subject}` } })

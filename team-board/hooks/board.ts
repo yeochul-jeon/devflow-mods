@@ -263,13 +263,14 @@ export function applyTaskTool(
 
 /**
  * work-plan 의 계획을 할 일 목록과 지금 단계 줄로. 모르는 모양(v 가 1 이 아님)이면 null.
- * 질문 없이 답으로 끝난 턴이면 남은 단계도 끝난 것으로 그린다 (모델은 마지막 done 을 보내지 않는다).
- * 결정 대기·중단·오류로 끝났으면 보고된 그대로 둔다. compaction 뒤 새 보고 전이면 단계 줄에 그렇게 적는다.
+ * 답으로 끝난 턴이면 질문으로 끝났어도 남은 단계를 끝난 것으로 그린다 (모델은 마지막 done 을 보내지 않는다.
+ * 결정 대기에 멈춘 막대는 실제로 한 일보다 적게 보였다, T24 재시험). 중단·오류로 끝났으면 보고된 그대로 둔다.
+ * compaction 뒤 새 보고 전이면 단계 줄에 그렇게 적는다.
  */
-export function tasksFromPlan(plan: unknown, asking: boolean): { tasks: Task[]; step: string } | null {
+export function tasksFromPlan(plan: unknown): { tasks: Task[]; step: string } | null {
   const p = plan as WorkPlan | null | undefined
   if (!p || p.v !== 1 || !Array.isArray(p.steps)) return null
-  const closed = p.ended?.reason === 'answer' && !asking
+  const closed = p.ended?.reason === 'answer'
   const tasks = p.steps.slice(0, 30).map((s, i): Task => ({
     id: String(i + 1),
     subject: oneLine(s.status === 'blocked' ? `막힘: ${s.title}` : s.title, 60),

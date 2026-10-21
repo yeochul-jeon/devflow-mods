@@ -490,7 +490,7 @@ describe('board (순수 함수)', () => {
       ended: null,
       ...over,
     })
-    expect(tasksFromPlan(plan(), false)).toEqual({
+    expect(tasksFromPlan(plan())).toEqual({
       tasks: [
         { id: '1', subject: 'math.py 만들기', status: 'completed' },
         { id: '2', subject: '테스트 쓰기', status: 'in_progress' },
@@ -500,17 +500,17 @@ describe('board (순수 함수)', () => {
       step: '할 일: 테스트 쓰기',
     })
     // compaction 뒤 새 보고 전
-    expect(tasksFromPlan(plan({ stale: true }), false)!.step).toBe('할 일(압축 전): 테스트 쓰기')
+    expect(tasksFromPlan(plan({ stale: true }))!.step).toBe('할 일(압축 전): 테스트 쓰기')
     // 진행 중인 단계가 없으면 단계 줄은 비운다 (team-board 자신의 줄을 덮지 않는다)
-    expect(tasksFromPlan(plan({ steps: [{ title: 'a', status: 'todo' }] }), false)!.step).toBe('')
-    expect(tasksFromPlan({ ...plan(), steps: [] }, false)).toEqual({ tasks: [], step: '' })
+    expect(tasksFromPlan(plan({ steps: [{ title: 'a', status: 'todo' }] }))!.step).toBe('')
+    expect(tasksFromPlan({ ...plan(), steps: [] })).toEqual({ tasks: [], step: '' })
     // 모르는 모양·없음
-    expect(tasksFromPlan(plan({ v: 2 }), false)).toBeNull()
-    expect(tasksFromPlan(undefined, false)).toBeNull()
-    expect(tasksFromPlan({ v: 1 }, false)).toBeNull()
+    expect(tasksFromPlan(plan({ v: 2 }))).toBeNull()
+    expect(tasksFromPlan(undefined)).toBeNull()
+    expect(tasksFromPlan({ v: 1 })).toBeNull()
   })
 
-  test('work-plan 턴 끝: 답으로 끝나고 결정 대기가 아니면 남은 단계도 완료, 그 밖엔 그대로', async () => {
+  test('work-plan 턴 끝: 답으로 끝나면 (질문이어도) 남은 단계도 완료, 그 밖엔 그대로', async () => {
     const steps = [
       { title: 'a', status: 'done' },
       { title: 'b', status: 'doing' },
@@ -518,11 +518,10 @@ describe('board (순수 함수)', () => {
     ]
     const ended = (reason: string) => ({ v: 1, steps, updatedAt: NOW, stale: false, ended: { reason, at: NOW } })
     const statuses = (r: ReturnType<typeof tasksFromPlan>) => r!.tasks.map(t => t.status)
-    expect(statuses(tasksFromPlan(ended('answer'), false))).toEqual(['completed', 'completed', 'completed'])
-    expect(tasksFromPlan(ended('answer'), false)!.step).toBe('')
-    expect(statuses(tasksFromPlan(ended('answer'), true))).toEqual(['completed', 'in_progress', 'pending'])
+    expect(statuses(tasksFromPlan(ended('answer')))).toEqual(['completed', 'completed', 'completed'])
+    expect(tasksFromPlan(ended('answer'))!.step).toBe('')
     for (const reason of ['aborted', 'error', 'refusal']) {
-      expect(statuses(tasksFromPlan(ended(reason), false))).toEqual(['completed', 'in_progress', 'pending'])
+      expect(statuses(tasksFromPlan(ended(reason)))).toEqual(['completed', 'in_progress', 'pending'])
     }
   })
 
@@ -1730,12 +1729,12 @@ describe('work-plan 연동', () => {
     await flush()
     expect(mine().tasks).toHaveLength(3)
 
-    // 질문으로 끝난 턴. 계획의 턴 끝 표시가 team-board 의 판정보다 먼저 와도(안쪽 hook) 결정 대기면 그대로 그린다
+    // 질문으로 끝난 턴도 남은 단계를 완료로 그린다. 모델은 질문 전에 마지막 done 을 보내지 않는다 (T24 재시험: 1/3 에 멈춰 보였다)
     await setPlan(plan(STEPS, { ended: { reason: 'answer', at: NOW } }))
     await $.turn.complete({ reason: 'answer', answer: '테스트 파일 이름을 무엇으로 할까요?', durationMs: 1, isAborted: false, turnId: 't1' } as any)
     await flush()
     expect(mine().state).toBe('asking')
-    expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
+    expect(statuses()).toEqual(['completed', 'completed', 'completed'])
 
     // 답으로 끝난 턴: 남은 단계도 완료. 표시가 나중에 와도(바깥 hook) 같다
     await $.turn.start({ text: 'test_math.py', turnId: 't2' } as any)
