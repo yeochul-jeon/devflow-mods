@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { contextFor, emptyPlan, GATE_DENY, GATE_RULE, MAX_STEPS, normalizeSteps, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
+import { contextFor, emptyPlan, GATE_DENY, GATE_RULE, isOpen, MAX_STEPS, normalizeSteps, NUDGE, NUDGE_AFTER, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
 
 const NOW = 1_800_000_000_000
 
@@ -244,5 +244,81 @@ describe('work-plan planGate (hook)', () => {
     expect(((await call($, 'Edit')) as any).result).toBe('Edit ok')
     await start($, 't3')
     expect(await call($, 'Edit')).toEqual({ deny: GATE_DENY })
+  })
+})
+
+describe('work-plan 갱신 알림 (hook)', () => {
+  function engine(on: any) {
+    mock.clock(on, { now: NOW })
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+    on('tool.register', ($: any, e: any) => ({ value: { tool: `mcp__work-plan__${e.name}` } }))
+    on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
+    on('turn.complete', () => ({ text: '' }))
+    for (const t of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'Read']) on('tool.call', { tool: t }, () => ({ result: `${t} ok` }))
+  }
+  const call = ($: any, tool: string, agentId?: string) => $.tool.call({ tool, tool_use_id: tool, ...(agentId ? { agentId } : {}) } as any)
+  const report = ($: any, steps: unknown) => $.tool.call({ tool: TOOL, steps, tool_use_id: 'p' } as any)
+  // n 번 부르고 알림이 붙은 차례(1부터)를 돌려준다
+  const nudgedAt = async ($: any, tools: string[], agentId?: string) => {
+    const hits: number[] = []
+    for (const [i, t] of tools.entries()) if (((await call($, t, agentId)) as any).context?.includes(NUDGE)) hits.push(i + 1)
+    return hits
+  }
+
+  test('isOpen: 단계가 있고, 턴이 안 끝났고, 남은 단계가 있을 때만', async () => {
+    expect(isOpen(emptyPlan(NOW))).toBe(false)
+    const open = withSteps(emptyPlan(NOW), [{ title: 'a', status: 'done' }, { title: 'b', status: 'doing' }], NOW)
+    expect(isOpen(open)).toBe(true)
+    expect(isOpen(withEnded(open, 'answer', NOW))).toBe(false)
+    expect(isOpen(withSteps(open, [{ title: 'a', status: 'done' }], NOW))).toBe(false)
+  })
+
+  test('계획이 열린 동안 작업 도구 5번째마다 한 줄, 보고하면 셈이 0', async ($, on) => {
+    engine(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+
+    // 계획 없으면 붙지 않는다
+    expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+
+    await report($, STEPS)
+    // Read 는 세지 않는다. Edit·Write·NotebookEdit·Bash 를 센다
+    expect(await nudgedAt($, ['Bash', 'Read', 'Edit', 'Write', 'NotebookEdit', 'Bash', 'Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([6, 11])
+    expect(NUDGE_AFTER).toBe(5)
+
+    // 보고가 셈을 지운다
+    await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash'])
+    await report($, STEPS)
+    expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([5])
+
+    // 결과는 그대로 두고 context 만 더한다
+    await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash'])
+    const r: any = await call($, 'Edit')
+    expect(r.result).toBe('Edit ok')
+    expect(r.context).toEqual([NUDGE])
+  })
+
+  test('서브에이전트 호출은 세지 않고, 턴이 끝난 계획이나 모두 끝난 계획에는 붙지 않는다', async ($, on) => {
+    engine(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await report($, STEPS)
+    expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash', 'Bash', 'Bash'], 'sub-1')).toEqual([])
+    expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+
+    await report($, [{ title: 'a', status: 'done' }])
+    expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+
+    await report($, STEPS)
+    await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: false, turnId: 't' } as any)
+    expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+  })
+
+  test('게이트가 거부한 호출은 세지 않는다', { options: { planGate: true } }, async ($, on) => {
+    engine(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await report($, STEPS)
+    await $.turn.start({ text: '', turnId: 't2' } as any)
+    // 새 턴: 계획 보고 전이라 Edit 는 거부된다 (계획 자체는 열려 있음)
+    expect(await nudgedAt($, ['Edit', 'Edit', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+    expect(await nudgedAt($, ['Bash'])).toEqual([1])
   })
 })

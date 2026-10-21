@@ -70,3 +70,16 @@ export const GATE_RULE =
 
 export const GATE_DENY =
   'Refused by the work-plan plan gate: no plan_update in this turn yet. Send plan_update with every step of this task, placed before this call in the same response (tools run in order as the response arrives), then make this call again.'
+
+// 갱신 알림 (T24). 실측: 보고가 있는 턴 38개 중 30개가 턴 시작에 한 번만 보고해 진행 줄이 첫 단계에 머물렀다.
+// 계획이 열린 동안 메인 루프의 작업 도구를 세어, 보고 없이 이만큼 지나면 그 도구 결과에 한 줄을 붙인다. 요청은 늘지 않는다.
+// 규칙 문구에 "단계마다 다시 보고"를 넣는 안은 -p 긴 작업에서 비용이 약 15% 늘어 쓰지 않았다 (보고가 잘 오는 턴은 알림 비용 0).
+export const NUDGE_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'Bash'] as const
+export const NUDGE_AFTER = 5
+
+export const NUDGE = `work-plan: ${NUDGE_AFTER} work calls since your last plan_update. If a step finished, send plan_update (that step done, the next doing) with your next work tool call.`
+
+/** 알림을 셀 계획인가: 보고된 단계가 있고, 턴이 아직 안 끝났고, 남은 단계가 있다. */
+export function isOpen(plan: WorkPlan): boolean {
+  return plan.steps.length > 0 && plan.ended === null && plan.steps.some(s => s.status !== 'done')
+}
