@@ -1769,7 +1769,8 @@ describe('work-plan 연동', () => {
     // 혼자 띠: 알약 막대에 지금 단계와 %
     const solo = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
     expect((await solo.find({ type: 'Text', text: /^ 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').work)
-    expect(await solo.find({ type: 'Text', text: /^  33%$/ })).toBeDefined()
+    // % 는 알약과 같은 상태색 굵은 글자 (흐린 글자는 잘 안 보였다)
+    expect((await solo.find({ type: 'Text', text: /^  33%$/ }))?.props).toMatchObject({ color: paletteOf('night').work, bold: true })
     // 섞은 색이라 흐린 글자 표시는 없다 (theme 팔레트만 dimColor)
     expect((await solo.find({ type: 'Text', text: /^█+$/ }))?.props.dimColor).toBe(false)
 

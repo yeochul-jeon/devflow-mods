@@ -495,7 +495,7 @@ export const register: Register = (on, options) => {
       <Text color={mix(PILL_HUE[pb.tone], pal.card || '#000000', 0.45)} dimColor={!pal.isRaw}>{pb.fill}</Text>
       <Text backgroundColor={PILL_HUE[pb.tone]} color={pal.onBadge} bold>{pb.pill}</Text>
       <Text color={pal.dim}>{pb.rest}</Text>
-      <Text color={pal.dim}>{`  ${pb.pct}%`}</Text>
+      <Text color={PILL_HUE[pb.tone]} bold>{`  ${pb.pct}%`}</Text>
     </Text>
   )
   // 막대 아래 보조 에이전트 한 줄
