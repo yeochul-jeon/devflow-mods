@@ -1,7 +1,7 @@
 {
   "name": "prompt-coach",
-  "version": "0.2.3",
-  "description": "보내기 전 초안을 목표·맥락·조건·완료 기준 순으로 다듬어 입력창에 다시 채움: /coach <초안> 또는 입력창 위 [다듬기] (Haiku), [되돌리기], /coach template",
+  "version": "0.3.0",
+  "description": "보내기 전 초안의 빈 곳을 객관식으로 묻고 답을 넣어 다시 써서 입력창에 채움 (Haiku 2회): 입력창 위 [다듬기] 또는 /coach <초안>, /coach view 상세 패널, /coach auto on 이면 보낼 때마다 먼저 물음",
   "author": {
     "name": "yeochul-jeon",
     "url": "https://github.com/yeochul-jeon"

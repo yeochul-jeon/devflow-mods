@@ -334,6 +334,7 @@ team-board를 맨 앞에 두려면 `~/.claude/settings.json` 에 아래 설정�
 
 - 이 설정은 managed settings가 없는 기기에서만 적용됩니다. Team·Enterprise 로그인에서는 적용되지 않습니다.
 - 적용 여부는 `claude --debug-file <파일>` 로그에서 `hooks module team-board@devflow-mods loaded (… tier prepend)` 줄로 확인하세요.
+- prompt-coach 0.3.0 이상이 질문의 답을 기다리면 그 세션은 결정 필요(`prompt-coach: <질문>`)로 보입니다. 다듬은 글을 입력창에 넣거나 그만두면 앞 상태(대기, 또는 기다리던 Claude 의 질문)로 돌아갑니다. prompt-coach 가 없으면 아무 일도 없습니다.
 - 비밀 값을 가리는 mod(예: `secret-redactor`)는 도구 결과만 가립니다. team-board가 저장하는 실패 명령 원문은 그 mod가 가리지 않습니다.
 
 ## 알아둘 것
