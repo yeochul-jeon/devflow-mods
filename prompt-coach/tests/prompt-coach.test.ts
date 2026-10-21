@@ -125,6 +125,7 @@ describe('prompt-coach 흐름', () => {
     on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
     on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
     // 모델 호출은 띠가 뒤에서 기다린다. 몇 번 양보해 끝나게 한다
     const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => (globalThis as any).setTimeout(r, 0)) }
@@ -435,5 +436,90 @@ describe('prompt-coach 흐름', () => {
     expect(await submit($, LONG)).toMatchObject({ drop: expect.any(String) })
     await settle()
     expect(s.asked).toHaveLength(1)
+  })
+
+  const pane = (cols = 100) => $pane.mount({ plugin: 'prompt-coach', surface: 'terminal', component: 'Pane', requestId: 'prompt-coach', props: { bodyColumns: cols } } as any)
+  let $pane: any
+  const has = async (p: any, re: RegExp) => (await p.find({ type: 'Text', text: re })) !== undefined
+
+  test('/coach view: 기록이 없으면 안내와 설정만', async ($, on) => {
+    $pane = $.ui
+    const { coach } = await setup($, on)
+    expect((await coach('view')).text).toContain('패널')
+    const p = await pane()
+    expect(await has(p, /^PROMPT COACH$/)).toBe(true)
+    expect(await has(p, /아직 다듬은 기록이 없어요/)).toBe(true)
+    expect(await has(p, /^자동 모드 꺼짐$/)).toBe(true)
+    await p.press({ key: 'view-auto' })
+    expect(await has(p, /^자동 모드 켜짐$/)).toBe(true)
+    await p.unmount()
+  })
+
+  test('/coach view: 다듬은 뒤 수치·보탠 것(답/제안)·원문과 다듬은 글. 넓으면 나란히, 좁으면 위아래', async ($, on) => {
+    $pane = $.ui
+    const { coach, press } = await setup($, on)
+    await coach(DRAFT)
+    await press('coach-opt-0')
+    await press('coach-skip')
+    await coach('view')
+    const p = await pane()
+    expect(await has(p, /^● 검토$/)).toBe(true)
+    expect(await has(p, /^원문 4단어$/)).toBe(true)
+    expect(await has(p, /^보탠 것 2$/)).toBe(true)
+    expect(await has(p, /^ {2}답$/)).toBe(true)
+    expect(await has(p, /^ {2}제안$/)).toBe(true)
+    expect(await has(p, /^✦ 다듬은 글$/)).toBe(true)
+    expect((await p.find({ key: 'cards' }))?.props.flexDirection).toBe('row')
+    await p.unmount()
+    const narrow = await pane(40)
+    expect((await narrow.find({ key: 'cards' }))?.props.flexDirection).toBe('column')
+    await narrow.unmount()
+  })
+
+  test('/coach view: 질문 중이면 질문 전체. 패널에서 답하고, 바꾸기로 되돌리고, 나머지 건너뛰고 다듬기', async ($, on) => {
+    $pane = $.ui
+    const { s, coach, settle } = await setup($, on)
+    await coach(DRAFT)
+    await coach('view')
+    const p = await pane()
+    expect(await has(p, /^● 질문$/)).toBe(true)
+    expect(await has(p, /^범위는\?$/)).toBe(true) // 다음 질문도 흐리게 보인다
+    await p.press({ key: 'view-opt-1' })
+    await settle()
+    expect(await has(p, /^빌드 에러$/)).toBe(true)
+    await p.press({ key: 'change-0' })
+    await settle()
+    expect((await p.find({ key: 'view-opt-0' }))).toBeDefined()
+    await p.press({ key: 'view-now' })
+    await settle()
+    expect(s.box).toBe(REFINED)
+    await p.unmount()
+  })
+
+  test('/coach view: 기록은 최신이 앞, 골라 보고, 비어 있는 입력창에 넣는다. 글이 있으면 덮지 않는다', async ($, on) => {
+    $pane = $.ui
+    const { s, coach, press, settle } = await setup($, on)
+    await coach(DRAFT)
+    await press('coach-now')
+    s.box = ''
+    await coach('결제 모듈 중복 코드 정리 부탁해요')
+    await press('coach-now')
+    await coach('view')
+    const p = await pane()
+    expect(await has(p, /^기록 2 $/)).toBe(true)
+    expect(await has(p, /^원문 6단어$/)).toBe(true)
+    await p.press({ key: 'hist-1' })
+    await settle()
+    expect(await has(p, /^원문 4단어$/)).toBe(true)
+    s.box = '쓰던 글'
+    await p.press({ key: 'view-fill' })
+    await settle()
+    expect(s.box).toBe('쓰던 글')
+    expect(s.toasts.at(-1)).toContain('넣지 않았어요')
+    s.box = ''
+    await p.press({ key: 'view-fill' })
+    await settle()
+    expect(s.box).toBe(REFINED)
+    await p.unmount()
   })
 })

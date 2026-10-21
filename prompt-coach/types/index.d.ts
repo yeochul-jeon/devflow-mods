@@ -10,6 +10,9 @@ export type Question = { q: string; options: string[] }
 /** 다듬은 글에 보탠 것. answer 는 질문 답에서, suggest 는 모델이 스스로 보탠 결과 모양·완료 확인. */
 export type Added = { kind: 'answer' | 'suggest'; text: string }
 
+/** 다듬기 한 번의 기록. 상세 패널이 최근 20개를 보인다. */
+export type CoachEntry = { at: number; draft: string; refined: string; added: Added[] }
+
 /**
  * 질문 → 다시 쓰기 흐름. 질문하는 동안 초안은 입력창이 아니라 여기에 있다(숫자 키로 답하려고 입력창을 비운다).
  * answers 는 질문 순서대로, 건너뛴 질문은 null. 길이가 지금 질문의 번호다.
@@ -36,6 +39,10 @@ declare module 'claude-code' {
       pending: string | null
       /** Claude 의 질문을 기다리는 중인지(team-board 가 본 것). 자동 모드는 그 답을 가로채지 않는다. 다음 턴이 시작되면 끈다. */
       claudeAsking: boolean
+      /** 상세 패널에 보일 기록 사본(최신이 앞). 원본은 $.store 에 있어 모든 세션이 같다. */
+      history: CoachEntry[]
+      /** 상세 패널에서 고른 기록의 순번(0 이 최신). */
+      pick: number
     }
     /** 읽기만 한다. team-board 가 없으면 오지 않는다. team-board/types/index.d.ts 의 Beat 에서 쓰는 필드만 */
     'team-board': { me: { state: string; question: string } | null }

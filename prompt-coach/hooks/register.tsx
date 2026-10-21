@@ -4,8 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CoachBand, CoachFlow, Spent } from '../types'
-import { addedHead, type Answer, buildQuestions, buildRewrite, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort } from './refine'
+import type { CoachBand, CoachEntry, CoachFlow, Spent } from '../types'
+import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort } from './refine'
 
 // $.state 에 두어 핫 리로드에도 유지된다.
 const band = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false } as CoachBand)
@@ -20,9 +20,15 @@ const bypass = atom({ plugin: 'prompt-coach', key: 'bypass' } as const, false)
 // team-board 가 이 이름으로 읽는다. 바꾸면 team-board 도 바꾼다
 const pending = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
 const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as const, false)
+const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as CoachEntry[])
+const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
 
 /** 자동 모드 설정. 모든 세션이 같은 값을 쓴다. */
 const AUTO_KEY = 'auto-on'
+/** 다듬기 기록. 모든 세션이 같은 목록을 쓴다. */
+const HISTORY_KEY = 'history'
+const MAX_HISTORY = 20
+const PANE = 'prompt-coach'
 
 /** 입력창이 비었을 때 띠의 버튼을 누르는 숫자. 선택지는 1~4. */
 const SKIP_KEY = '0'
@@ -31,7 +37,7 @@ const NOW_KEY = '9'
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
-    await $.command.register({ name: 'coach', description: '초안의 빈 곳을 묻고 다듬어 입력창에', argumentHint: '<초안> | template | undo | cancel | auto on|off' })
+    await $.command.register({ name: 'coach', description: '초안의 빈 곳을 묻고 다듬어 입력창에', argumentHint: '<초안> | view | template | undo | cancel | auto on|off' })
     await isAuto($)
     // 모듈을 다시 불러 모델 호출이 끊겼으면 초안을 돌려준다. 질문 단계는 답을 기다리는 중이라 그대로 둔다
     const f = await read($, flow)
@@ -46,7 +52,7 @@ export const register: Register = on => {
     if (arg === '') {
       const s = await read($, spent)
       return {
-        text: `쓰는 법: /coach <초안> · /coach template · 입력창 위 [다듬기]·[되돌리기] · /coach undo · /coach cancel\n이번 세션 ${s.calls}회, Haiku 입력 ${s.input.toLocaleString('en-US')} · 출력 ${s.output.toLocaleString('en-US')} 토큰`,
+        text: `쓰는 법: /coach <초안> · /coach view · /coach template · 입력창 위 [다듬기]·[되돌리기] · /coach undo · /coach cancel · /coach auto on|off\n이번 세션 ${s.calls}회, Haiku 입력 ${s.input.toLocaleString('en-US')} · 출력 ${s.output.toLocaleString('en-US')} 토큰`,
       }
     }
     // 명령을 보냈으니 입력창은 비어 있다. 그대로 채운다.
@@ -65,11 +71,15 @@ export const register: Register = on => {
       return { text: filled.isFilled ? '다듬기 전 원문을 입력창에 되돌렸어요.' : `입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})` }
     }
     if (arg === 'auto' || arg === 'auto on' || arg === 'auto off') {
-      if (arg !== 'auto') {
-        await $.store.set(AUTO_KEY, arg === 'auto on')
-        await update($, auto, () => arg === 'auto on')
-      }
+      if (arg !== 'auto') await setAuto($, arg === 'auto on')
       return { text: (await isAuto($)) ? AUTO_ON : '자동 모드 꺼짐: [다듬기]·/coach 로만 다듬어요. (/coach auto on)' }
+    }
+    if (arg === 'view') {
+      await loadHistory($)
+      await update($, pick, () => 0)
+      await $.ui.open({ id: PANE, title: 'prompt-coach', closeOnEscape: true })
+      // 이 줄은 모델도 읽으므로 짧게 둔다
+      return { text: '다듬기 상세를 옆 패널에 띄웠어요. (Esc로 닫기)' }
     }
     if (arg === 'cancel') return { text: (await cancel($)) ? '다듬기를 그만두고 초안을 입력창에 돌려놓았어요.' : '다듬는 중이 아니에요.' }
     const refusal = await begin($, arg)
@@ -147,6 +157,170 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!e.agentId) await setClaudeAsking($, false)
     return next(e)
+  })
+
+  // 상세 패널: 단계 표시, 질문 전체, 고른 기록의 수치·보탠 것·원문과 다듬은 글, 기록 목록, 설정
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Text, Button } = $.ui.resolve(e)
+    // 패널 안쪽 폭 (좌우 여백 1칸씩)
+    const cols = Math.max(24, (e.props as { bodyColumns?: number }).bodyColumns ?? 80) - 2
+    const f = await read($, flow)
+    const list = await read($, history)
+    const chosen = Math.min(await read($, pick), Math.max(0, list.length - 1))
+    const entry = list[chosen]
+    const isOn = await read($, auto)
+    const used = await read($, spent)
+
+    // 한 줄 높이 Box 안에서 줄바꿈시켜 넘친 가로줄을 숨긴다 (truncate 는 끝에 … 를 붙인다)
+    const ruled = (key: string, lead: JSX.Element, leadW: number) => (
+      <Box key={key} height={1} overflow="hidden">
+        <Text wrap="wrap">
+          {lead}
+          <Text dimColor>{'─'.repeat(Math.max(0, cols - leadW))}</Text>
+        </Text>
+      </Box>
+    )
+    const section = (key: string, title: string) => <Box key={key} marginTop={1}>{ruled(`${key}-r`, <Text bold dimColor>{`${title} `}</Text>, cells(title) + 1)}</Box>
+    const TITLE = 'PROMPT COACH'
+
+    // 단계: 초안 → 질문 → 다시 쓰기 → 검토. 끝난 것 초록 ✓, 지금 노랑 ●, 남은 것 흐린 ○
+    const now = f.stage === 'asking' || f.stage === 'questions' ? 1 : f.stage === 'rewriting' ? 2 : 3
+    const steps = ['초안', '질문', '다시 쓰기', '검토']
+    const tracker = (
+      <Box key="tracker" flexDirection="row" flexWrap="wrap">
+        {steps.map((st, i) => (
+          <Text key={`step-${i}`}>
+            {i > 0 ? <Text color={i <= now ? 'green' : undefined} dimColor={i > now}>{' ── '}</Text> : null}
+            {i < now ? <Text color="green">{`✓ ${st}`}</Text> : i === now ? <Text color="yellow" bold>{`● ${st}`}</Text> : <Text dimColor>{`○ ${st}`}</Text>}
+          </Text>
+        ))}
+      </Box>
+    )
+
+    const card = (key: string, label: string, body: string, gold: boolean, width?: number) => (
+      <Box key={key} flexDirection="column" borderStyle="round" borderColor={gold ? 'yellow' : 'gray'} paddingX={1} width={width} flexShrink={0}>
+        <Text bold color={gold ? 'yellow' : undefined} dimColor={!gold}>{label}</Text>
+        <Text>{body}</Text>
+      </Box>
+    )
+
+    const flowPart = () => {
+      if (f.stage === 'asking' || f.stage === 'rewriting') {
+        return [card('draft', '초안', f.draft, false), <Text key="wait" color="cyan">{f.stage === 'asking' ? '질문을 만드는 중…' : '다시 쓰는 중…'}</Text>]
+      }
+      if (f.stage !== 'questions') return []
+      const current = f.answers.length
+      return [
+        card('draft', '초안', f.draft, false),
+        section('qs', '몇 가지만 물을게요'),
+        ...f.questions.map((q, i) => {
+          const given = f.answers[i]
+          if (i < current) {
+            return (
+              <Box key={`q-${i}`} flexDirection="column">
+                <Box flexDirection="row" columnGap={1}>
+                  <Text backgroundColor="green" color="black" bold>{' ✓ '}</Text>
+                  <Text>{q.q}</Text>
+                </Box>
+                <Box flexDirection="row" columnGap={2} paddingX={4}>
+                  {given ? <Text color="green">{given}</Text> : <Text dimColor>건너뜀</Text>}
+                  <Button key={`change-${i}`} label="바꾸기" plain dimColor onPress={() => void setFlow($, { ...f, answers: f.answers.slice(0, i) })} />
+                </Box>
+              </Box>
+            )
+          }
+          if (i > current) {
+            return (
+              <Box key={`q-${i}`} flexDirection="row" columnGap={1}>
+                <Text dimColor>{` ${i + 1} `}</Text>
+                <Text dimColor>{q.q}</Text>
+              </Box>
+            )
+          }
+          return (
+            <Box key={`q-${i}`} flexDirection="column">
+              <Box flexDirection="row" columnGap={1}>
+                <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
+                <Text bold>{q.q}</Text>
+              </Box>
+              <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingX={4}>
+                {q.options.map((o, k) => <Button key={`view-opt-${k}`} label={o} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />)}
+                <Button key="view-skip" label="건너뛰기" hotkey={SKIP_KEY} plain dimColor onPress={() => void answer($, null)} />
+              </Box>
+            </Box>
+          )
+        }),
+        <Box key="q-actions" flexDirection="row" columnGap={2} marginTop={1}>
+          {/* 주 버튼: 노란 바탕에 어두운 굵은 글자 */}
+          <Button key="view-now" hotkey={NOW_KEY} plain onPress={() => void rewriteNow($)}>
+            <Text backgroundColor="yellow" color="black" bold>{' 나머지 건너뛰고 다듬기 '}</Text>
+          </Button>
+          <Button key="view-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
+        </Box>,
+        <Text key="q-hint" dimColor>{'입력창 Enter = 지금 질문의 답 · > 로 시작하면 새 요청'}</Text>,
+      ]
+    }
+
+    const reviewPart = () => {
+      if (!entry || f.stage !== 'idle' && f.stage !== 'done') return []
+      const side = cols >= 70
+      const half = Math.floor((cols - 1) / 2)
+      return [
+        <Box key="nums" flexDirection="row" columnGap={3} marginTop={1}>
+          <Text dimColor>{`원문 ${words(entry.draft)}단어`}</Text>
+          <Text bold>{`다듬은 글 ${words(entry.refined)}단어`}</Text>
+          <Text color="green">{`보탠 것 ${entry.added.length}`}</Text>
+        </Box>,
+        <Box key="review-actions" flexDirection="row" columnGap={2}>
+          <Button key="view-fill" label="입력창에 넣기" variant="primary" onPress={() => void fillFromHistory($, entry)} />
+        </Box>,
+        section('added', '보탠 것'),
+        ...(entry.added.length === 0
+          ? [<Text key="added-none" dimColor>없음 (순서만 다듬음)</Text>]
+          : entry.added.map((a, k) => (
+              <Text key={`added-${k}`}>
+                <Text color={a.kind === 'answer' ? 'green' : 'yellow'}>{'+ '}</Text>
+                {a.text}
+                <Text dimColor>{a.kind === 'answer' ? '  답' : '  제안'}</Text>
+              </Text>
+            ))),
+        <Box key="cards" flexDirection={side ? 'row' : 'column'} columnGap={1} marginTop={1}>
+          {card('card-draft', '원문', entry.draft, false, side ? half : undefined)}
+          {card('card-refined', '✦ 다듬은 글', entry.refined, true, side ? cols - half - 1 : undefined)}
+        </Box>,
+      ]
+    }
+
+    const historyPart = () =>
+      list.length === 0
+        ? []
+        : [
+            section('history', `기록 ${list.length}`),
+            ...list.map((item, i) => (
+              <Button key={`hist-${i}`} plain onPress={() => void update($, pick, () => i)}>
+                <Text color={i === chosen ? 'yellow' : undefined}>{i === chosen ? '▸ ' : '  '}</Text>
+                <Text dimColor={i !== chosen}>{clip(oneLine(item.draft), cols - 4)}</Text>
+              </Button>
+            )),
+          ]
+
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        <Text bold>{TITLE}</Text>
+        {ruled('title-rule', <Text color="yellow">{'━'.repeat(cells(TITLE))}</Text>, cells(TITLE))}
+        {tracker}
+        {...flowPart()}
+        {...reviewPart()}
+        {f.stage === 'idle' && list.length === 0 ? <Text dimColor>아직 다듬은 기록이 없어요. 입력창 위 [다듬기]나 /coach &lt;초안&gt; 으로 시작하세요.</Text> : null}
+        {...historyPart()}
+        {section('settings', '설정')}
+        <Box flexDirection="row" columnGap={2}>
+          <Text>{`자동 모드 ${isOn ? '켜짐' : '꺼짐'}`}</Text>
+          <Button key="view-auto" label={isOn ? '끄기' : '켜기'} onPress={() => void setAuto($, !isOn)} />
+        </Box>
+        <Text dimColor>{`이번 세션 Haiku ${used.calls}회 · 입력 ${used.input.toLocaleString('en-US')} · 출력 ${used.output.toLocaleString('en-US')} 토큰`}</Text>
+      </Box>
+    )
   })
 
   // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 위에 붙인다.
@@ -264,6 +438,52 @@ async function isAuto($: EngineInterface): Promise<boolean> {
   return on
 }
 
+async function setAuto($: EngineInterface, on: boolean): Promise<void> {
+  await $.store.set(AUTO_KEY, on)
+  await update($, auto, () => on)
+}
+
+async function loadHistory($: EngineInterface): Promise<void> {
+  const stored = await $.store.get(HISTORY_KEY)
+  await update($, history, () => (Array.isArray(stored) ? (stored as CoachEntry[]) : []))
+}
+
+/** 다듬기 한 번을 기록 맨 앞에 둔다. 다른 세션이 쓴 것도 잃지 않게 저장소에서 다시 읽어 붙인다. */
+async function remember($: EngineInterface, item: CoachEntry): Promise<void> {
+  const stored = await $.store.get(HISTORY_KEY)
+  const next = [item, ...(Array.isArray(stored) ? (stored as CoachEntry[]) : [])].slice(0, MAX_HISTORY)
+  await $.store.set(HISTORY_KEY, next)
+  await update($, history, () => next)
+  await update($, pick, () => 0)
+}
+
+/** 기록의 다듬은 글을 입력창에 넣는다. 입력창에 글이 있으면 덮지 않는다. */
+async function fillFromHistory($: EngineInterface, item: CoachEntry): Promise<void> {
+  if ((await $.prompt.read()).text.trim() !== '') {
+    $.ui.toast('prompt-coach: 입력창에 글이 있어 넣지 않았어요. 비운 뒤 다시 누르세요.')
+    return
+  }
+  const filled = await fillRefined($, item.draft, item.refined)
+  if (!filled.isFilled) $.ui.toast(`prompt-coach: 입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})`)
+  // 넣은 글을 보내면 자동 모드가 다시 묻지 않는다
+  else await update($, bypass, () => true)
+}
+
+function words(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length
+}
+
+/** 칸 수에 맞춰 자른다. 넘치면 끝에 … */
+function clip(text: string, width: number): string {
+  if (cells(text) <= width) return text
+  let out = ''
+  for (const ch of text) {
+    if (cells(out + ch) > width - 1) break
+    out += ch
+  }
+  return out + '…'
+}
+
 function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
@@ -336,6 +556,7 @@ async function rewrite($: EngineInterface, draft: string, answers: readonly Answ
   const filled = await fillRefined($, draft, out.text)
   if (!filled.isFilled) return fail($, draft, `입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'}).`)
   await setFlow($, { stage: 'done', added: out.added })
+  await remember($, { at: await $.clock.now(), draft, refined: out.text, added: out.added })
 }
 
 /** 기다리던 단계가 그대로인지. 그사이 취소했거나 다른 초안으로 다시 시작했으면 결과를 버린다. */
