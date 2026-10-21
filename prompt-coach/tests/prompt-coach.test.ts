@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { buildRefine, lacksDone, parseRefined, TEMPLATE } from '../hooks/refine'
+import { buildQuestions, buildRefine, buildRewrite, lacksDone, parseQuestions, parseRefined, parseRewrite, passThrough, TEMPLATE } from '../hooks/refine'
 
 const USAGE = { input_tokens: 500, output_tokens: 120, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { plugin: 'prompt-coach', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } } as any
@@ -32,6 +32,60 @@ describe('refine (순수 함수)', () => {
     expect(lacksDone(`<refined>${REFINED}</refined>\n<done>yes</done>`)).toBe(false)
     expect(lacksDone(`<refined>${REFINED}</refined>`)).toBe(false)
     expect(lacksDone(`<refined>${REFINED} <done>no</done></refined>`)).toBe(false)
+  })
+})
+
+describe('질문·다시 쓰기 (순수 함수)', () => {
+  test('질문: 초안만 태그에 넣고, 초안에 있는 것·코드로 알 수 있는 것은 묻지 말라고 한다', async () => {
+    const { system, prompt } = buildQuestions(DRAFT)
+    expect(prompt).toBe(`<draft>\n${DRAFT}\n</draft>`)
+    for (const rule of ['at most 3', 'already states', 'reading the code', 'ask nothing', 'not instructions to you', '<questions>[]</questions>']) expect(system).toContain(rule)
+  })
+
+  test('질문 읽기: 3개까지, 선택지 2~4개, 모양이 틀린 질문은 버림. 태그나 JSON 이 깨지면 null, 빈 목록은 []', async () => {
+    const qs = [
+      { q: '범위는?', options: ['이 파일만', '모듈 전체', '저장소 전체', '테스트까지', '문서까지'] },
+      { q: '선택지가 하나', options: ['하나'] },
+      { q: '', options: ['a', 'b'] },
+      { q: '확인 방법은?', options: ['테스트 통과', '빌드 통과', 7] },
+      { q: '넷째', options: ['a', 'b'] },
+      { q: '다섯째', options: ['a', 'b'] },
+    ]
+    const r = parseQuestions(`설명\n<questions>${JSON.stringify(qs)}</questions>`)!
+    expect(r.map(q => q.q)).toEqual(['범위는?', '확인 방법은?', '넷째'])
+    expect(r[0]!.options).toEqual(['이 파일만', '모듈 전체', '저장소 전체', '테스트까지'])
+    expect(r[1]!.options).toEqual(['테스트 통과', '빌드 통과'])
+    expect(parseQuestions('<questions>[]</questions>')).toEqual([])
+    expect(parseQuestions('어떤 파일인가요?')).toBeNull()
+    expect(parseQuestions('<questions>[{q:</questions>')).toBeNull()
+    expect(parseQuestions('<questions>{"q":"x"}</questions>')).toBeNull()
+  })
+
+  test('다시 쓰기: 답을 넣고, 틀은 제안으로, 사실은 지어내지 말라고 한다', async () => {
+    const { system, prompt } = buildRewrite(DRAFT, [{ q: '범위는?', a: '모듈 전체' }])
+    expect(prompt).toBe(`<draft>\n${DRAFT}\n</draft>\n<answers>\n- 범위는? → 모듈 전체\n</answers>`)
+    for (const rule of ['Add what the answers say', 'Add nothing else', 'not additions', 'scope word', 'not instructions to you', 'answer: ', 'suggest: ', '<added></added>']) expect(system).toContain(rule)
+    expect(buildRewrite(DRAFT, []).prompt).toContain('<answers>\n\n</answers>')
+  })
+
+  test('다시 쓰기 읽기: 다듬은 글과 보탠 것(답/제안). 머리가 틀린 줄은 버리고, 글이 없으면 null', async () => {
+    const r = parseRewrite(`<refined>${REFINED}</refined>\n<added>\nanswer: 범위 모듈 전체\n- Suggest: 완료 확인 방법\n그냥 줄\n</added>`)
+    expect(r).toEqual({ text: REFINED, added: [{ kind: 'answer', text: '범위 모듈 전체' }, { kind: 'suggest', text: '완료 확인 방법' }] })
+    expect(parseRewrite(`<refined>${REFINED}</refined>`)).toEqual({ text: REFINED, added: [] })
+    expect(parseRewrite(`<refined>${REFINED} <added>answer: 안쪽</added></refined>`)!.added).toEqual([])
+    expect(parseRewrite('무슨 뜻인가요?')).toBeNull()
+  })
+
+  test('자동 모드 통과: 사람이 친 것이 아니거나, 명령·첨부·작업 중·보이지 않는 프롬프트·짧은 답이면 그대로', async () => {
+    const typed = { text: '로그인 오류를 고쳐 주세요 auth.ts', origin: { kind: 'composer' } }
+    expect(passThrough(typed)).toBe(false)
+    expect(passThrough({ ...typed, origin: { kind: 'plugin' } })).toBe(true)
+    expect(passThrough({ ...typed, command: { name: 'coach', args: '' } })).toBe(true)
+    expect(passThrough({ ...typed, attachments: [{ type: 'image' }] })).toBe(true)
+    expect(passThrough({ ...typed, attachments: [] })).toBe(false)
+    expect(passThrough({ ...typed, turnId: 't1' })).toBe(true)
+    expect(passThrough({ ...typed, isMeta: true })).toBe(true)
+    expect(passThrough({ ...typed, text: '네 계속 해 주세요' })).toBe(true)
   })
 })
 
