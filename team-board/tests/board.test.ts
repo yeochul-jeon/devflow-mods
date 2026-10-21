@@ -1298,11 +1298,12 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /PR38 과 겹치는지 확인/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^ 왜 지금 $/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^PR38 착수가 이 답을 기다림$/ })).toBeDefined()
-    // 고른 탭은 배지처럼 색 바탕, 안 고른 탭은 색 글자. 만든 종류에만 재생성(🔄)
+    // 고른 탭은 배지처럼 색 바탕, 안 고른 탭은 색 글자. 만든 종류에만 재생성(↻)
     const night = paletteOf('night')
     expect((await pane.find({ type: 'Text', text: /^ 12살 ▴ $/ }))?.props).toMatchObject({ backgroundColor: night.ok, color: night.onBadge })
     expect((await pane.find({ type: 'Text', text: /^\[ ASD-STE100 \]$/ }))?.props).toMatchObject({ color: night.work })
-    expect((await pane.find({ key: 'regen-kid-peer' }))?.props).toMatchObject({ label: '🔄' })
+    // 재생성은 괄호 없는 1칸 ↻, 평소 흐리게 (이모지 🔄 는 2칸 고정 색 타일이라 괄호까지 6칸이었다)
+    expect((await pane.find({ key: 'regen-kid-peer' }))?.props).toMatchObject({ plain: true, label: '↻', dimColor: true })
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeUndefined()
 
     // 열린 탭을 다시 누르면 접기 / 펼치기
@@ -1350,7 +1351,7 @@ describe('팀 상황판', () => {
     await clock.advance(3_000)
     expect(steCalls).toBe(2)
     expect(await pane.find({ key: 'regen-ste-peer' })).toBeDefined()
-    // 좁은 패널(N2b): 탭 줄은 묶음 사이에서 줄바꿈. 탭과 그 🔄 는 한 묶음, │ 는 둘째 묶음부터 앞에
+    // 좁은 패널(N2b): 탭 줄은 묶음 사이에서 줄바꿈. 탭과 그 ↻ 는 한 묶음, │ 는 둘째 묶음부터 앞에
     const tabs = await pane.find({ key: 'tabs-peer' })
     expect(tabs?.props).toMatchObject({ flexWrap: 'wrap' })
     expect(JSON.stringify(await pane.find({ key: 'tabgrp-kid-peer' }))).toContain('regen-kid-peer')

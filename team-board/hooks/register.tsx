@@ -1348,9 +1348,9 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // 탭 줄: [ 12살 ▴ ][ 🔄 ] │ [ ASD-STE100 ][ 🔄 ] │ [ HTML ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
+    // 탭 줄: [ 12살 ▴ ] ↻ │ [ ASD-STE100 ] ↻ │ [ HTML ]. 고른 탭은 배지처럼 색 바탕, ▴/▾ 는 고른 탭에만
     // (초점 반전이 걸린 고른 탭이 안 고른 탭처럼 보일 수 있어 기호로 구분한다).
-    // 좁은 패널에서는 묶음(탭 + 그 🔄) 사이에서만 줄바꿈한다. │ 는 둘째 묶음부터 앞에 붙여 줄 끝에 남지 않게
+    // 좁은 패널에서는 묶음(탭 + 그 ↻) 사이에서만 줄바꿈한다. │ 는 둘째 묶음부터 앞에 붙여 줄 끝에 남지 않게
     const tabRow = (b: Beat) => {
       const shown = hasAny(b)
       const bar = (k: string) => <Text key={`bar-${k}-${b.id}`} color={pal.dim}>│</Text>
@@ -1369,7 +1369,7 @@ export const register: Register = (on, options) => {
                   )}
                 </Button>
                 {/* 재생성은 만든 탭에만, 만드는 중에는 숨긴다 (눌러도 무시되므로) */}
-                {partOf(b, t.kind) && !makingOf(b, t.kind) ? <Button key={`regen-${t.kind}-${b.id}`} variant="secondary" label="🔄" onPress={noop} /> : null}
+                {partOf(b, t.kind) && !makingOf(b, t.kind) ? <Button key={`regen-${t.kind}-${b.id}`} plain dimColor label="↻" onPress={noop} /> : null}
               </Box>
             )
           })}
