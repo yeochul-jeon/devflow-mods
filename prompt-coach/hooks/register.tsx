@@ -83,7 +83,7 @@ export const register: Register = on => {
     }
     if (arg === 'cancel') return { text: (await cancel($)) ? '다듬기를 그만두고 초안을 입력창에 돌려놓았어요.' : '다듬는 중이 아니에요.' }
     const refusal = await begin($, arg)
-    return { text: refusal ? `/coach: ${refusal}` : '입력창 위에 질문이 떠요. 숫자로 고르거나, 입력창에 직접 써서 Enter.' }
+    return { text: refusal ?? '입력창 위에 질문이 떠요. 숫자로 고르거나, 입력창에 직접 써서 Enter.' }
   })
 
   // 사람이 Enter 로 보낸 명령은 입력창을 비우지만 prompt.submit 을 거치지 않는다. 플러그인이 부른 명령은 입력창을 그대로 둔다.
@@ -97,8 +97,12 @@ export const register: Register = on => {
     const r = await next(e)
     const hasDraft = r.text.trim() !== ''
     if ((await read($, band)).hasDraft !== hasDraft) await update($, band, b => ({ ...b, hasDraft }))
-    // 다듬은 글을 지웠으면 보탠 것 줄도 내린다
-    if (!hasDraft && (await read($, flow)).stage === 'done') await setFlow($, { stage: 'idle' })
+    if (!hasDraft) {
+      // 다듬은 글을 지웠으면 보탠 것 줄도 내린다
+      if ((await read($, flow)).stage === 'done') await setFlow($, { stage: 'idle' })
+      // 다듬은 글·돌려놓은 초안을 지웠으면 다음 보내기는 다시 묻는다
+      if (await read($, bypass)) await update($, bypass, () => false)
+    }
     return r
   })
 
@@ -309,16 +313,16 @@ export const register: Register = on => {
         <Text bold>{TITLE}</Text>
         {ruled('title-rule', <Text color="yellow">{'━'.repeat(cells(TITLE))}</Text>, cells(TITLE))}
         {tracker}
+        {/* 설정은 위에 둔다. 아래에 두면 기록이 길 때 패널 밖으로 밀려 보이지 않는다 */}
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+          <Text>{`자동 모드 ${isOn ? '켜짐' : '꺼짐'}`}</Text>
+          <Button key="view-auto" label={isOn ? '끄기' : '켜기'} onPress={() => void setAuto($, !isOn)} />
+          <Text dimColor>{`이번 세션 Haiku ${used.calls}회 · 입력 ${used.input.toLocaleString('en-US')} · 출력 ${used.output.toLocaleString('en-US')} 토큰`}</Text>
+        </Box>
         {...flowPart()}
         {...reviewPart()}
         {f.stage === 'idle' && list.length === 0 ? <Text dimColor>아직 다듬은 기록이 없어요. 입력창 위 [다듬기]나 /coach &lt;초안&gt; 으로 시작하세요.</Text> : null}
         {...historyPart()}
-        {section('settings', '설정')}
-        <Box flexDirection="row" columnGap={2}>
-          <Text>{`자동 모드 ${isOn ? '켜짐' : '꺼짐'}`}</Text>
-          <Button key="view-auto" label={isOn ? '끄기' : '켜기'} onPress={() => void setAuto($, !isOn)} />
-        </Box>
-        <Text dimColor>{`이번 세션 Haiku ${used.calls}회 · 입력 ${used.input.toLocaleString('en-US')} · 출력 ${used.output.toLocaleString('en-US')} 토큰`}</Text>
       </Box>
     )
   })

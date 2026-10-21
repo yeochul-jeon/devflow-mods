@@ -271,6 +271,7 @@ describe('prompt-coach 흐름', () => {
   test('짧은 초안은 부르지 않는다', async ($, on) => {
     const { s, coach } = await setup($, on)
     expect((await coach('고쳐')).text).toContain('짧')
+    expect((await coach('고쳐')).text).not.toContain('/coach:') // 엔진이 앞에 prompt-coach: 를 붙인다
     expect(s.asked).toHaveLength(0)
   })
 
@@ -392,6 +393,19 @@ describe('prompt-coach 흐름', () => {
     expect(s.box).toBe(LONG)
     expect(await submit($, LONG)).toMatchObject({ text: LONG })
     expect(s.asked).toHaveLength(1)
+  })
+
+  test('취소·다듬기 뒤 입력창을 손으로 비우면, 나중에 자동 모드에서 보낸 글은 다시 묻는다', async ($, on) => {
+    const { s, settle, coach, press } = await setup($, on)
+    await coach(LONG)
+    await press('coach-cancel')
+    expect(s.box).toBe(LONG)
+    s.box = ''
+    await ($ as any).prompt.edit({ origin: { kind: 'composer' }, text: LONG, cursor: LONG.length, start: 0, end: LONG.length, inputText: '' } as any)
+    await coach('auto on')
+    expect(await submit($, LONG)).toHaveProperty('drop')
+    await settle()
+    expect(s.asked).toHaveLength(2)
   })
 
   test('/coach auto off 로 끈다. 켜면 띠 머리에 자동', async ($, on) => {
