@@ -527,6 +527,9 @@ export const register: Register = (on, options) => {
     // ' /lookback' 처럼 앞에 공백이 있으면 엔진이 일반 메시지로 보낸다. 그래서 / 는 다듬기 전 글로 본다
     if (text && !e.text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
       const at = await $.clock.now()
+      const b = self.beat
+      const kept = { decisions: b.decisions, timeline: b.timeline, question: b.question, prompt: b.prompt, state: b.state, step: b.step, recent: b.recent }
+      const keptAsking = { undo: self.undo, htmlKeep: self.htmlKeep, askingSince: self.askingSince }
       let { decisions, timeline } = self.beat
       self.undo = null
       if (self.beat.state === 'asking' && self.beat.question) {
@@ -541,6 +544,14 @@ export const register: Register = (on, options) => {
       self.htmlKeep = ''
       self.beat.agents = agentClearEnded(self.beat.agents)
       await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), state: 'working', step: '생각 중' }, true)
+      // 다른 mod 가 보내기를 막았으면(drop) 요청도 답도 아니다. 넘기기 전 상태로 되돌린다
+      const r = await next(e)
+      if (r.drop !== undefined) {
+        self.flowDirty = true
+        await save($, kept, true)
+        Object.assign(self, keptAsking)
+      }
+      return r
     } else if (e.origin.kind === 'plugin' && e.origin.name === 'team-board' && self.beat?.state === 'asking' && self.beat.question) {
       // HTML 버튼이 보낸 요청: 결정은 아직 남아 있다
       self.htmlKeep = self.beat.question

@@ -56,4 +56,19 @@ describe('plain-terms', () => {
     await $.prompt.submit({ text: '질문', context: ['앞 문맥'], origin: { kind: 'composer' }, wait: false } as any)
     expect(seen).toEqual(['앞 문맥', RULE])
   })
+
+  test('막힌 보내기(drop)는 규칙을 쓰지 않는다. 다음에 실제로 들어가는 프롬프트에 붙인다', async ($, on) => {
+    const contexts: (readonly string[] | undefined)[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('prompt.submit', ($, e: any) => {
+      contexts.push(e.context)
+      return e.text.startsWith('HOLD') ? { drop: 'prompt-coach: 질문에 답하면 다듬어요' } : { text: e.text }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    const submit = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false } as any)
+    await submit('HOLD 설명해 줘')
+    await submit('다듬은 요청')
+    await submit('계속')
+    expect(contexts).toEqual([[RULE], [RULE], undefined])
+  })
 })

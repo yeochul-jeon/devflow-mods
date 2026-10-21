@@ -1934,3 +1934,49 @@ describe('흐름 복사', () => {
     await pane2.unmount()
   })
 })
+
+describe('막힌 보내기', () => {
+  test('다른 mod 가 보내기를 막으면(drop) 작업 중으로 바꾼 것과 결정 기록을 되돌린다', async ($, on) => {
+    const files = new Map<string, string>()
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', ($, e: any) => {
+      if (!files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
+      return { value: files.get(e.path)! }
+    })
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('prompt.submit', ($, e: any) => (e.text.startsWith('HOLD') ? { drop: 'prompt-coach: 질문에 답하면 다듬어요' } : { text: e.text }))
+    on('turn.complete', () => ({ text: '' }))
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.prompt.submit({ text: '첫 요청', origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '범위는 어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    const before = mine()
+    expect(before.state).toBe('asking')
+
+    // 결정을 기다리던 중 막힌 보내기: 결정 대기 그대로, 결정 기록도 요청 기록도 남지 않는다
+    const r = await $.prompt.submit({ text: 'HOLD 모듈 전체', origin: { kind: 'composer' } } as any)
+    expect(r).toMatchObject({ drop: 'prompt-coach: 질문에 답하면 다듬어요' })
+    expect(mine()).toMatchObject({ state: 'asking', question: before.question, prompt: before.prompt, step: before.step, decisions: before.decisions, timeline: before.timeline, recent: before.recent })
+
+    // 대기 중 막힌 보내기: 작업 중으로 바뀌지 않는다
+    await $.prompt.submit({ text: '모듈 전체', origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't2' } as any)
+    const idle = mine()
+    expect(idle.state).toBe('idle')
+    await $.prompt.submit({ text: 'HOLD 다음 일', origin: { kind: 'composer' } } as any)
+    expect(mine()).toMatchObject({ state: 'idle', prompt: idle.prompt, timeline: idle.timeline })
+  })
+})

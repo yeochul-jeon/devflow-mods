@@ -12,7 +12,10 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     if (!pending || e.text.trim().startsWith('/')) return next(e)
     pending = false
-    return next({ ...e, context: [...(e.context ?? []), RULE] })
+    const r = await next({ ...e, context: [...(e.context ?? []), RULE] })
+    // 다른 mod 가 막은(drop) 프롬프트는 들어가지 않았다. 다음 프롬프트에 붙인다
+    if (r.drop !== undefined) pending = true
+    return r
   })
 
   // precompute 와 거부된 compaction 은 대화를 바꾸지 않는다.
