@@ -369,8 +369,9 @@ export const register: Register = (on, options) => {
       const sum = v.summaries[p.root]
       return (
         <Box key={`p${i}`} flexDirection="column" marginTop={1}>
+          {/* 프로젝트마다 이름 붙은 가로줄, 그 아래 수치. 안의 커밋·결정·요청은 작은 머리로 나눈다 */}
+          {ruled(`p${i}-h`, <Text><Text bold color="cyan">{p.name}</Text> </Text>, cells(p.name) + 1)}
           <Box flexDirection="row" gap={1}>
-            <Text bold color="cyan">{p.name}</Text>
             <Text dimColor>
               {p.entries.length ? `요청 ${p.entries.length} · ${durationText(p.ms)} · ` : ''}
               {`결정 ${decisionsOf(p).length} · 커밋 ${p.commits.length}`}
@@ -379,6 +380,7 @@ export const register: Register = (on, options) => {
             {sum === undefined || sum.startsWith('요약 실패') ? <Button key={`sum-${i}`} label="요약" variant="secondary" onPress={noop} /> : null}
           </Box>
           {sum !== undefined ? <Text color={sum.startsWith('요약 실패') ? 'red' : undefined}>{sum === '…' ? '요약하는 중…' : sum}</Text> : null}
+          {p.commitError || p.commits.length ? <Text dimColor>─ 커밋</Text> : null}
           {p.commitError ? <Text dimColor>{p.commitError}</Text> : null}
           {p.commits.slice(-MAX_COMMITS).map(c => (
             <Text key={`c${c.hash}`} wrap="truncate-end">
@@ -387,6 +389,7 @@ export const register: Register = (on, options) => {
             </Text>
           ))}
           {p.commits.length > MAX_COMMITS ? <Text dimColor>{`  … 커밋 ${p.commits.length - MAX_COMMITS}개 더`}</Text> : null}
+          {decisionsOf(p).length ? <Text dimColor>─ 결정</Text> : null}
           {decisionsOf(p).length > MAX_DECISIONS ? <Text dimColor>{`  … 앞선 결정 ${decisionsOf(p).length - MAX_DECISIONS}개`}</Text> : null}
           {decisionsOf(p).slice(-MAX_DECISIONS).map(d => (
             <Text key={`d${d.at}`} wrap="truncate-end">
@@ -397,6 +400,7 @@ export const register: Register = (on, options) => {
               {clipText(d.answer, 40)}
             </Text>
           ))}
+          {p.entries.length ? <Text dimColor>─ 요청</Text> : null}
           {p.entries.length > MAX_REQUESTS ? <Text dimColor>{`  … 앞선 요청 ${p.entries.length - MAX_REQUESTS}개`}</Text> : null}
           {shown.map(r => (
             <Text key={`r${r.at}`} wrap="truncate-end">
@@ -477,16 +481,17 @@ export const register: Register = (on, options) => {
       const known = <T,>(list: T[], isKnown: (x: T) => boolean, count: (x: T) => number) => Math.max(1, ...list.filter(isKnown).map(count))
       const maxKind = known(w.byKind, k => k.kind !== 'unknown', k => k.count)
       const maxModel = known(w.byModel, m => m.model !== '', m => m.count)
-      // 차트: 3줄 막대. 막대 칸 = 폭 / 막대 수, 2칸 이상이면 1칸은 사이
+      // 차트: 3줄 막대. 막대 칸 = 폭 / 막대 수, 2칸 이상이면 1칸은 흐린 세로줄로 칸을 나눈다. 막대 아래 가로 기준선
       const slot = Math.max(1, Math.floor(cols / Math.max(1, bars.length)))
       const bw = slot >= 2 ? slot - 1 : 1
-      const gap = slot >= 2 ? ' ' : ''
+      const gap = slot >= 2 ? '│' : ''
       const peak = Math.max(1, ...bars.map(b => b.min))
       const chartRow = (r: number) => (
         <Text key={`ch-${r}`} wrap="truncate-end">
           {bars.map((b, i) => (
-            <Text key={`b${i}`} color={b.now ? 'yellow' : 'cyan'}>
-              {blockRow(Math.round((b.min / peak) * 24), r).repeat(bw) + gap}
+            <Text key={`b${i}`}>
+              <Text color={b.now ? 'yellow' : 'cyan'}>{blockRow(Math.round((b.min / peak) * 24), r).repeat(bw)}</Text>
+              <Text dimColor>{gap}</Text>
             </Text>
           ))}
         </Text>
@@ -530,6 +535,7 @@ export const register: Register = (on, options) => {
           {w.byModel.map(m => row(`m-${m.model || 'none'}`, m.model ? 'magenta' : 'gray', modelName(m.model), m.count, maxModel, ''))}
           {section('s-chart', chartTitle)}
           {[2, 1, 0].map(chartRow)}
+          <Text key="ch-base" dimColor wrap="truncate-end">{bars.map(() => '─'.repeat(bw) + (gap ? '┴' : '')).join('')}</Text>
           {labels}
           <Text bold>{summary}</Text>
           <Text dimColor>{`아낀 시간은 추정입니다 (코드 수정 ${minutes.edit}분 · 실행 ${minutes.run}분 · 조사 ${minutes.research}분 · 대화 ${minutes.chat}분). 바꾸기: claude plugin configure look-back@devflow-mods`}</Text>
@@ -541,6 +547,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" paddingX={1}>
         {chips}
         {hideReport ? <Text bold>{`돌아보기 · ${range}`}</Text> : report()}
+        {section('s-proj', '프로젝트')}
         <Text>{`요청 ${reqs} · Claude 작업 ${durationText(ms)} · 결정 ${decided} · 커밋 ${commits} · 프로젝트 ${rep.projects.length}`}</Text>
         {rep.projects.length === 0 ? <Text dimColor>이 기간에 기록된 요청이 없어요. 기록은 look-back 을 설치한 뒤 대화형 세션에서 보낸 요청부터 남아요.</Text> : null}
         {rep.projects.map(project)}

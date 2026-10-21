@@ -345,6 +345,11 @@ describe('look-back (hook)', () => {
     expect(await ui.find({ type: 'Text', text: /^2026-10-18$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 5분 · 결정 0 · 커밋 1 · 프로젝트 1$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^order-svc$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^프로젝트 ─+$/ })).toBeDefined() // 합계 줄 위 가로줄
+    expect(await ui.find({ type: 'Text', text: /^order-svc ─+$/ })).toBeDefined() // 프로젝트마다 이름 붙은 가로줄
+    expect(await ui.find({ type: 'Text', text: /^─ 커밋$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^─ 요청$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^─ 결정$/ })).toBeUndefined() // 빈 묶음은 머리도 없다
     expect(await ui.find({ type: 'Text', text: /abc1234.*add order api/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /10\/18 22:59 .*■ .*결제 버그 고쳐 줘/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /어제 요청/ })).toBeUndefined()
@@ -381,6 +386,7 @@ describe('look-back (hook)', () => {
     expect(await ui.find({ type: 'Text', text: /23:54 \? 커밋, push, 설치를 진행할까요\? → 커밋하고 push 후 설치까지 진행해주세요/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^결정 1 · 커밋 1$/ })).toBeDefined() // 요청 기록이 없으면 요청·시간·토큰을 빼고
+    expect(await ui.find({ type: 'Text', text: /^─ 결정$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /A 로 할까요\? → A/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /어제 질문|안 읽힘/ })).toBeUndefined()
     await ui.unmount()
@@ -420,6 +426,8 @@ describe('look-back (hook)', () => {
     expect(await ui.find({ type: 'Text', text: /조사 .* 1 +15분$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Opus 5\.5 .* 2$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^최근 7일 아낀 시간 50분 · 연속 2일$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^(─+┴){7}$/ })).toBeDefined() // 막대 아래 기준선, 칸 사이 ┴
+    expect(await ui.find({ type: 'Text', text: /^( +│){5}/ })).toBeDefined() // 0분인 날도 세로줄로 칸이 보인다
     expect(await ui.find({ type: 'Text', text: /아낀 시간은 추정/ })).toBeDefined()
     await ui.unmount()
 
