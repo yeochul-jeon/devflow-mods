@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
+import type { PillBar, PillTone, SoundOs, Strip } from './board'
 import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, SubAgent, WorkPlan } from '../types'
 import {
   EVENT_MARK,
@@ -11,6 +12,7 @@ import {
   agentMeta,
   agentPatch,
   agentStart,
+  agentStrips,
   agentSummary,
   agentSync,
   waitsOnAgents,
@@ -44,7 +46,10 @@ import {
   normalize,
   notificationTokens,
   oneLine,
+  pillBar,
   progress,
+  soundCommands,
+  soundOs,
   pushCapped,
   questionSummary,
   questionText,
@@ -58,12 +63,13 @@ import {
   headParts,
   steStacked,
   tasksFromPlan,
+  turnTook,
   unwrapPaste,
   visible,
   withMe,
 } from './board'
 import { commandKey, formatAlert, judge, masksIn, noteForClaude, redact, signLine } from './failure'
-import { bar, contextTone, paletteOf } from './palette'
+import { bar, contextTone, mix, paletteOf } from './palette'
 import { cells as widthOf, clip as widthClip, flowArt, parseExplain, parseSte } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
 
@@ -214,7 +220,8 @@ async function syncPlan($: EngineInterface, plan?: unknown): Promise<void> {
   if (!self.beat) return
   const r = tasksFromPlan(plan === undefined ? await read($, workPlan) : plan, self.beat.state === 'asking')
   if (!r) return
-  await save($, r.step && self.beat.state === 'working' ? { tasks: r.tasks, step: r.step } : { tasks: r.tasks })
+  // 계획 보고는 한 턴에 몇 번뿐이라 바로 쓴다: 묶어 쓰기(1.5초)에 걸리면 띠가 Spinner 보다 한 단계 늦다 (T24 실화면)
+  await save($, r.step && self.beat.state === 'working' ? { tasks: r.tasks, step: r.step } : { tasks: r.tasks }, true)
 }
 
 async function note($: EngineInterface, kind: Parameters<typeof event>[1], text: string, patch: Partial<Beat> = {}, force = false, full = text) {
@@ -453,7 +460,20 @@ async function maybeAlert($: EngineInterface): Promise<void> {
   await announce($, `${b.name} 세션이 결정을 기다립니다`)
 }
 
+// 이 기기의 소리 재생 방식. 처음 울릴 때 한 번 정한다
+let soundOsOf: SoundOs | null = null
+
 async function announce($: EngineInterface, text: string): Promise<void> {
+  const root = $.plugin.root
+  soundOsOf ??= soundOs(root, /^[A-Za-z]:/.test(root) ? '' : ((await $.process.run(['uname', '-s'], { timeoutMs: 2000 }).catch(() => null))?.stdout ?? ''))
+  if (soundOsOf !== 'mac') {
+    // 알림은 부가 기능이라 플레이어가 없으면 조용히 건너뛴다. 음성(say)은 macOS 에만 있다
+    for (const c of soundCommands(soundOsOf, `${root}/sounds/chime.wav`)) {
+      const r = await $.process.run(c.argv, { ...(c.env ? { env: c.env } : {}), timeoutMs: 5000 }).catch(() => null)
+      if (r?.exitCode === 0) return
+    }
+    return
+  }
   await $.audio.play({ asset: 'sounds/chime.wav' }).catch(() => undefined)
   // 한국어 목소리(Yuna)가 없으면 기본 목소리로
   await $.audio
@@ -464,6 +484,31 @@ async function announce($: EngineInterface, text: string): Promise<void> {
 
 export const register: Register = (on, options) => {
   const pal = paletteOf(options.palette)
+
+  // 알약 막대 한 줄 (T24 B안). Text 는 그리는 화면의 것. 채움은 상태색을 카드 바탕 쪽으로 흐리게.
+  // 이름 색 팔레트(theme)는 섞을 수 없어 흐린 글자(dimColor)로: 같은 색이면 채움과 알약이 붙어 보인다 (밝은 테마 실화면)
+  const PILL_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok }
+  const pillOf = (Text: any, pb: PillBar) => (
+    <Text wrap="truncate-end">
+      <Text color={mix(PILL_HUE[pb.tone], pal.card || '#000000', 0.45)} dimColor={!pal.isRaw}>{pb.fill}</Text>
+      <Text backgroundColor={PILL_HUE[pb.tone]} color={pal.onBadge} bold>{pb.pill}</Text>
+      <Text color={pal.dim}>{pb.rest}</Text>
+      <Text color={pal.dim}>{`  ${pb.pct}%`}</Text>
+    </Text>
+  )
+  // 막대 아래 보조 에이전트 한 줄
+  const stripOf = (Text: any, r: Strip) =>
+    'more' in r ? (
+      <Text color={pal.dim} wrap="truncate-end">{`↳ +${r.more} 보조 ${r.more}개 · ${r.done}개 끝남`}</Text>
+    ) : (
+      <Text wrap="truncate-end">
+        <Text color={pal.dim}>{`↳ ${r.n} `}</Text>
+        <Text color={r.status === 'working' ? pal.text : pal.dim}>{r.label}</Text>
+        {r.model ? <Text color={pal.dim}>{` (${r.model})`}</Text> : null}
+        {r.tool ? <Text color={r.status === 'failed' ? pal.bad : pal.work}>{`  ${r.tool}`}</Text> : null}
+        <Text color={pal.dim}>{`  ${r.time}`}</Text>
+      </Text>
+    )
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -785,7 +830,7 @@ export const register: Register = (on, options) => {
     if (sub === 'sound' && (rest[0] === 'on' || rest[0] === 'off' || rest[0] === 'test')) {
       if (rest[0] === 'test') {
         await announce($, `${self.beat?.name ?? '이'} 세션이 결정을 기다립니다`)
-        return { text: '알림 소리를 재생했어요. (macOS 에서만 들립니다)' }
+        return { text: '알림 소리를 재생했어요. 음성은 macOS 에서만, chime 은 Windows(PowerShell)·Linux(paplay 또는 aplay)에서도 들립니다.' }
       }
       const off = rest[0] === 'off'
       await $.store.set(SOUND_KEY, off)
@@ -960,6 +1005,12 @@ export const register: Register = (on, options) => {
     }
     const minutesOf = (b: Beat) => <Text color={pal.ask}>{cacheMinutes(cacheLeft(b.cacheAt, now)!)}</Text>
 
+    // 띠 칸의 알약 막대. 결정·실패는 secondOf 가 먼저 글로 보이므로 여기는 작업·끝남만. 좁으면 null (경로선으로)
+    const pillBarOf = (b: Beat, width: number) => {
+      const pb = pillBar(b.tasks, width - 8, 'run', turnTook(b.timeline))
+      return pb ? pillOf(Text, pb) : null
+    }
+
     // filled: 칸이 노랗게 칠해졌는지 (HUD 칸). 혼자 띠는 바탕이 칠해지지 않아 질문을 노란 글자로 쓴다
     const secondOf = (b: Beat, width: number, filled = true) => {
       const hot = b.state === 'asking' && !isStale(b, now)
@@ -970,7 +1021,7 @@ export const register: Register = (on, options) => {
         : bad
           ? <Text color={pal.bad} wrap="truncate-end">{signLine(b.fail!.signs[0] ?? b.fail!.key)}</Text>
         : total
-          ? (
+          ? pillBarOf(b, width) ?? (
               <Text wrap="truncate-end">
                 {routeLine(b.tasks, Math.max(8, width - 8)).map(sg => <Text color={SEG[sg.tone]}>{sg.text}</Text>)}
                 <Text color={pal.text}>{` ${done}/${total}`}</Text>
@@ -1046,7 +1097,7 @@ export const register: Register = (on, options) => {
                 {badgeOf(b)}
                 {cool ? minutesOf(b) : null}
               </Box>
-              <Box flexShrink={1}>{secondOf(b, Math.min(40, slotW - 40), false)}</Box>
+              <Box flexShrink={1}>{secondOf(b, Math.min(64, slotW - 40), false)}</Box>
             </Box>
             <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
           </Box>
@@ -1059,6 +1110,17 @@ export const register: Register = (on, options) => {
         {hud}
       </Box>
     )
+  })
+
+  // 턴이 도는 동안 프롬프트 위 Spinner 줄에 지금 단계 (T24): `2/5 테스트 실행…` (지금 단계의 순번/전체). 경과·토큰은 엔진이 그대로 붙인다.
+  // 엔진이 자기 상태 문구(message)를 띄운 동안은 두고, 계획이 없거나 지금 단계가 없으면 손대지 않는다.
+  // work-plan atom 을 읽어 보고가 오면 바로 다시 그린다 (할 일 도구로 만든 목록이면 세션 상태의 것).
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    if (e.props.message !== null) return next(e)
+    const tasks = tasksFromPlan(await read($, workPlan), false)?.tasks ?? self.beat?.tasks ?? []
+    const { total, current } = progress(tasks)
+    if (!current) return next(e)
+    return next({ ...e, props: { ...e.props, message: `${tasks.indexOf(current) + 1}/${total} ${current.subject}` } })
   })
 
   // /board 패널: 전체 보기 또는 한 세션 자세히
@@ -1132,6 +1194,10 @@ export const register: Register = (on, options) => {
     const progressRow = (b: Beat) => {
       const { done, total, current } = progress(b.tasks)
       if (!total) return null
+      const stale = isStale(b, now)
+      const tone: PillTone = b.state === 'asking' && !stale ? 'ask' : b.fail?.level === 'high' && !stale ? 'err' : 'run'
+      const pb = pillBar(b.tasks, Math.min(46, rightWidth - 6 - 6), tone, turnTook(b.timeline))
+      if (pb) return row('진행', pillOf(Text, pb))
       const segs = routeLine(b.tasks, Math.min(34, Math.max(10, rightWidth - 6 - 6)))
       return row(
         '진행',
@@ -1200,7 +1266,7 @@ export const register: Register = (on, options) => {
               {titleRow(b)}
               {second}
               {progressRow(b) ?? (b.prompt && !showsPrompt ? row('요청', <Text color={pal.dim} wrap="truncate-end">{b.prompt}</Text>) : null)}
-              {b.agents.length ? row('보조', <Text color={agentCounts(b.agents).working ? pal.work : pal.dim} wrap="truncate-end">{agentSummary(b.agents)}</Text>) : null}
+              {agentStrips(b.agents, now).map((r, i) => row(i === 0 ? '보조' : '', stripOf(Text, r), `strip-${b.id}-${i}`))}
             </Box>
           </Box>
         </Box>

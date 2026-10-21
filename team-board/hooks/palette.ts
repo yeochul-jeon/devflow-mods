@@ -82,3 +82,12 @@ export function contextTone(pct: number | null, pal: Palette): string {
   if (pct === null) return pal.dim
   return pct >= 80 ? pal.bad : pct >= 50 ? pal.ask : pal.ok
 }
+
+/** 두 #rrggbb 를 섞는다 (t = to 쪽 비율). 어느 하나라도 이름 색(theme 팔레트)이면 from 그대로. */
+export function mix(from: string, to: string, t: number): string {
+  const rgb = (c: string) => (/^#[0-9a-f]{6}$/i.test(c) ? [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)) : null)
+  const a = rgb(from)
+  const b = rgb(to)
+  if (!a || !b) return from
+  return '#' + a.map((v, i) => Math.round(v + (b[i]! - v) * t).toString(16).padStart(2, '0')).join('')
+}

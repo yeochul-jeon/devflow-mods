@@ -1,6 +1,6 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
 import type { Beat, Decision, Event, ExplainKind, RecentLine, SubAgent, Task, WorkPlan } from '../types'
-import { cells, EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
+import { cells, clip, EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 import { bar } from './palette'
 
@@ -458,6 +458,67 @@ export function routeLine(tasks: readonly Task[], width: number): Seg[] {
   return out
 }
 
+/**
+ * 알약 막대 (T24 B안, plan-progress 의 막대를 글자로):  ████████ 테스트 실행 ···│···│···
+ * 채움(█) 끝에 지금 단계 이름 알약이 붙고, 남은 구간은 · 와 단계 경계 눈금 │ 로 그린다.
+ * 알약 글은 상태로 정한다: 작업 = 지금 단계, 결정 = ? 단계, 실패 = ✕ 단계, 끝남 = ✓ 걸린 시간(없으면 도착).
+ * 폭 1 BMP 문자만 쓴다. width 는 채움 + 알약 + 남은 구간의 칸 수. 너무 좁으면 null (부르는 쪽이 경로선으로).
+ */
+export type PillTone = 'run' | 'ask' | 'err' | 'ok'
+export type PillBar = { fill: string; pill: string; rest: string; pct: number; tone: PillTone }
+
+export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, took = ''): PillBar | null {
+  const { done, total, current } = progress(tasks)
+  if (total === 0 || width < 12) return null
+  const allDone = done === total
+  const tn: PillTone = allDone && tone === 'run' ? 'ok' : tone
+  const step = current ?? tasks.find(t => t.status !== 'completed')
+  const label = tn === 'ok' ? `✓ ${took || '도착'}` : `${tn === 'ask' ? '? ' : tn === 'err' ? '✕ ' : ''}${step?.subject ?? ''}`
+  const pill = ` ${clip(label, Math.max(4, Math.floor(width / 2) - 2))} `
+  const room = Math.max(0, width - cells(pill))
+  const filled = tn === 'ok' ? room : Math.min(room, Math.round((done / total) * room))
+  const ticks = new Set(Array.from({ length: total - 1 }, (_, k) => Math.round(((k + 1) * room) / total)))
+  let rest = ''
+  for (let i = filled; i < room; i++) rest += ticks.has(i) && i > filled ? '│' : '·'
+  return { fill: '█'.repeat(filled), pill, rest, pct: Math.round((done / total) * 100), tone: tn }
+}
+
+/** 마지막 요청에서 턴 끝까지 걸린 시간 (흐름의 prompt → done). 끝나지 않았으면 '' */
+export function turnTook(timeline: readonly Event[]): string {
+  const doneAt = [...timeline].reverse().find(e => e.kind === 'done')?.at
+  const promptAt = [...timeline].reverse().find(e => e.kind === 'prompt' && (doneAt === undefined || e.at <= doneAt))?.at
+  if (doneAt === undefined || promptAt === undefined) return ''
+  return took(doneAt - promptAt)
+}
+
+/** 걸린 시간: 12초, 3분 12초 */
+export function took(ms: number): string {
+  const sec = Math.max(0, Math.round(ms / 1000))
+  return sec < 60 ? `${sec}초` : `${Math.floor(sec / 60)}분 ${sec % 60}초`
+}
+
+/**
+ * 막대 아래 보조 에이전트 줄 (T24 B안): 도는 것 먼저, 그다음 최근에 끝난 것. max 줄을 넘으면 마지막 줄을 "+k" 요약으로.
+ * 시간은 도는 동안 지금까지, 끝났으면 걸린 시간. 모델은 짧게 (claude-haiku-5-5 → haiku 5.5): 좁은 창에서 도구·시간이 잘리지 않게.
+ */
+export type Strip = { n: number; label: string; model: string; tool: string; time: string; status: SubAgent['status'] } | { more: number; done: number }
+
+export function agentStrips(list: readonly SubAgent[], now: number, max = 3): Strip[] {
+  const order = list.map((a, i) => ({ a, n: i + 1 }))
+  order.sort((x, y) => (x.a.status === 'working' ? 0 : 1) - (y.a.status === 'working' ? 0 : 1) || (y.a.endedAt ?? 0) - (x.a.endedAt ?? 0))
+  const fits = order.length <= max ? order : order.slice(0, max - 1)
+  const rows: Strip[] = fits.map(({ a, n }) => ({
+    n,
+    label: a.desc || a.type || '에이전트',
+    model: a.model.replace(/^claude-([a-z]+)-(\d+)-(\d+).*$/, '$1 $2.$3'),
+    tool: a.status === 'working' ? a.tool : a.status === 'failed' ? '실패' : '',
+    time: took((a.endedAt ?? now) - a.startedAt),
+    status: a.status,
+  }))
+  const rest = order.slice(fits.length)
+  return rest.length ? [...rows, { more: rest.length, done: rest.filter(r => r.a.status !== 'working').length }] : rows
+}
+
 /** 같은 이름의 세션이 여럿이면 화면용 이름 뒤에 ·2, ·3 을 붙인다 (기록은 그대로). */
 export function dedupeNames<T extends { id: string; name: string }>(list: readonly T[]): T[] {
   const groups = new Map<string, T[]>()
@@ -670,4 +731,28 @@ export function headParts(
 /** STE 선택지 이름 칸(가장 긴 이름 + 7)이 상자 안쪽 폭의 40% 를 넘으면 이름을 위에, 글을 아래에 쓴다 */
 export function steStacked(labelW: number, artW: number): boolean {
   return labelW + 7 > artW * 0.4
+}
+
+/**
+ * 알림 chime 을 어디서 어떻게 울릴지 (T24, 모든 터미널). macOS 는 엔진 플레이어($.audio.play, afplay).
+ * 엔진 플레이어는 Linux·Windows 터미널에서 소리 없이 끝나므로 그 둘은 시스템 명령으로 튼다.
+ * Windows 는 plugin 폴더가 드라이브 문자로 시작하는 것으로, 나머지는 uname -s 로 가른다.
+ */
+export type SoundOs = 'mac' | 'windows' | 'linux'
+
+export function soundOs(root: string, uname: string): SoundOs {
+  if (/^[A-Za-z]:/.test(root)) return 'windows'
+  return /darwin/i.test(uname) ? 'mac' : 'linux'
+}
+
+/** 시스템 명령 후보: 앞에서부터 하나가 exit 0 이면 끝. 경로는 환경 변수로 넘긴다 (경로 속 따옴표가 명령을 끊지 않게). */
+export function soundCommands(os: SoundOs, file: string): { argv: string[]; env?: Record<string, string> }[] {
+  if (os === 'windows') {
+    return [{
+      argv: ['powershell', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '(New-Object Media.SoundPlayer $env:TEAM_BOARD_WAV).PlaySync()'],
+      env: { TEAM_BOARD_WAV: file.replace(/\//g, '\\') },
+    }]
+  }
+  if (os === 'linux') return [{ argv: ['paplay', file] }, { argv: ['aplay', '-q', file] }]
+  return []
 }

@@ -1,6 +1,12 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import {
+  agentStrips,
+  soundCommands,
+  soundOs,
+  pillBar,
+  took,
+  turnTook,
   agentClearEnded,
   agentEnd,
   agentGone,
@@ -153,6 +159,115 @@ describe('경로선과 픽셀', () => {
     expect([r.columns, r.rows]).toEqual([6, 3])
     const bytes = Uint8Array.from(atob(r.cells), c => c.charCodeAt(0))
     expect(bytes.length).toBe(6 * 3 * 3 * 4)
+  })
+})
+
+describe('알약 막대 (T24 B안)', () => {
+  const t = (status: string, i: number, subject = 's' + i) => ({ id: String(i), subject, status }) as any
+  const five = (doneN: number) => Array.from({ length: 5 }, (_, i) => t(i < doneN ? 'completed' : i === doneN ? 'in_progress' : 'pending', i, i === doneN ? '테스트 실행' : 's' + i))
+  const line = (b: any) => b.fill + b.pill + b.rest
+
+  test('채움 끝에 지금 단계 알약, 남은 구간은 · 와 눈금 │, 폭을 넘지 않는다', async () => {
+    const b = pillBar(five(2), 40, 'run')!
+    expect(b.pill).toBe(' 테스트 실행 ')
+    expect(b.pct).toBe(40)
+    expect(b.tone).toBe('run')
+    expect(b.fill).toMatch(/^█+$/)
+    expect(b.rest).toMatch(/^[·│]+$/)
+    expect(b.rest).toContain('│')
+    expect(cells(line(b))).toBe(40)
+    // 채움 비율은 알약을 뺀 칸 기준
+    expect(b.fill.length).toBe(Math.round(0.4 * (40 - cells(b.pill))))
+  })
+
+  test('상태별 알약 글: 결정 ?, 실패 ✕, 다 끝나면 ✓ 걸린 시간(없으면 도착)', async () => {
+    expect(pillBar(five(1), 40, 'ask')!.pill).toBe(' ? 테스트 실행 ')
+    expect(pillBar(five(1), 40, 'err')!.pill).toBe(' ✕ 테스트 실행 ')
+    const all = five(5)
+    const ok = pillBar(all, 40, 'run', '3분 12초')!
+    expect(ok.tone).toBe('ok')
+    expect(ok.pill).toBe(' ✓ 3분 12초 ')
+    expect(ok.rest).toBe('')
+    expect(ok.pct).toBe(100)
+    expect(pillBar(all, 40, 'run')!.pill).toBe(' ✓ 도착 ')
+  })
+
+  test('doing 이 없으면 첫 남은 단계를 알약에, 긴 제목은 폭의 절반으로 자른다, 좁거나 빈 목록은 null', async () => {
+    expect(pillBar([t('completed', 1), t('pending', 2, '배포')], 30, 'run')!.pill).toBe(' 배포 ')
+    const long = pillBar([t('in_progress', 1, '아주 긴 단계 이름이 여기 들어갑니다 정말로 깁니다')], 30, 'run')!
+    expect(cells(long.pill)).toBeLessThanOrEqual(15)
+    expect(long.pill).toContain('…')
+    expect(cells(line(long))).toBe(30)
+    expect(pillBar([], 40, 'run')).toBeNull()
+    expect(pillBar(five(1), 11, 'run')).toBeNull()
+  })
+
+  test('걸린 시간: 마지막 요청에서 턴 끝까지, 끝나지 않았으면 빈 글', async () => {
+    expect(took(12_400)).toBe('12초')
+    expect(took(192_000)).toBe('3분 12초')
+    const ev = (kind: string, at: number) => ({ kind, at, text: '' }) as any
+    expect(turnTook([ev('prompt', NOW), ev('done', NOW + 192_000)])).toBe('3분 12초')
+    expect(turnTook([ev('prompt', NOW), ev('done', NOW + 5_000), ev('prompt', NOW + 9_000)])).toBe('5초')
+    expect(turnTook([ev('prompt', NOW)])).toBe('')
+  })
+
+  test('보조 줄: 도는 것 먼저, 넘치면 마지막 줄을 +k 요약으로', async () => {
+    const a = (id: string, status: string, startedAt: number, endedAt: number | null, tool = '') => ({ id, desc: 'd' + id, type: 'Explore', model: 'haiku', status, tool, startedAt, endedAt, tokens: 0 }) as any
+    const list = [a('1', 'done', NOW, NOW + 6_000), a('2', 'working', NOW, null, 'Grep'), a('3', 'failed', NOW, NOW + 3_000), a('4', 'done', NOW, NOW + 4_000)]
+    const rows = agentStrips(list, NOW + 12_000)
+    expect(rows[0]).toEqual({ n: 2, label: 'd2', model: 'haiku', tool: 'Grep', time: '12초', status: 'working' })
+    expect(rows[1]).toMatchObject({ n: 1, time: '6초', tool: '' })
+    expect(rows[2]).toEqual({ more: 2, done: 2 })
+    expect(agentStrips(list.slice(0, 3), NOW + 12_000)).toHaveLength(3)
+    expect(agentStrips(list.slice(0, 3), NOW + 12_000)[2]).toMatchObject({ n: 3, tool: '실패' })
+  })
+})
+
+describe('알림 소리 (T24, 모든 터미널)', () => {
+  test('어디서 울릴지: 드라이브 문자면 Windows, uname 이 Darwin 이면 macOS, 나머지는 Linux', async () => {
+    expect(soundOs('C:\\Users\\me\\.claude\\plugins\\team-board', '')).toBe('windows')
+    expect(soundOs('/Users/me/.claude/plugins/team-board', 'Darwin\n')).toBe('mac')
+    expect(soundOs('/home/me/.claude/plugins/team-board', 'Linux\n')).toBe('linux')
+  })
+  test('명령 후보: macOS 는 없음(엔진 플레이어), Linux 는 paplay → aplay, Windows 는 경로를 환경 변수로 PowerShell 에', async () => {
+    expect(soundCommands('mac', '/r/sounds/chime.wav')).toEqual([])
+    expect(soundCommands('linux', '/r/sounds/chime.wav').map(c => c.argv)).toEqual([['paplay', '/r/sounds/chime.wav'], ['aplay', '-q', '/r/sounds/chime.wav']])
+    const [win] = soundCommands('windows', "C:/Users/O'Brien/team-board/sounds/chime.wav")
+    expect(win!.argv[0]).toBe('powershell')
+    expect(win!.argv.join(' ')).not.toContain("O'Brien")
+    expect(win!.env).toEqual({ TEAM_BOARD_WAV: "C:\\Users\\O'Brien\\team-board\\sounds\\chime.wav" })
+  })
+  test('Linux: /board sound test 는 paplay 가 안 되면 aplay 로, 음성은 내지 않는다', async ($, on) => {
+    const runs: string[][] = []
+    let spoke = 0
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.cwd', () => ({ value: '/repo/a' }))
+    on('session.repo', () => ({ value: { root: '/repo/a', remote: null, internal: false, name: 'a' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', () => ({ value: undefined }))
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', () => ({ value: '' }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('process.run', ($, e: any) => {
+      runs.push(e.argv)
+      return { value: { stdout: e.argv[0] === 'uname' ? 'Linux\n' : '', stderr: '', exitCode: e.argv[0] === 'aplay' ? 0 : 1, isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    on('audio.play', () => ({ value: undefined }))
+    on('audio.speak', () => { spoke += 1; return { value: { via: 'system' as const } } })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/a' } as any)
+    runs.length = 0
+    await $.command.run({ command: 'board', args: 'sound test' } as any)
+    expect(runs.map(a => a[0])).toEqual(['uname', 'paplay', 'aplay'])
+    expect(runs[1]![1]).toMatch(/\/sounds\/chime\.wav$/)
+    expect(spoke).toBe(0)
+    // 두 번째부터는 uname 을 다시 묻지 않는다
+    runs.length = 0
+    await $.command.run({ command: 'board', args: 'sound test' } as any)
+    expect(runs.map(a => a[0])).toEqual(['paplay', 'aplay'])
   })
 })
 
@@ -1061,7 +1176,7 @@ describe('팀 상황판', () => {
     let greps = 0
     on('process.run', ($, e: any) => {
       if (e.argv[0] === 'grep') greps += 1
-      return { value: { stdout: e.argv[0] === 'grep' ? titleLine : '', stderr: '', exitCode: e.argv[0] === 'grep' && titleLine ? 0 : 1, isStdoutTruncated: false, isStderrTruncated: false } }
+      return { value: { stdout: e.argv[0] === 'grep' ? titleLine : e.argv[0] === 'uname' ? 'Darwin\n' : '', stderr: '', exitCode: e.argv[0] === 'grep' && titleLine ? 0 : 1, isStdoutTruncated: false, isStderrTruncated: false } }
     })
     on('command.run', { command: 'rename' }, () => ({ text: 'renamed' }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
@@ -1259,10 +1374,11 @@ describe('팀 상황판', () => {
     let pane = await $.ui.mount(PANE)
     expect(await pane.find({ type: 'Text', text: /결정 대기 1/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /→ 예, release 만/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeDefined() // 경로선: 끝낸 할 일
-    expect(await pane.find({ type: 'Text', text: /^━+$/ })).toBeDefined() // 지나온 길
+    // 알약 막대 (T24 B안): 채움 끝에 결정을 기다리는 지금 단계, 남은 구간, %
+    expect((await pane.find({ type: 'Text', text: /^ \? PR38 래퍼 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
+    expect(await pane.find({ type: 'Text', text: /^█+$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^  50%$/ })).toBeDefined()
     expect(await pane.find({ type: 'Raster' })).toBeDefined() // 픽셀 아이콘
-    expect(await pane.find({ type: 'Text', text: /^◉$/ })).toBeDefined() // 지금 위치
     expect(await pane.find({ type: 'Text', text: /PR38 래퍼/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /결정을 기다려요/ })).toBeDefined() // 주의 띠
     // 질문 줄과 탭 줄 사이 흐린 가로줄 (카드 테두리 노랑과 겹치지 않게 흐린 색)
@@ -1564,13 +1680,15 @@ describe('work-plan 연동', () => {
     on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
-    on('fs.list', () => ({ value: [] }))
+    on('fs.list', () => ({ value: [...files.keys()].map(p => ({ kind: 'file' as const, name: p.split('/').pop()!, mtimeMs: NOW, size: 0, isLink: false })) }))
     on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
     on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('turn.complete', () => ({ text: '' }))
     on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
     on('tool.call', () => ({ result: 'ok: 3 steps', text: 'ok' }) as any)
+    on('ui.render', { component: 'Spinner' }, ($, e: any) => ({ type: 'Text', props: {}, children: [e.props.message ?? e.props.word] }) as any)
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: '' }))
 
     const plan = (steps: [string, string][], over: Record<string, unknown> = {}) => ({
       v: 1, steps: steps.map(([title, status]) => ({ title, status })), updatedAt: NOW, stale: false, ended: null, ...over,
@@ -1595,6 +1713,18 @@ describe('work-plan 연동', () => {
     expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
     expect(mine().step).toBe('할 일: 테스트 쓰기')
 
+    // Spinner 줄 (T24): 지금 단계로 글을 바꾼다. 엔진이 자기 문구를 띄운 동안은 두고, 지금 단계가 없으면 두지 않는다
+    const SPIN = { plugin: 'team-board', surface: 'terminal', component: 'Spinner' } as any
+    const spinProps = { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' }
+    expect(await (await $.ui.mount({ ...SPIN, props: spinProps })).find({ type: 'Text', text: '2/3 테스트 쓰기' })).toBeDefined() // 지금 단계의 순번/전체
+    expect(await (await $.ui.mount({ ...SPIN, props: { ...spinProps, message: 'Waiting for permission' } })).find({ type: 'Text', text: /2\/3/ })).toBeUndefined()
+    // 혼자 띠: 알약 막대에 지금 단계와 %
+    const solo = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
+    expect((await solo.find({ type: 'Text', text: /^ 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').work)
+    expect(await solo.find({ type: 'Text', text: /^  33%$/ })).toBeDefined()
+    // 섞은 색이라 흐린 글자 표시는 없다 (theme 팔레트만 dimColor)
+    expect((await solo.find({ type: 'Text', text: /^█+$/ }))?.props.dimColor).toBe(false)
+
     // 모르는 모양은 무시
     await setPlan({ ...plan(STEPS), v: 2, steps: [] })
     await flush()
@@ -1615,6 +1745,36 @@ describe('work-plan 연동', () => {
     await flush()
     expect(mine().state).toBe('idle')
     expect(statuses()).toEqual(['completed', 'completed', 'completed'])
+  })
+})
+
+describe('알약 막대 팔레트 (T24)', () => {
+  test('theme 팔레트(이름 색)는 채움을 흐린 글자로, 알약은 상태색 바탕', { plugins: [WORK_PLAN], options: { palette: 'theme' } }, async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/a' }))
+    on('session.repo', () => ({ value: { root: '/repo/a', remote: null, internal: false, name: 'a' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [...files.keys()].map(p => ({ kind: 'file' as const, name: p.split('/').pop()!, mtimeMs: NOW, size: 0, isLink: false })) }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('tool.call', () => ({ result: 'ok', text: 'ok' }) as any)
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: '' }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/a' } as any)
+    await $.turn.start({ text: 'x', turnId: 't1' } as any)
+    await $.tool.call({ tool: 'SetPlan', plan: { v: 1, steps: [{ title: 'a', status: 'done' }, { title: '테스트 쓰기', status: 'doing' }, { title: 'c', status: 'todo' }], updatedAt: NOW, stale: false, ended: null }, tool_use_id: 'sp' } as any)
+    await clock.advance(3_000)
+    const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
+    expect((await band.find({ type: 'Text', text: /^█+$/ }))?.props).toMatchObject({ color: 'suggestion', dimColor: true })
+    expect((await band.find({ type: 'Text', text: /^ 테스트 쓰기 $/ }))?.props.backgroundColor).toBe('suggestion')
   })
 })
 
@@ -1745,7 +1905,12 @@ describe('보조 에이전트 (hook)', () => {
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
     expect(await pane.find({ type: 'Text', text: /^보조$/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /● 1 작업 · Explore: / })).toBeDefined()
+    // 보조 줄 (T24 B안): 번호, 설명, 모델, 지금 도구, 시간
+    expect(await pane.find({ type: 'Text', text: /^↳ 1 $/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^G4 표본 고르기$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ \(haiku 5\.5\)$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^  .*flowArt/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^  3초$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /● 보조 1/ })).toBeDefined()
     // 메인 턴은 끝났어도 보조가 돌면 대기가 아니라 보조 기다림
     expect(await pane.find({ type: 'Text', text: /^◐ 보조 기다림 1$/ })).toBeDefined()
