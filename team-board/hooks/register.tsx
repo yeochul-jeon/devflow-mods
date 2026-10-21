@@ -1066,7 +1066,7 @@ export const register: Register = (on, options) => {
             {helpers ? <Text color={pal.work} bold>{`보조 ${helpers}`}</Text> : null}
             {sum.total ? (
               <Text>
-                <Text color={pal.ok}>{bar(sum.done, sum.total, 8)}</Text>
+                <Text color={asking ? pal.ask : pal.ok}>{bar(sum.done, sum.total, 8)}</Text>
                 <Text color={pal.text}>{` ${sum.done}/${sum.total}`}</Text>
               </Text>
             ) : null}
@@ -1650,7 +1650,7 @@ export const register: Register = (on, options) => {
           {sum.total ? (
             <Text>
               <Text color={pal.dim}>전체 </Text>
-              <Text color={pal.ok}>{bar(sum.done, sum.total, cells)}</Text>
+              <Text color={count('asking') ? pal.ask : pal.ok}>{bar(sum.done, sum.total, cells)}</Text>
               <Text color={pal.text}>{` ${sum.done}/${sum.total}`}</Text>
             </Text>
           ) : null}

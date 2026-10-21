@@ -190,6 +190,11 @@ describe('알약 막대 (T24 B안)', () => {
     expect(ok.rest).toBe('')
     expect(ok.pct).toBe(100)
     expect(pillBar(all, 40, 'run')!.pill).toBe(' ✓ 도착 ')
+    // 다 끝난 계획의 결정 대기는 초록 ✓ 가 아니라 노란 '질문 대기' (일을 멈추고 묻는 세션과 구별)
+    const asked = pillBar(all, 40, 'ask', '3분 12초')!
+    expect(asked.tone).toBe('ask')
+    expect(asked.pill).toBe(' ? 질문 대기 ')
+    expect(asked.pct).toBe(100)
   })
 
   test('doing 이 없으면 첫 남은 단계를 알약에, 긴 제목은 폭의 절반으로 자른다, 좁거나 빈 목록은 null', async () => {
@@ -1338,6 +1343,8 @@ describe('팀 상황판', () => {
     // 기본은 HUD 창: 머리줄 + 세션 칸
     expect(await band.find({ type: 'Text', text: /◆ TEAM 2/ })).toBeDefined()
     expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
+    // 결정 대기 세션이 있으면 머리줄 전체 막대는 노랑 (질문으로 끝난 턴도 단계는 완료로 세기 때문)
+    expect((await band.find({ type: 'Text', text: /^[▰▱]{8}$/ }))?.props.color).toBe(paletteOf('night').ask)
     // 결정 대기 칸: 칸이 노랗게 칠해져 있어 배지는 반전색. 이름 앞 표시(⚑)는 배지로 바뀌었다
     const askBadge = await band.find({ type: 'Text', text: /^ 결정 $/ })
     expect(askBadge?.props).toMatchObject({ color: paletteOf('night').ask, backgroundColor: paletteOf('night').onBadge })
@@ -1372,6 +1379,7 @@ describe('팀 상황판', () => {
     const PANE = { plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any
     let pane = await $.ui.mount(PANE)
     expect(await pane.find({ type: 'Text', text: /결정 대기 1/ })).toBeDefined()
+    expect((await pane.find({ type: 'Text', text: /^[▰▱]+$/ }))?.props.color).toBe(paletteOf('night').ask)
     expect(await pane.find({ type: 'Text', text: /→ 예, release 만/ })).toBeDefined()
     // 알약 막대 (T24 B안): 채움 끝에 결정을 기다리는 지금 단계, 남은 구간, %
     expect((await pane.find({ type: 'Text', text: /^ \? PR38 래퍼 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)

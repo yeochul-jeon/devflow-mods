@@ -474,7 +474,8 @@ export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, t
   const allDone = done === total
   const tn: PillTone = allDone && tone === 'run' ? 'ok' : tone
   const step = current ?? tasks.find(t => t.status !== 'completed')
-  const label = tn === 'ok' ? `✓ ${took || '도착'}` : `${tn === 'ask' ? '? ' : tn === 'err' ? '✕ ' : ''}${step?.subject ?? ''}`
+  // 다 끝난 계획의 결정 대기는 단계 이름 대신 '질문 대기': 초록 ✓ 로 그리면 일을 멈추고 묻는 세션과 구별되지 않는다
+  const label = tn === 'ok' ? `✓ ${took || '도착'}` : `${tn === 'ask' ? '? ' : tn === 'err' ? '✕ ' : ''}${step?.subject ?? (tn === 'ask' ? '질문 대기' : '')}`
   const pill = ` ${clip(label, Math.max(4, Math.floor(width / 2) - 2))} `
   const room = Math.max(0, width - cells(pill))
   const filled = tn === 'ok' ? room : Math.min(room, Math.round((done / total) * room))
