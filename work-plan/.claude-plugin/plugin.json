@@ -1,7 +1,7 @@
 {
   "name": "work-plan",
   "displayName": "Work Plan",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "모델이 여러 단계 작업의 계획과 진행을 plan_update 도구로 보고: 화면 표시는 team-board 진행 줄 (규칙은 대화 첫 프롬프트에 한 번)",
   "author": {
     "name": "yeochul-jeon",

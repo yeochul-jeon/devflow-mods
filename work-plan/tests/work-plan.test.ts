@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { contextFor, emptyPlan, GATE_DENY, GATE_RULE, isOpen, MAX_STEPS, normalizeSteps, NUDGE, NUDGE_AFTER, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
+import { contextFor, emptyPlan, FIRST_NUDGE, FIRST_NUDGE_AFTER, GATE_DENY, GATE_RULE, isOpen, MAX_STEPS, normalizeSteps, NUDGE, NUDGE_AFTER, RULE, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from '../hooks/plan'
 
 const NOW = 1_800_000_000_000
 
@@ -310,6 +310,44 @@ describe('work-plan 갱신 알림 (hook)', () => {
     await report($, STEPS)
     await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: false, turnId: 't' } as any)
     expect(await nudgedAt($, ['Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+  })
+
+  test('계획 없이 작업 도구 3번째에 첫 보고 알림을 턴마다 한 번', async ($, on) => {
+    engine(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    const firstAt = async (tools: string[], agentId?: string) => {
+      const hits: number[] = []
+      for (const [i, t] of tools.entries()) if (((await call($, t, agentId)) as any).context?.includes(FIRST_NUDGE)) hits.push(i + 1)
+      return hits
+    }
+    expect(FIRST_NUDGE_AFTER).toBe(3)
+
+    // Read 와 서브에이전트 호출은 세지 않는다. 한 턴에 한 번만
+    expect(await firstAt(['Bash', 'Read'])).toEqual([])
+    expect(await firstAt(['Bash', 'Bash', 'Bash'], 'sub-1')).toEqual([])
+    expect(await firstAt(['Edit', 'Bash', 'Bash', 'Bash', 'Bash', 'Bash'])).toEqual([2])
+
+    // 턴이 끝나면 다시 센다
+    await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: false, turnId: 't0' } as any)
+    expect(await firstAt(['Bash', 'Bash', 'Bash'])).toEqual([3])
+
+    // 끝난 계획이 남아 있어도(ended) 계획 없음으로 본다
+    await report($, STEPS)
+    await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: false, turnId: 't' } as any)
+    expect(await firstAt(['Bash', 'Bash', 'Bash'])).toEqual([3])
+
+    // 보고하면 셈이 0. 이번 턴 계획이 모두 끝난 뒤의 호출에는 붙지 않는다
+    await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: false, turnId: 't2' } as any)
+    expect(await firstAt(['Bash', 'Bash'])).toEqual([])
+    await report($, [{ title: 'a', status: 'done' }])
+    expect(await firstAt(['Bash', 'Bash', 'Bash', 'Bash'])).toEqual([])
+
+    // 결과는 그대로 두고 context 만 더한다
+    await $.turn.complete({ reason: 'answer', answer: '끝', durationMs: 1, isAborted: false, turnId: 't3' } as any)
+    await firstAt(['Bash', 'Bash'])
+    const r: any = await call($, 'Edit')
+    expect(r.result).toBe('Edit ok')
+    expect(r.context).toEqual([FIRST_NUDGE])
   })
 
   test('게이트가 거부한 호출은 세지 않는다', { options: { planGate: true } }, async ($, on) => {

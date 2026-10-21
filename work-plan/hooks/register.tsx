@@ -4,7 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { WorkPlan } from '../types'
-import { contextFor, emptyPlan, GATE_DENY, GATE_OPEN_AFTER, GATED_TOOLS, isOpen, normalizeSteps, NUDGE, NUDGE_AFTER, NUDGE_TOOLS, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from './plan'
+import { contextFor, emptyPlan, FIRST_NUDGE, FIRST_NUDGE_AFTER, GATE_DENY, GATE_OPEN_AFTER, GATED_TOOLS, isOpen, normalizeSteps, NUDGE, NUDGE_AFTER, NUDGE_TOOLS, TOOL_DESCRIPTION, withEnded, withStale, withSteps } from './plan'
 
 const TOOL = 'mcp__work-plan__plan_update'
 const plan = atom({ plugin: 'work-plan', key: 'plan' } as const, emptyPlan(0) as WorkPlan)
@@ -18,6 +18,8 @@ let gateTurn = { planned: false, denied: 0 }
 
 // 갱신 알림: 메인 루프가 마지막 plan_update 뒤 작업 도구를 몇 번 썼나
 let sinceReport = 0
+// 첫 보고 알림: 이번 메인 턴에 열린 계획 없이 작업 도구를 몇 번 썼나. 메인 turn.complete 와 plan_update 에서 0
+let unplanned = 0
 
 export const register: Register = (on, options) => {
   const gate = options.planGate === true
@@ -63,6 +65,7 @@ export const register: Register = (on, options) => {
     if (!e.agentId) {
       if (steps.length > 0) gateTurn.planned = true
       sinceReport = 0
+      unplanned = 0
       const now = await $.clock.now()
       await update($, plan, p => withSteps(p, steps, now))
     }
@@ -73,6 +76,7 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
     if (!e.agentId) {
+      unplanned = 0
       const p = await read($, plan)
       if (p.steps.length > 0) {
         const now = await $.clock.now()
@@ -98,19 +102,25 @@ export const register: Register = (on, options) => {
       const now = await $.clock.now()
       await update($, plan, () => emptyPlan(now))
       pending = 'start'
+      unplanned = 0
     }
     return next(e)
   })
 
   // 갱신 알림: 계획이 열린 동안 보고 없이 작업 도구가 NUDGE_AFTER 번 지나면 그 결과에 한 줄. 거부된 호출은 세지 않는다.
+  // 계획이 없으면 이번 턴 FIRST_NUDGE_AFTER 번째에 한 번만 첫 보고를 권한다.
   // matcher 없는 tool.call 은 한 번만 달 수 있어(게이트가 쓴다) 도구 목록 matcher 로 단다.
   on('tool.call', { tool: NUDGE_TOOLS }, async ($, e, next) => {
     if (e.agentId) return next(e)
     const r = await next(e)
     if (r.deny !== undefined) return r
-    if (!isOpen(await read($, plan))) {
+    const p = await read($, plan)
+    if (!isOpen(p)) {
       sinceReport = 0
-      return r
+      // 이번 턴에 보고한 계획이 모두 끝난 뒤의 호출은 세지 않는다
+      if (p.steps.length > 0 && p.ended === null) return r
+      unplanned += 1
+      return unplanned === FIRST_NUDGE_AFTER ? { ...r, context: [...(r.context ?? []), FIRST_NUDGE] } : r
     }
     sinceReport += 1
     if (sinceReport < NUDGE_AFTER) return r

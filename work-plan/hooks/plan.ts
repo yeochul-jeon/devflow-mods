@@ -79,6 +79,11 @@ export const NUDGE_AFTER = 5
 
 export const NUDGE = `work-plan: ${NUDGE_AFTER} work calls since your last plan_update. If a step finished, send plan_update (that step done, the next doing) with your next work tool call.`
 
+// 첫 보고 알림: 계획 없이 작업 도구가 이만큼 지나면 그 턴에 한 번. 실측(T24 재시험): 조사 Bash 6번(47초) 뒤에야 첫 보고가 와 그동안 진행 줄이 비었다.
+export const FIRST_NUDGE_AFTER = 3
+
+export const FIRST_NUDGE = `work-plan: ${FIRST_NUDGE_AFTER} work calls in this turn and no plan_update yet. If this task has two or more steps, send plan_update with your next work tool call.`
+
 /** 알림을 셀 계획인가: 보고된 단계가 있고, 턴이 아직 안 끝났고, 남은 단계가 있다. */
 export function isOpen(plan: WorkPlan): boolean {
   return plan.steps.length > 0 && plan.ended === null && plan.steps.some(s => s.status !== 'done')
