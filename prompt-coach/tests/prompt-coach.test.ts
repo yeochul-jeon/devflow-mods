@@ -478,6 +478,23 @@ describe('prompt-coach 흐름', () => {
     await p.unmount()
   })
 
+  test('/coach view: 끄기를 누르면 설정과 띠 모두 꺼진다', async ($, on) => {
+    $pane = $.ui
+    const { coach, type, text } = await setup($, on)
+    await coach('auto on')
+    await type(LONG)
+    expect(await text(/ 자동$/)).toBe(true)
+    await coach('view')
+    const p = await pane()
+    expect(await has(p, /^자동 모드 켜짐$/)).toBe(true)
+    await p.press({ key: 'view-auto' })
+    expect(await has(p, /^자동 모드 꺼짐$/)).toBe(true)
+    expect((await coach('auto')).text).toContain('꺼짐')
+    expect(await text(/ 자동$/)).toBe(false)
+    expect(await submit($, LONG)).toMatchObject({ text: LONG })
+    await p.unmount()
+  })
+
   test('/coach view: 다듬은 뒤 수치·보탠 것(답/제안)·원문과 다듬은 글. 넓으면 나란히, 좁으면 위아래', async ($, on) => {
     $pane = $.ui
     const { coach, press } = await setup($, on)
