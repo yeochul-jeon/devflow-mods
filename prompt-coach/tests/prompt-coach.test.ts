@@ -93,6 +93,16 @@ const PEEK = {
   },
 }
 
+const TEAM_BOARD = {
+  name: 'team-board',
+  register(on: any) {
+    on('tool.call', { tool: 'SetMe' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'team-board', key: 'me' }, e.me)
+      return { result: 'ok' }
+    })
+  },
+}
+
 describe('prompt-coach 흐름', () => {
   // 입력창(box), 채운 글, 토스트, 모델 호출을 흉내 낸다. qReply·rReply 로 모델의 답을 바꾼다.
   const setup = async ($: any, on: any) => {
@@ -114,6 +124,7 @@ describe('prompt-coach 흐름', () => {
     on('ui.toast', ($: any, e: any) => { s.toasts.push(e.text); return { value: undefined } })
     on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
+    on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
     // 모델 호출은 띠가 뒤에서 기다린다. 몇 번 양보해 끝나게 한다
     const settle = async () => { for (let i = 0; i < 30; i++) await new Promise(r => (globalThis as any).setTimeout(r, 0)) }
@@ -168,6 +179,7 @@ describe('prompt-coach 흐름', () => {
     const { coach, mount } = await setup($, on)
     await coach(DRAFT)
     const band = await mount()
+    expect(await band.find({ type: 'Text', text: /^입력창 Enter = 이 질문의 답 · > 로 시작하면 새 요청$/ })).toBeDefined()
     expect((await band.find({ key: 'coach-opt-0' }))?.props).toMatchObject({ hotkey: '1', plain: true })
     expect((await band.find({ key: 'coach-opt-1' }))?.props).toMatchObject({ hotkey: '2' })
     expect((await band.find({ key: 'coach-skip' }))?.props).toMatchObject({ hotkey: '0' })
@@ -175,7 +187,7 @@ describe('prompt-coach 흐름', () => {
     await band.unmount()
     const narrow = await mount(40)
     expect(await narrow.find({ type: 'Text', text: /^초안/ })).toBeUndefined()
-    expect(await narrow.find({ type: 'Text', text: /직접 쓰려면/ })).toBeUndefined()
+    expect(await narrow.find({ type: 'Text', text: /이 질문의 답/ })).toBeUndefined()
     await narrow.unmount()
   })
 
@@ -400,5 +412,28 @@ describe('prompt-coach 흐름', () => {
     await press('coach-skip')
     expect(await peek()).toBeNull()
   })
-})
 
+  test('질문 중 > 로 시작한 글은 새 요청: 다듬기를 그만두고 > 를 벗겨 보낸 뒤 초안을 입력창에 돌려놓는다', async ($, on) => {
+    const { s, coach, text } = await setup($, on)
+    await coach(DRAFT)
+    s.box = ''
+    expect(await submit($, '> 급한 거 먼저: 배포 로그 봐 줘')).toMatchObject({ text: '급한 거 먼저: 배포 로그 봐 줘' })
+    expect(s.box).toBe(DRAFT)
+    expect(await text(/질문 1\/2$/)).toBe(false)
+  })
+
+  test('자동 모드: team-board 가 Claude 의 질문 대기로 보는 동안의 답은 가로채지 않는다. 다음 턴이 시작되면 다시 묻는다', { plugins: [TEAM_BOARD] }, async ($, on) => {
+    const { s, settle, coach } = await setup($, on)
+    const me = (state: string, question = '') => $.tool.call({ tool: 'SetMe', me: { state, question } } as any)
+    await coach('auto on')
+    await me('asking', '범위는 어느 쪽으로 할까요?')
+    await me('working') // 사람이 보내는 순간 team-board 가 먼저 작업 중으로 바꾼다
+    expect(await submit($, '변경 파일만 하고 테스트도 같이 돌려 줘')).toMatchObject({ text: '변경 파일만 하고 테스트도 같이 돌려 줘' })
+    // 다음 턴이 시작되면 끈다. prompt-coach 자신의 질문(결정 필요로 보임)은 Claude 의 질문이 아니다
+    await $.turn.start({ text: '', turnId: 't1' } as any)
+    await me('asking', 'prompt-coach: 범위는?')
+    expect(await submit($, LONG)).toMatchObject({ drop: expect.any(String) })
+    await settle()
+    expect(s.asked).toHaveLength(1)
+  })
+})

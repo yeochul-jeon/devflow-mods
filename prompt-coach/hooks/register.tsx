@@ -19,6 +19,7 @@ const auto = atom({ plugin: 'prompt-coach', key: 'auto' } as const, false)
 const bypass = atom({ plugin: 'prompt-coach', key: 'bypass' } as const, false)
 // team-board 가 이 이름으로 읽는다. 바꾸면 team-board 도 바꾼다
 const pending = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
+const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as const, false)
 
 /** 자동 모드 설정. 모든 세션이 같은 값을 쓴다. */
 const AUTO_KEY = 'auto-on'
@@ -94,6 +95,13 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     // 질문하는 동안 입력창에 쓴 글은 지금 질문의 직접 답이다. 보내지 않는다.
     const f = await read($, flow)
+    // 질문 중 '>' 로 시작한 글은 새 요청이다. 다듬기를 그만두고 보낸 뒤 초안을 입력창에 돌려놓는다
+    if (f.stage === 'questions' && e.origin.kind === 'composer' && !e.command && e.text.startsWith('>')) {
+      await setFlow($, { stage: 'idle' })
+      const r = await next({ ...e, text: e.text.slice(1).trimStart() })
+      if (r.drop === undefined && (await $.prompt.read()).text.trim() === '') await fillBox($, f.draft)
+      return r
+    }
     if (f.stage === 'questions' && e.origin.kind === 'composer' && !e.command && e.text.trim() !== '') {
       // 막힌 글은 엔진이 입력창에 다시 넣는다. 그 뒤에 비우고 답을 넘긴다. 여기서 답하면 마지막 질문의 다듬은 글이
       // 되돌아온 글에 덮여 지워지고, 바깥 hook(team-board)이 drop 을 보고 되돌릴 때 바뀐 질문도 옛 것으로 돌아간다
@@ -111,7 +119,7 @@ export const register: Register = on => {
       // 자동 모드: 사람이 친 프롬프트를 보내기 전에 먼저 묻는다. '>' 로 시작하면 벗겨서 그대로 보낸다
       if (!e.command && (await isAuto($))) {
         if (text.startsWith('>')) text = text.slice(1).trimStart()
-        else if (!skip && !passThrough(e) && (await begin($, text)) === null) {
+        else if (!skip && !passThrough(e) && !(await read($, claudeAsking)) && (await begin($, text)) === null) {
           void $.clock.sleep(300).then(() => clearBox($)).catch(unloaded)
           return { drop: 'prompt-coach: 입력창 위 질문에 답하면 다듬어요 (그대로 보내려면 맨 앞에 >)' }
         }
@@ -122,6 +130,23 @@ export const register: Register = on => {
     if (await read($, original)) await forget($)
     if (f.stage === 'done') await setFlow($, { stage: 'idle' })
     return next(text === e.text ? e : { ...e, text })
+  })
+
+  // team-board 가 이 세션을 Claude 의 질문 대기로 보면 기억한다. 사람이 보내는 순간 team-board 가 먼저 작업 중으로 바꾸므로
+  // 작업 중은 무시하고 대기·다음 턴에서만 끈다. prompt-coach 자신의 질문(결정 필요로 보임)은 Claude 의 질문이 아니다
+  on('state.set', { plugin: 'team-board', key: 'me' }, async ($, e, next) => {
+    const r = await next(e)
+    const me = e.value as { state?: unknown; question?: unknown } | null
+    if ('value' in r && r.value?.isSet && me) {
+      if (me.state === 'asking' && typeof me.question === 'string' && !me.question.startsWith('prompt-coach: ')) await setClaudeAsking($, true)
+      else if (me.state === 'idle') await setClaudeAsking($, false)
+    }
+    return r
+  }).catch(($, e, next) => next(e)) // 읽기만 하므로 실패해도 team-board 의 기록은 그대로 선다
+
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) await setClaudeAsking($, false)
+    return next(e)
   })
 
   // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 위에 붙인다.
@@ -171,7 +196,7 @@ export const register: Register = on => {
             <Button key="coach-now" label="바로 다듬기" hotkey={NOW_KEY} plain onPress={() => void rewriteNow($)} />
             {cancelButton}
           </Box>
-          {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">직접 쓰려면 입력창에 쓰고 Enter</Text></Box> : null}
+          {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
           {rest}
         </Box>
       )
@@ -224,6 +249,10 @@ async function setFlow($: EngineInterface, next: CoachFlow): Promise<void> {
   if ((await read($, pending)) !== waiting) await update($, pending, () => waiting)
   // 다듬은 글을 넣었거나 초안을 돌려놓은 뒤의 첫 보내기는 다시 묻지 않는다
   if (next.stage === 'done') await update($, bypass, () => true)
+}
+
+async function setClaudeAsking($: EngineInterface, on: boolean): Promise<void> {
+  if ((await read($, claudeAsking)) !== on) await update($, claudeAsking, () => on)
 }
 
 const AUTO_ON = '자동 모드 켜짐: 보낼 때 먼저 빈 곳을 물어요. 그대로 보내려면 맨 앞에 > (모든 세션, /coach auto off)'

@@ -34,6 +34,10 @@ declare module 'claude-code' {
       bypass: boolean
       /** 답을 기다리는 질문("prompt-coach: …"), 없으면 null. team-board 가 읽어 결정 필요로 보인다. */
       pending: string | null
+      /** Claude 의 질문을 기다리는 중인지(team-board 가 본 것). 자동 모드는 그 답을 가로채지 않는다. 다음 턴이 시작되면 끈다. */
+      claudeAsking: boolean
     }
+    /** 읽기만 한다. team-board 가 없으면 오지 않는다. team-board/types/index.d.ts 의 Beat 에서 쓰는 필드만 */
+    'team-board': { me: { state: string; question: string } | null }
   }
 }
