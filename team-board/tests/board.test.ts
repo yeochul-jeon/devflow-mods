@@ -1980,3 +1980,61 @@ describe('막힌 보내기', () => {
     expect(mine()).toMatchObject({ state: 'idle', prompt: idle.prompt, timeline: idle.timeline })
   })
 })
+
+const PROMPT_COACH = {
+  name: 'prompt-coach',
+  register(on: any) {
+    on('tool.call', { tool: 'SetPending' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'prompt-coach', key: 'pending' }, e.question)
+      return { result: 'ok' }
+    })
+  },
+}
+
+describe('prompt-coach 연동', () => {
+  test('prompt-coach 가 답을 기다리는 질문은 결정 필요로, 끝나면 앞 상태(대기 또는 Claude 의 질문)로 돌아간다', { plugins: [PROMPT_COACH] }, async ($, on) => {
+    const files = new Map<string, string>()
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', ($, e: any) => {
+      if (!files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
+      return { value: files.get(e.path)! }
+    })
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    on('turn.complete', () => ({ text: '' }))
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.prompt.submit({ text: '첫 요청', origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    expect(mine().state).toBe('idle')
+
+    await pending('prompt-coach: 범위는?')
+    expect(mine()).toMatchObject({ state: 'asking', question: 'prompt-coach: 범위는?' })
+    await pending('prompt-coach: 완료 기준은?')
+    expect(mine()).toMatchObject({ state: 'asking', question: 'prompt-coach: 완료 기준은?' })
+    await pending(null)
+    expect(mine()).toMatchObject({ state: 'idle', question: '' })
+
+    // Claude 의 질문을 기다리던 중이면 끝난 뒤 그 질문으로 돌아간다
+    await $.prompt.submit({ text: '다음 요청', origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '범위는 어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't2' } as any)
+    await pending('prompt-coach: 어떤 에러인가요?')
+    expect(mine().question).toBe('prompt-coach: 어떤 에러인가요?')
+    await pending(null)
+    expect(mine()).toMatchObject({ state: 'asking', question: '범위는 어느 쪽으로 할까요?' })
+  })
+})

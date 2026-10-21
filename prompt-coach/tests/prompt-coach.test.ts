@@ -86,6 +86,13 @@ describe('질문·다시 쓰기 (순수 함수)', () => {
   })
 })
 
+const PEEK = {
+  name: 'peek',
+  register(on: any) {
+    on('tool.call', { tool: 'Peek' }, async ($: any) => ({ result: JSON.stringify(await $.state.get({ plugin: 'prompt-coach', key: 'pending' })) }))
+  },
+}
+
 describe('prompt-coach 흐름', () => {
   // 입력창(box), 채운 글, 토스트, 모델 호출을 흉내 낸다. qReply·rReply 로 모델의 답을 바꾼다.
   const setup = async ($: any, on: any) => {
@@ -312,4 +319,80 @@ describe('prompt-coach 흐름', () => {
     expect(await text(/입력창에 넣음$/)).toBe(false)
     expect((await coach('undo')).text).toContain('없어요')
   })
+
+  const LONG = '결제 모듈의 중복 코드를 정리해 주세요'
+  const submit = ($: any, text: string, extra: any = {}) => $.prompt.submit({ text, origin: { kind: 'composer' }, ...extra } as any)
+
+  test('자동 모드는 기본 꺼짐: 보내기에 끼어들지 않는다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    expect((await coach('auto')).text).toContain('꺼짐')
+    expect(await submit($, LONG)).toMatchObject({ text: LONG })
+    expect(s.asked).toHaveLength(0)
+  })
+
+  test('자동 모드: 사람이 친 프롬프트를 막고 질문 → 다듬은 글을 입력창에. 그 글은(고쳐도) 다시 묻지 않고 보낸다', async ($, on) => {
+    const { s, clock, settle, coach, press, text } = await setup($, on)
+    expect((await coach('auto on')).text).toContain('켜짐')
+    expect(await text(/ 자동$/)).toBe(false) // 초안이 없으면 띠가 없다
+    s.box = LONG
+    const r = await submit($, LONG)
+    expect(r).toMatchObject({ drop: expect.stringContaining('맨 앞에 >') })
+    await settle()
+    await clock.advance(300)
+    await settle()
+    expect(s.box).toBe('')
+    expect(await text(/질문 1\/2$/)).toBe(true)
+    await press('coach-now')
+    expect(s.box).toBe(REFINED)
+    expect(await submit($, REFINED + ' 그리고 요약도')).toMatchObject({ text: REFINED + ' 그리고 요약도' })
+    expect(s.asked).toHaveLength(2)
+    // 다음 새 프롬프트는 다시 묻는다
+    expect(await submit($, LONG)).toMatchObject({ drop: expect.any(String) })
+    await settle()
+    expect(s.asked).toHaveLength(3)
+  })
+
+  test('자동 모드에서 그대로 보내는 것: 명령·작업 중·첨부·짧은 답·플러그인 프롬프트, > 로 시작하면 벗겨서', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    await coach('auto on')
+    expect(await submit($, LONG, { command: { name: 'review', args: '' } })).toMatchObject({ text: LONG })
+    expect(await submit($, LONG, { turnId: 't1' })).toMatchObject({ text: LONG })
+    expect(await submit($, LONG, { attachments: [{ type: 'image' }] })).toMatchObject({ text: LONG })
+    expect(await submit($, '네 계속 해 주세요')).toMatchObject({ text: '네 계속 해 주세요' })
+    expect(await $.prompt.submit({ text: LONG, origin: { kind: 'plugin', name: 'other' } } as any)).toMatchObject({ text: LONG })
+    expect(await submit($, '> ' + LONG)).toMatchObject({ text: LONG })
+    expect(s.asked).toHaveLength(0)
+  })
+
+  test('자동 모드에서 취소하면 돌려놓은 초안의 Enter 는 그대로 보낸다', async ($, on) => {
+    const { s, settle, coach, press } = await setup($, on)
+    await coach('auto on')
+    await submit($, LONG)
+    await settle()
+    await press('coach-cancel')
+    expect(s.box).toBe(LONG)
+    expect(await submit($, LONG)).toMatchObject({ text: LONG })
+    expect(s.asked).toHaveLength(1)
+  })
+
+  test('/coach auto off 로 끈다. 켜면 띠 머리에 자동', async ($, on) => {
+    const { coach, type, text } = await setup($, on)
+    await coach('auto on')
+    await type(LONG)
+    expect(await text(/ 자동$/)).toBe(true)
+    expect((await coach('auto off')).text).toContain('꺼짐')
+    expect(await submit($, LONG)).toMatchObject({ text: LONG })
+  })
+
+  test('답을 기다리는 질문을 pending 에 둔다(team-board 가 읽음). 입력창을 채우면 null 이 된다', { plugins: [PEEK] }, async ($, on) => {
+    const { coach, press } = await setup($, on)
+    const peek = async () => JSON.parse((await $.tool.call({ tool: 'Peek' } as any) as any).result).value
+    await coach(DRAFT)
+    expect(await peek()).toBe('prompt-coach: 어떤 에러인가요?')
+    await press('coach-opt-0')
+    expect(await peek()).toBe('prompt-coach: 범위는?')
+    await press('coach-skip')
+    expect(await peek()).toBeNull()
+  })
 })
+

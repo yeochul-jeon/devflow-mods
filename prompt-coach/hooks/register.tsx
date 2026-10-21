@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CoachBand, CoachFlow, Spent } from '../types'
-import { addedHead, type Answer, buildQuestions, buildRewrite, MAX_TOKENS, parseQuestions, parseRewrite, rule, TEMPLATE, tooShort } from './refine'
+import { addedHead, type Answer, buildQuestions, buildRewrite, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort } from './refine'
 
 // $.state 에 두어 핫 리로드에도 유지된다.
 const band = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false } as CoachBand)
@@ -15,6 +15,13 @@ const original = atom({ plugin: 'prompt-coach', key: 'original' } as const, '')
 /** 그때 입력창에 넣은 다듬은 글. [되돌리기]는 입력창이 이것과 같을 때만 덮는다. */
 const refined = atom({ plugin: 'prompt-coach', key: 'refined' } as const, '')
 const flow = atom({ plugin: 'prompt-coach', key: 'flow' } as const, { stage: 'idle' } as CoachFlow)
+const auto = atom({ plugin: 'prompt-coach', key: 'auto' } as const, false)
+const bypass = atom({ plugin: 'prompt-coach', key: 'bypass' } as const, false)
+// team-board 가 이 이름으로 읽는다. 바꾸면 team-board 도 바꾼다
+const pending = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
+
+/** 자동 모드 설정. 모든 세션이 같은 값을 쓴다. */
+const AUTO_KEY = 'auto-on'
 
 /** 입력창이 비었을 때 띠의 버튼을 누르는 숫자. 선택지는 1~4. */
 const SKIP_KEY = '0'
@@ -23,7 +30,8 @@ const NOW_KEY = '9'
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
-    await $.command.register({ name: 'coach', description: '초안의 빈 곳을 묻고 다듬어 입력창에', argumentHint: '<초안> | template | undo | cancel' })
+    await $.command.register({ name: 'coach', description: '초안의 빈 곳을 묻고 다듬어 입력창에', argumentHint: '<초안> | template | undo | cancel | auto on|off' })
+    await isAuto($)
     // 모듈을 다시 불러 모델 호출이 끊겼으면 초안을 돌려준다. 질문 단계는 답을 기다리는 중이라 그대로 둔다
     const f = await read($, flow)
     if (f.stage === 'asking' || f.stage === 'rewriting') await fail($, f.draft, '다시 불러와 멈췄어요.')
@@ -55,6 +63,13 @@ export const register: Register = on => {
       const filled = await restore($, before)
       return { text: filled.isFilled ? '다듬기 전 원문을 입력창에 되돌렸어요.' : `입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})` }
     }
+    if (arg === 'auto' || arg === 'auto on' || arg === 'auto off') {
+      if (arg !== 'auto') {
+        await $.store.set(AUTO_KEY, arg === 'auto on')
+        await update($, auto, () => arg === 'auto on')
+      }
+      return { text: (await isAuto($)) ? AUTO_ON : '자동 모드 꺼짐: [다듬기]·/coach 로만 다듬어요. (/coach auto on)' }
+    }
     if (arg === 'cancel') return { text: (await cancel($)) ? '다듬기를 그만두고 초안을 입력창에 돌려놓았어요.' : '다듬는 중이 아니에요.' }
     const refusal = await begin($, arg)
     return { text: refusal ? `/coach: ${refusal}` : '입력창 위에 질문이 떠요. 숫자로 고르거나, 입력창에 직접 써서 Enter.' }
@@ -85,11 +100,24 @@ export const register: Register = on => {
       void $.clock.sleep(300).then(() => clearBox($)).catch(unloaded)
       return { drop: 'prompt-coach: 질문의 답으로 받았어요' }
     }
+    let text = e.text
+    if (e.origin.kind === 'composer') {
+      const skip = await read($, bypass)
+      if (skip) await update($, bypass, () => false)
+      // 자동 모드: 사람이 친 프롬프트를 보내기 전에 먼저 묻는다. '>' 로 시작하면 벗겨서 그대로 보낸다
+      if (!e.command && (await isAuto($))) {
+        if (text.startsWith('>')) text = text.slice(1).trimStart()
+        else if (!skip && !passThrough(e) && (await begin($, text)) === null) {
+          void $.clock.sleep(300).then(() => clearBox($)).catch(unloaded)
+          return { drop: 'prompt-coach: 입력창 위 질문에 답하면 다듬어요 (그대로 보내려면 맨 앞에 >)' }
+        }
+      }
+    }
     // 보낸 뒤에는 되돌릴 원문과 보탠 것 줄이 의미가 없다.
     if ((await read($, band)).hasDraft) await update($, band, b => ({ ...b, hasDraft: false }))
     if (await read($, original)) await forget($)
     if (f.stage === 'done') await setFlow($, { stage: 'idle' })
-    return next(e)
+    return next(text === e.text ? e : { ...e, text })
   })
 
   // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 위에 붙인다.
@@ -102,7 +130,8 @@ export const register: Register = on => {
     const width = e.props.bodyColumns
     const { Box, Text, Button } = $.ui.resolve(e)
     // 바로 위 대화 기록과 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 오른쪽 끝은 지금 단계
-    const head = (status = '') => <Text dimColor wrap="truncate-end">{rule(width, status)}</Text>
+    const isOn = await read($, auto)
+    const head = (status = '') => <Text dimColor wrap="truncate-end">{rule(width, status || (isOn ? '자동' : ''))}</Text>
     const cancelButton = <Button key="coach-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
     const undoButton = before !== '' ? <Button key="coach-undo" label="되돌리기" onPress={() => void undoBox($)} /> : null
 
@@ -183,8 +212,23 @@ function unloaded(err: unknown): void {
   if (!(err instanceof Error && err.message.includes('unloaded'))) throw err
 }
 
+/** 흐름을 바꾸고, 답을 기다리는 질문을 team-board 가 읽는 곳에 맞춘다. 입력창을 채우기 전에 비워야 보낸 글이 그 질문의 답으로 기록되지 않는다. */
 async function setFlow($: EngineInterface, next: CoachFlow): Promise<void> {
   await update($, flow, () => next)
+  const q = next.stage === 'questions' ? next.questions[next.answers.length]?.q : undefined
+  const waiting = q === undefined ? null : `prompt-coach: ${q}`
+  if ((await read($, pending)) !== waiting) await update($, pending, () => waiting)
+  // 다듬은 글을 넣었거나 초안을 돌려놓은 뒤의 첫 보내기는 다시 묻지 않는다
+  if (next.stage === 'done') await update($, bypass, () => true)
+}
+
+const AUTO_ON = '자동 모드 켜짐: 보낼 때 먼저 빈 곳을 물어요. 그대로 보내려면 맨 앞에 > (모든 세션, /coach auto off)'
+
+/** 자동 모드인지 설정에서 읽고 띠 표시용 사본을 맞춘다. 저장소를 못 읽으면 꺼진 것으로 본다(보내기를 막지 않게). */
+async function isAuto($: EngineInterface): Promise<boolean> {
+  const on = (await $.store.get(AUTO_KEY).catch(() => undefined)) === true
+  if ((await read($, auto)) !== on) await update($, auto, () => on)
+  return on
 }
 
 function oneLine(text: string): string {
@@ -270,6 +314,7 @@ async function still($: EngineInterface, stage: 'asking' | 'rewriting', draft: s
 /** 흐름을 접고 초안을 입력창에 돌려놓는다. 입력창에 새 글이 있으면 덮지 않는다. */
 async function fail($: EngineInterface, draft: string, why: string): Promise<void> {
   await setFlow($, { stage: 'idle' })
+  await update($, bypass, () => true)
   const back = (await $.prompt.read()).text.trim() === '' ? (await fillBox($, draft)).isFilled : false
   $.ui.toast(`prompt-coach: ${why}${back ? ' 초안은 입력창에 그대로예요.' : ''}`)
 }
@@ -279,6 +324,7 @@ async function cancel($: EngineInterface): Promise<boolean> {
   const f = await read($, flow)
   if (f.stage === 'idle' || f.stage === 'done') return false
   await setFlow($, { stage: 'idle' })
+  await update($, bypass, () => true)
   if ((await $.prompt.read()).text.trim() === '') await fillBox($, f.draft)
   return true
 }

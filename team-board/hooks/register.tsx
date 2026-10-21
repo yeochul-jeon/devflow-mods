@@ -132,6 +132,8 @@ const self = {
   /** 흐름 줄 원문 (flowKey → 글). 장부와 따로 <id>.flow 에 쓴다: 모든 세션이 몇 초마다 읽는 <id>.json 을 키우지 않고, 옛 판의 scan(*.json)도 읽지 않게 */
   flow: {} as Record<string, string>,
   flowDirty: false,
+  /** prompt-coach 질문을 띄우기 전 상태. 질문이 끝나면 이것으로 되돌린다(Claude 의 질문을 기다리던 중이었을 수 있다) */
+  coachKept: null as Pick<Beat, 'state' | 'step' | 'question'> | null,
 }
 
 /** 흐름 줄의 원문을 남긴다. 장부의 줄은 100자로 줄인 한 줄이다. 실패 기록처럼 비밀 값은 가린다 */
@@ -193,6 +195,20 @@ async function syncAgents($: EngineInterface): Promise<void> {
  * 턴 끝에 이 세션의 상태를 정한 뒤에도 한 번 더 부른다 (hook 순서에 따라 계획의 턴 끝 표시가 먼저 올 수 있다).
  * 단계 줄은 일하는 중일 때만 바꾼다.
  */
+async function coachPending($: EngineInterface, question: string | null): Promise<void> {
+  const b = self.beat
+  if (!b) return
+  if (question) {
+    self.coachKept ??= { state: b.state, step: b.step, question: b.question }
+    await save($, { state: 'asking', step: '', question }, true)
+  } else if (self.coachKept) {
+    const kept = self.coachKept
+    self.coachKept = null
+    // 그사이 턴이 시작됐으면(작업 중) 그대로 둔다
+    if (b.state === 'asking' && b.question.startsWith('prompt-coach: ')) await save($, kept, true)
+  }
+}
+
 async function syncPlan($: EngineInterface, plan?: unknown): Promise<void> {
   if (!self.beat) return
   const r = tasksFromPlan(plan === undefined ? await read($, workPlan) : plan, self.beat.state === 'asking')
@@ -580,6 +596,14 @@ export const register: Register = (on, options) => {
     if ('value' in r && r.value?.isSet) await syncPlan($, e.value)
     return r
   }).catch(($, e, next) => next(e)) // 표시가 실패해도 work-plan 의 기록은 그대로 선다
+
+  // prompt-coach 가 질문의 답을 기다리면 결정 필요로 보인다. 입력창을 채우면 null 이 오고 앞 상태로 돌아간다.
+  // prompt-coach 가 없으면 오지 않는다. 계획 관찰처럼 hook 순서와 상관없다
+  on('state.set', { plugin: 'prompt-coach', key: 'pending' }, async ($, e, next) => {
+    const r = await next(e)
+    if ('value' in r && r.value?.isSet) await coachPending($, typeof e.value === 'string' ? e.value : null)
+    return r
+  }).catch(($, e, next) => next(e)) // 표시가 실패해도 prompt-coach 의 기록은 그대로 선다
 
   on('turn.start', async ($, e, next) => {
     // 보조 에이전트의 시작도 여기로 온다. 메인을 작업 중으로 바꾸지 않는다

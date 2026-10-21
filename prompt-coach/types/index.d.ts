@@ -22,6 +22,18 @@ export type CoachFlow =
 
 declare module 'claude-code' {
   interface PluginState {
-    'prompt-coach': { band: CoachBand; spent: Spent; original: string; refined: string; flow: CoachFlow }
+    'prompt-coach': {
+      band: CoachBand
+      spent: Spent
+      original: string
+      refined: string
+      flow: CoachFlow
+      /** 자동 모드(보낼 때 먼저 질문). 설정은 $.store 에 두고 이것은 띠 표시용 사본이다. */
+      auto: boolean
+      /** 다음 한 번의 보내기는 가로채지 않는다. 다듬은 글을 넣었거나 취소·실패로 초안을 돌려놓았을 때 켠다. */
+      bypass: boolean
+      /** 답을 기다리는 질문("prompt-coach: …"), 없으면 null. team-board 가 읽어 결정 필요로 보인다. */
+      pending: string | null
+    }
   }
 }

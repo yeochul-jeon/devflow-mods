@@ -117,5 +117,7 @@ declare module 'claude-code' {
     }
     /** 읽기만 한다. work-plan 이 없으면 값이 없다 */
     'work-plan': { plan: WorkPlan | null }
+    /** 읽기만 한다. prompt-coach 가 답을 기다리는 질문("prompt-coach: …") 또는 null. prompt-coach/types/index.d.ts 의 pending 과 같다 */
+    'prompt-coach': { pending: string | null }
   }
 }
