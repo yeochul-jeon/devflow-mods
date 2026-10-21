@@ -336,9 +336,13 @@ export const register: Register = on => {
     const before = await read($, original)
     const width = e.props.bodyColumns
     const { Box, Text, Button } = $.ui.resolve(e)
-    // 바로 위 대화 기록과 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 오른쪽 끝은 지금 단계
+    // 바로 위 대화 기록과 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
     const isOn = await read($, auto)
-    const head = (status = '') => <Text dimColor wrap="truncate-end">{rule(width, status || (isOn ? '자동' : ''))}</Text>
+    const head = (status = '') => (
+      <Box marginTop={e.props.maxRows >= 3 ? 1 : 0}>
+        <Text color="gray" wrap="truncate-end">{rule(width, status || (isOn ? '자동' : ''))}</Text>
+      </Box>
+    )
     const cancelButton = <Button key="coach-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
     const undoButton = before !== '' ? <Button key="coach-undo" label="되돌리기" onPress={() => void undoBox($)} /> : null
 

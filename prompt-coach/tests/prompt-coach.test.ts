@@ -21,8 +21,8 @@ describe('refine (순수 함수)', () => {
   })
 
   test('띠 가로줄은 폭을 채우고 상태 문구를 오른쪽 끝에 둔다 (한글은 2칸)', async () => {
-    expect(rule(30)).toBe('── prompt-coach ' + '─'.repeat(14))
-    expect(rule(30, '질문 1/3')).toBe('── prompt-coach ' + '─'.repeat(5) + ' 질문 1/3')
+    expect(rule(30)).toBe('━━ prompt-coach ' + '━'.repeat(14))
+    expect(rule(30, '질문 1/3')).toBe('━━ prompt-coach ' + '━'.repeat(5) + ' 질문 1/3')
   })
 
   test('보탠 것 머리: 답·제안 수, 없으면 순서만', async () => {
@@ -163,11 +163,20 @@ describe('prompt-coach 흐름', () => {
     expect(status.text).toContain('1,000')
   })
   test('[다듬기]: 입력창의 초안을 가져가 입력창을 비우고, [바로 다듬기]는 남은 질문을 건너뛴다. 다른 mod 의 띠는 그대로', async ($, on) => {
-    const { s, type, press, shows, text } = await setup($, on)
+    const { s, type, press, shows, text, mount } = await setup($, on)
     expect(await shows('coach-refine')).toBe(false) // 빈 입력창: 버튼 없음
     await type(DRAFT)
     expect(await text(/OTHER-MOD-BAND/)).toBe(true)
-    expect(await text(/^── prompt-coach ─{104}$/)).toBe(true) // 띠 폭(bodyColumns 120)을 채운다
+    expect(await text(/^━━ prompt-coach ━{104}$/)).toBe(true) // 띠 폭(bodyColumns 120)을 채운다
+    // 위 대화 메시지와 띄우는 빈 줄. 띠에 줄이 모자라면 뺀다 (find 는 props 로 거르지 않아 맨 위 Box 의 첫 자식을 본다)
+    const gap = async (maxRows: number) => {
+      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
+      const root = (await band.find({ type: 'Box' })) as any
+      await band.unmount()
+      return root.children[0].props.marginTop
+    }
+    expect(await gap(10)).toBe(1)
+    expect(await gap(2)).toBe(0)
     await press('coach-refine')
     expect(s.box).toBe('') // 숫자 키로 답하도록 비운다
     expect(await text(/OTHER-MOD-BAND/)).toBe(true)

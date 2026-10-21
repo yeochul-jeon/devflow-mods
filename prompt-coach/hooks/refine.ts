@@ -122,9 +122,9 @@ export function cells(text: string): number {
 
 /** 띠 폭을 채우는 이름 붙은 가로줄. 상태 문구가 있으면 오른쪽 끝에 둔다. */
 export function rule(width: number, status = ''): string {
-  const head = '── prompt-coach '
+  const head = '━━ prompt-coach '
   const tail = status === '' ? '' : ` ${status}`
-  return head + '─'.repeat(Math.max(0, width - cells(head) - cells(tail))) + tail
+  return head + '━'.repeat(Math.max(0, width - cells(head) - cells(tail))) + tail
 }
 
 /** 띠의 보탠 것 머리: 답·제안 수. 보탠 것이 없으면 순서만 다듬었다고 한다. */
