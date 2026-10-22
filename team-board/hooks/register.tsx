@@ -1613,7 +1613,7 @@ export const register: Register = (on, options) => {
             {[...b.decisions].reverse().map((d, i, all) => (
               <Box flexDirection="column">
                 <Text wrap="truncate-end">
-                  <Text color={pal.ok}>  ◆ </Text>
+                  <Text color={pal.ok}>  ✓ </Text>
                   <Text color={pal.text}>{d.question}</Text>
                   <Text color={pal.dim}>{`  ${ago(now - d.at)}`}</Text>
                 </Text>

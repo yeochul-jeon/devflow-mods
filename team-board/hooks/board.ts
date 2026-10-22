@@ -142,7 +142,8 @@ export function questionSummary(question: string): string {
       .filter((t): t is string => !!t)
     if (titles.length) return oneLine(titles.join(' · '), 90)
   }
-  return oneLine(last, 90)
+  // 글머리표(- * •)는 뗀다 (T32: 띠·카드의 질문 요약이 '- 보고 문서에…' 처럼 보였다)
+  return oneLine(last.replace(/^[-*•]\s+/, ''), 90)
 }
 
 export function describeTool(tool: string, input: Record<string, unknown>): string {

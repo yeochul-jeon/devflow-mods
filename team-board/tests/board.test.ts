@@ -462,6 +462,10 @@ describe('board (순수 함수)', () => {
     expect(questionSummary('1. 5분: 빠르게 반영\n2. 1시간: 부하가 적음\n어떻게 진행할까요?')).toBe('5분 · 1시간')
     expect(questionSummary('1) 온라인 마이그레이션\n2) 점검 시간 마이그레이션\n결정해 주세요.')).toBe('온라인 마이그레이션 · 점검 시간 마이그레이션')
     // 대상이 있는 질문, 앞에 번호 항목이 없는 질문, 들여쓴 번호는 그대로
+    // 글머리표는 뗀다 (T32)
+    expect(questionSummary('조사했습니다.\n- 캐시 만료를 5분으로 할까요?')).toBe('캐시 만료를 5분으로 할까요?')
+    expect(questionSummary('* 배포는 오늘 할까요?')).toBe('배포는 오늘 할까요?')
+    expect(questionSummary('• 배포는 오늘 할까요?')).toBe('배포는 오늘 할까요?')
     expect(questionSummary('1번은 5분으로 정했습니다.\n2번 배포 시점이 남았습니다.\n배포는 어느 쪽으로 할까요?')).toBe('배포는 어느 쪽으로 할까요?')
     expect(questionSummary('검토를 마쳤습니다.\n어느 쪽으로 할까요?')).toBe('어느 쪽으로 할까요?')
     expect(questionSummary('캐시 만료\n   1. 5분\n   2. 1시간\n어느 쪽으로 할까요?')).toBe('어느 쪽으로 할까요?')
@@ -1217,7 +1221,7 @@ describe('결정할 것 블록 (T32)', () => {
       '결정할 사항',
       '캐시 만료를 5분으로 할지 정해 주세요.',
     ].join('\n')
-    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'asking', question })))
+    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'asking', question, decisions: [{ at: NOW - 60_000, question: 'push 할까요?', answer: '예' }] })))
     mock.clock(on, { now: NOW })
     mock.store(on)
     on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -1254,6 +1258,13 @@ describe('결정할 것 블록 (T32)', () => {
     const groups = (await pane.findAll({ type: 'Box' })).filter(x => x.props.marginTop === 1 && JSON.stringify(x).includes('┃') && !JSON.stringify(x).includes('⚑'))
     expect(groups.length).toBe(1)
     await pane.unmount()
+
+    // 자세히의 결정 기록도 카드의 답함 줄과 같은 ✓ (예전 ◆)
+    await $.command.run({ command: 'board', args: 'sub-2' } as any)
+    const detail = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    expect((await detail.find({ type: 'Text', text: /^  ✓ $/ }))?.props.color).toBe(pal.ok)
+    expect(await detail.find({ type: 'Text', text: /^  ◆ $/ })).toBeUndefined()
+    await detail.unmount()
   })
 })
 
