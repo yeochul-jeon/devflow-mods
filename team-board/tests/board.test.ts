@@ -260,6 +260,8 @@ describe('알약 막대 (T24 B안)', () => {
     expect(turnTook([ev('prompt', NOW), ev('done', NOW + 192_000)])).toBe('3분 12초')
     expect(turnTook([ev('prompt', NOW), ev('done', NOW + 5_000), ev('prompt', NOW + 9_000)])).toBe('5초')
     expect(turnTook([ev('prompt', NOW)])).toBe('')
+    // 요청 없이 끝난 턴(`!` 명령에 답한 턴)은 세지 않는다
+    expect(turnTook([ev('prompt', NOW), ev('done', NOW + 26_000), ev('done', NOW + 57_000)])).toBe('26초')
   })
 
   test('보조 줄: 도는 것 먼저, 넘치면 마지막 줄을 +k 요약으로', async () => {

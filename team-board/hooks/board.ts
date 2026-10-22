@@ -501,12 +501,16 @@ export function pillToneOf(b: Pick<Beat, 'state' | 'tasks' | 'fail' | 'planEnded
   return 'run'
 }
 
-/** 마지막 요청에서 턴 끝까지 걸린 시간 (흐름의 prompt → done). 끝나지 않았으면 '' */
+/**
+ * 끝난 마지막 요청에서 그 턴 끝까지 걸린 시간 (흐름의 prompt → 그 뒤 첫 done). 끝난 요청이 없으면 ''.
+ * 요청 없이 끝난 턴(`!` 명령에 모델이 답한 턴 등)은 세지 않는다: 전에는 마지막 done 까지 재어 26초가 57초로 늘었다.
+ */
 export function turnTook(timeline: readonly Event[]): string {
-  const doneAt = [...timeline].reverse().find(e => e.kind === 'done')?.at
-  const promptAt = [...timeline].reverse().find(e => e.kind === 'prompt' && (doneAt === undefined || e.at <= doneAt))?.at
-  if (doneAt === undefined || promptAt === undefined) return ''
-  return took(doneAt - promptAt)
+  for (const p of [...timeline].reverse().filter(e => e.kind === 'prompt')) {
+    const done = timeline.find(e => e.kind === 'done' && e.at >= p.at)
+    if (done) return took(done.at - p.at)
+  }
+  return ''
 }
 
 /** 걸린 시간: 12초, 3분 12초 */
