@@ -401,7 +401,9 @@ export function gitText(g: Omit<GitState, 'at'>): string {
 }
 
 /** 결정 질문 대화상자 위 맥락 줄 (T34 A1): 요청, 지금 계획 단계, 질문 직전 Claude 의 글. 줄마다 width 칸으로 자른다. 아는 것이 없으면 [] */
-export function askContext(b: Pick<Beat, 'prompt' | 'recent'>, tasks: readonly Task[], width = 78): string[] {
+export function askContext(b: Pick<Beat, 'state' | 'step' | 'prompt' | 'recent'>, tasks: readonly Task[], width = 78): string[] {
+  // 이 세션의 Claude 가 AskUserQuestion 으로 묻는 중일 때만 (tool.call 이 '질문 중' 으로 둔다). 다른 mod 의 $.ui.ask 도 같은 대화상자다
+  if (b.state !== 'asking' || b.step !== '질문 중') return []
   const { total, current } = progress(tasks)
   const said = [...b.recent].reverse().find(l => l.role === 'assistant')?.text ?? ''
   return [
@@ -421,8 +423,10 @@ export function needsVerify(path: string): boolean {
 
 /** 복귀 요약 (T34 D2): 마지막 요청 뒤에 끝난 단계, 고친 파일, 질문, 숨은 실패 수. 요청이 없거나 그 뒤 아무 일도 없으면 null */
 export function sinceLastPrompt(b: Beat): { at: number; steps: number; files: number; asks: number; fails: number } | null {
-  const p = [...b.timeline].reverse().find(t => t.kind === 'prompt')
-  if (!p) return null
+  // 흐름은 12개로 잘려 오래 일한 세션에서는 요청 줄이 밀려난다. 따로 둔 시각을 먼저 (0.28.9 전 파일은 흐름에서)
+  const from = b.promptAt ?? [...b.timeline].reverse().find(t => t.kind === 'prompt')?.at
+  if (from === undefined) return null
+  const p = { at: from }
   const after = (at: number | undefined) => at !== undefined && at >= p.at
   const steps = b.tasks.filter(t => after(t.doneAt)).length
   const files = (b.touched ?? []).filter(t => after(t.at)).length

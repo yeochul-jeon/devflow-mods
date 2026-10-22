@@ -1325,6 +1325,16 @@ describe('복귀 요약·세션 나이 (T34 D2·D4)', () => {
     touched: [{ path: 'src/a.ts', at: T0 + 2 * 60_000 }, { path: 'src/b.ts', at: T0 + 3 * 60_000 }, { path: 'README.md', at: T0 - 60_000 }],
   })
 
+  test('흐름이 12개로 잘려 요청 줄이 밀려나도 마지막 요청 시각(promptAt)으로 센다', async () => {
+    const at = NOW - 40 * 60_000
+    const busy = beat({
+      promptAt: at,
+      timeline: Array.from({ length: 12 }, (_, i) => ({ at: at + (i + 1) * 60_000, kind: 'done', text: `턴 ${i}` })),
+      touched: [{ path: 'src/a.ts', at: at + 5 * 60_000 }],
+    })
+    expect(sinceLastPrompt(busy)).toEqual({ at, steps: 0, files: 1, asks: 0, fails: 0 })
+  })
+
   test('마지막 요청 뒤에 끝난 단계·고친 파일·질문·실패를 센다', async () => {
     expect(sinceLastPrompt(peer)).toEqual({ at: T0, steps: 2, files: 2, asks: 1, fails: 1 })
     expect(sinceText(sinceLastPrompt(peer)!, NOW)).toBe('30분 전 요청 뒤 · ✓ 단계 2 · 파일 2 · ⚑ 질문 1 · ⚠ 실패 1')
@@ -2845,14 +2855,17 @@ describe('결정 대화상자 위 맥락 (T34 A1)', () => {
       { id: '3', subject: '구현', status: 'pending' as const },
     ]
     const said = '조회 로그를 보니 같은 주문을 3분 안에 다시 읽는 비율이 82%입니다. 만료를 정해야 구현을 시작할 수 있어요. '.repeat(3)
-    const lines = askContext({ prompt: '주문 조회 캐시를 정리해 줘', recent: [{ role: 'user', text: '주문 조회 캐시를 정리해 줘' }, { role: 'assistant', text: said }] }, tasks)
+    const lines = askContext({ state: 'asking', step: '질문 중', prompt: '주문 조회 캐시를 정리해 줘', recent: [{ role: 'user', text: '주문 조회 캐시를 정리해 줘' }, { role: 'assistant', text: said }] }, tasks)
     expect(lines.slice(0, 2)).toEqual(['요청 · 주문 조회 캐시를 정리해 줘', '계획 · 2/3 만료 정하기'])
     expect(lines[2]).toMatch(/^직전 · 조회 로그를 보니.*…$/)
     // 40칸마다 한 줄로 세는 대화상자 규칙: 머리 1 + 줄마다 2 = 7줄 이하 (12줄 넘으면 엔진 것만 그려진다)
     for (const l of lines) expect(cells(l)).toBeLessThanOrEqual(78)
-    expect(askContext({ prompt: '', recent: [] }, [])).toEqual([])
+    expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: [] }, [])).toEqual([])
     // 사용자의 글은 직전 글로 쓰지 않는다
-    expect(askContext({ prompt: '', recent: [{ role: 'user', text: '답' }] }, [])).toEqual([])
+    expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: [{ role: 'user', text: '답' }] }, [])).toEqual([])
+    // 이 세션의 Claude 가 AskUserQuestion 으로 묻는 중일 때만: 다른 mod 의 $.ui.ask(prompt-coach 질문 등)도 같은 대화상자라 그 위에는 그리지 않는다
+    expect(askContext({ state: 'asking', step: '', prompt: '주문 조회 캐시를 정리해 줘', recent: [] }, tasks)).toEqual([])
+    expect(askContext({ state: 'working', step: '질문 중', prompt: '주문 조회 캐시를 정리해 줘', recent: [] }, tasks)).toEqual([])
   })
 })
 
@@ -2921,6 +2934,8 @@ describe('같은 실패 반복 (T34 A4)', () => {
     await $.prompt.submit({ text: '다른 방법으로 해 봐', origin: { kind: 'composer' } } as any)
     await clock.advance(3_000)
     expect(mine().stuck ?? null).toBeNull()
+    // 마지막 요청 시각은 흐름(12개)과 따로 둔다 (T34 D2)
+    expect(mine().promptAt).toBe(mine().timeline.findLast((t: any) => t.kind === 'prompt').at)
 
     // 사이에 다른 명령이 실패하면 처음부터 센다 (연속이 아니다)
     await bash('make a'); await bash('make a')

@@ -69,6 +69,8 @@ export type Beat = {
   stuck?: { at: number; key: string; count: number } | null
   /** 턴이 끝날 때 읽은 작업 폴더의 git 상태 (T34 B2, 0.28 전 파일에는 없음). git 저장소가 아니면 null */
   git?: GitState | null
+  /** 사람이 마지막으로 요청을 보낸 시각. 흐름(12개)에서 밀려나도 남는다 (T34 D2, 0.28.9 전 파일에는 없음) */
+  promptAt?: number
   /** 이 기록을 처음 만든 시각 (세션 나이, 0.28 전 파일에는 없음) */
   startedAt?: number
   /** 최근 편집한 경로와 시각, 12개. 같은 파일 겹침을 찾는다 (0.28 전 파일에는 없음) */

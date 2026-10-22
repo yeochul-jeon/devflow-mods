@@ -645,7 +645,7 @@ export const register: Register = (on, options) => {
     if (text && !e.text.startsWith('/') && self.beat && USER_ORIGINS.has(e.origin.kind)) {
       const at = await $.clock.now()
       const b = self.beat
-      const kept = { decisions: b.decisions, timeline: b.timeline, question: b.question, prompt: b.prompt, state: b.state, step: b.step, recent: b.recent }
+      const kept = { decisions: b.decisions, timeline: b.timeline, question: b.question, prompt: b.prompt, promptAt: b.promptAt, state: b.state, step: b.step, recent: b.recent }
       const keptAsking = { undo: self.undo, htmlKeep: self.htmlKeep, askingSince: self.askingSince }
       let { decisions, timeline } = self.beat
       self.undo = null
@@ -661,7 +661,7 @@ export const register: Register = (on, options) => {
       self.htmlKeep = ''
       self.beat.agents = agentClearEnded(self.beat.agents)
       self.failRun = { key: '', count: 0 }
-      await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), state: 'working', step: '생각 중', stuck: null }, true)
+      await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), promptAt: at, state: 'working', step: '생각 중', stuck: null }, true)
       // 다른 mod 가 보내기를 막았으면(drop) 요청도 답도 아니다. 넘기기 전 상태로 되돌린다
       const r = await next(e)
       if (r.drop !== undefined) {
@@ -1020,7 +1020,8 @@ export const register: Register = (on, options) => {
     else if (key.startsWith('view-')) {
       // 보조 대화 보기 (T34 D3): 사람이 누른 것이라 엔진이 보기를 옮긴다. 안 되면 엔진이 준 이유를 그대로
       const agentId = key === 'view-main' ? undefined : key.slice('view-'.length)
-      const r = await $.ui.view(agentId ? { agentId } : {})
+      // $.ui.view 는 CLI 2.1.300 부터: 그 전 엔진의 거절도 이유로 보인다
+      const r = await $.ui.view(agentId ? { agentId } : {}).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
       if (r.deny) await $.ui.toast(`${agentId ? '보조 대화' : '메인 대화'}를 열지 못했어요: ${r.deny}`)
     }
     else return next(e)
