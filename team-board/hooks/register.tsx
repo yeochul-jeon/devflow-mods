@@ -55,6 +55,7 @@ import {
   soundCommands,
   soundOs,
   pushCapped,
+  needsVerify,
   pushTouch,
   questionSummary,
   sinceLastPrompt,
@@ -78,7 +79,7 @@ import {
   visible,
   withMe,
 } from './board'
-import { commandKey, formatAlert, judge, masksIn, noteForClaude, redact, signLine } from './failure'
+import { commandKey, formatAlert, isVerify, judge, masksIn, noteForClaude, redact, signLine } from './failure'
 import { bar, contextTone, mix, paletteOf } from './palette'
 import { cells as widthOf, clip as widthClip, flowArt, parseExplain, parseSte } from './diagram'
 import { hex, ICONS, sprite } from './pixel'
@@ -124,6 +125,9 @@ const self = {
   root: '',
   /** 같은 파일 겹침을 Claude 에게 이미 알린 것: `<경로>|<세션 id>` */
   overlapTold: new Set<string>(),
+  /** 마지막 검증 명령 뒤에 고친 코드 경로와 마지막 편집 시각 (T34 B1). 보조 에이전트의 편집·검증도 센다 */
+  unchecked: new Set<string>(),
+  uncheckedAt: 0,
   beat: null as Beat | null,
   lastWrite: 0,
   /** 마지막으로 시작한 scan 번호. 늦게 끝난 이전 scan 이 새 결과를 덮지 않게 한다 */
@@ -722,6 +726,11 @@ export const register: Register = (on, options) => {
   // 숨은 실패: exit 0 인데 출력에 실패 흔적. 같은 명령이 깨끗하게 다시 돌면 지운다.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
+    // 검증 명령을 돌렸으면(통과·실패와 상관없이) 검증 없음을 지운다 (T34 B1)
+    if (ran.deny === undefined && isVerify(e.command)) {
+      self.unchecked.clear()
+      if (self.beat?.unverified) await save($, { unverified: null }, true)
+    }
     if (self.failOff || e.agentId || !self.beat) return ran
     // 거부됐거나 exit 0 이 아니면 Claude 가 이미 오류로 받는다
     if (ran.deny !== undefined || ran.isError === true) return ran
@@ -783,6 +792,13 @@ export const register: Register = (on, options) => {
     if (e.tool === PLAN_TOOL) return next(e)
 
     const step = describeTool(e.tool, input)
+    if (EDIT_TOOLS.has(e.tool)) {
+      const p = touchPath(self.root, String(input.file_path ?? input.notebook_path ?? ''))
+      if (needsVerify(p)) {
+        self.unchecked.add(p)
+        self.uncheckedAt = await $.clock.now()
+      }
+    }
     if (EDIT_TOOLS.has(e.tool) && main && self.beat) {
       const full = String(input.file_path ?? input.notebook_path ?? '')
       const file = basename(full)
@@ -831,6 +847,8 @@ export const register: Register = (on, options) => {
 
     const usage = await $.session.usage().catch(() => null)
     const contextPct = usage?.context?.percent ?? null
+    // 고친 코드를 검증 없이 턴이 끝났는지 (T34 B1). 아래 어느 쪽 기록에도 함께 쓰인다
+    if (self.beat) self.beat.unverified = self.unchecked.size ? { at: self.uncheckedAt, files: self.unchecked.size } : null
     const answer = 'answer' in e && typeof e.answer === 'string' ? e.answer : ''
     const undo = self.undo
     self.undo = null
@@ -1381,6 +1399,13 @@ export const register: Register = (on, options) => {
       return row('겹침', <Text color={pal.ask} wrap="truncate-end">{`⚠ ${o.path} · ${o.name} ${ago(now - o.at)}${os.length > 1 ? ` 외 ${os.length - 1}건` : ''}`}</Text>, `overlap-${b.id}`)
     }
 
+    // 검증 없음 (T34 B1)
+    const uncheckedRow = (b: Beat) => {
+      const u = b.unverified
+      if (!u || isStale(b, now)) return null
+      return row('검증', <Text color={pal.ask} wrap="truncate-end">{`△ 마지막 코드 수정 뒤 테스트·빌드 없음 · 파일 ${u.files} · ${ago(now - u.at)}`}</Text>, `unverified-${b.id}`)
+    }
+
     // 복귀 요약 (T34 D2): 마지막 요청 뒤 무엇이 바뀌었나. 요청한 지 5분이 안 됐으면 보고 있던 참이라 뺀다
     const sinceRow = (b: Beat) => {
       const s = sinceLastPrompt(b)
@@ -1634,6 +1659,7 @@ export const register: Register = (on, options) => {
             {b.startedAt !== undefined ? row('시작', <Text color={pal.dim}>{`${ago(now - b.startedAt)} 시작`}</Text>) : null}
             {sinceRow(b)}
             {failRows(b, true)}
+            {uncheckedRow(b)}
             {overlapRow(b)}
             {b.files.length ? row('편집', <Text color={pal.dim} wrap="truncate-end">{`${b.edits}회 · ${b.files.slice(0, 6).join(', ')}`}</Text>) : null}
             {askBlock(b, 40)}
@@ -1743,6 +1769,7 @@ export const register: Register = (on, options) => {
           <Text color={pal.accent} bold>TEAM BOARD</Text>
           {count('asking') ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 대기 ${count('asking')} `}</Text> : null}
           {list.some(b => b.fail?.level === 'high' && !isStale(b, now)) ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 숨은 실패 ${list.filter(b => b.fail?.level === 'high' && !isStale(b, now)).length} `}</Text> : null}
+          {list.some(b => b.unverified && !isStale(b, now)) ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` △ 검증 없음 ${list.filter(b => b.unverified && !isStale(b, now)).length} `}</Text> : null}
           {overlapped ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` ⚠ 겹침 ${overlapped} `}</Text> : null}
           <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
           {waiting ? <Text color={pal.work}>{`◐ 보조 기다림 ${waiting}`}</Text> : null}
@@ -1768,6 +1795,7 @@ export const register: Register = (on, options) => {
                 : null}
               {sinceRow(b)}
               {failRows(b, false)}
+              {uncheckedRow(b)}
               {overlapRow(b)}
               {askBlock(b, 6)}
               <Box flexDirection="row" justifyContent="flex-end">

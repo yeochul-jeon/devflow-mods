@@ -43,6 +43,7 @@ import {
   touchPath,
   sinceLastPrompt,
   sinceText,
+  needsVerify,
   progress,
   questionSummary,
   recentTurns,
@@ -60,7 +61,7 @@ import {
 import { bar, contextTone, mix, paletteOf } from '../hooks/palette'
 import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
-import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
+import { commandKey, isReadOnly, isVerify, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
 
 // 알약 바탕: 상태색을 카드 바탕 쪽으로 30% (위 줄 배지와 구분, T27 D2)
 const chip = (tone: 'ask' | 'work') => mix(paletteOf('night')[tone], paletteOf('night').card, 0.3)
@@ -1415,6 +1416,82 @@ describe('보조 에이전트 대화 보기 (T34 D3)', () => {
     await viewing.press({ key: 'view-main' })
     expect(views.at(-1)).toEqual({})
     await viewing.unmount()
+  })
+})
+
+describe('검증 없음 (T34 B1)', () => {
+  test('검증 명령: 테스트·빌드·타입 검사·린트. 읽기만 하는 명령과 echo 는 아니다', async () => {
+    for (const c of ['cd svc && ./gradlew test --tests X', 'mvn -q verify', 'npm test', 'npm run build', 'pnpm lint', 'bun test', 'pytest -k a', 'python -m pytest', 'cargo check', 'go test ./...', 'bunx -p typescript tsc --noEmit -p .', 'npx eslint .', 'make test', 'claude plugin test ./team-board', 'claude plugin validate ./a'])
+      expect([c, isVerify(c)]).toEqual([c, true])
+    for (const c of ['git status', 'echo test', 'cat build/test.log', 'grep -n test a.ts', 'ls tests', 'npm install', 'git commit -m test'])
+      expect([c, isVerify(c)]).toEqual([c, false])
+  })
+
+  test('검증이 필요한 편집: 저장소 안 코드. 문서·저장소 밖 파일은 아니다', async () => {
+    expect(needsVerify('src/order.ts')).toBe(true)
+    expect(needsVerify('build.gradle.kts')).toBe(true)
+    expect(needsVerify('README.md')).toBe(false)
+    expect(needsVerify('docs/guide.txt')).toBe(false)
+    expect(needsVerify('docs/images/a.webp')).toBe(false)
+    expect(needsVerify('/home/me/.claude/plans/p.md')).toBe(false)
+    expect(needsVerify('/tmp/x.ts')).toBe(false)
+  })
+
+  test('코드를 고친 뒤 검증 없이 턴이 끝나면 카드에 표시, 검증 명령이 돌면 지운다. 문서만 고치면 조용하다', async ($, on) => {
+    const pal = paletteOf('night')
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.complete', () => ({ text: '' }))
+    on('tool.call', ($, e: any) => (e.tool === 'Bash' ? { result: { stdout: 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' } : { result: 'ok', text: 'ok' }) as any)
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    const done = async () => {
+      await $.turn.complete({ reason: 'answer', answer: '고쳤습니다.', durationMs: 1, isAborted: false, turnId: 't' } as any)
+      await clock.advance(3_000)
+    }
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+
+    // 문서만 고치면 조용하다
+    await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/README.md', old_string: 'a', new_string: 'b', tool_use_id: 'e0' } as any)
+    await done()
+    expect(mine().unverified ?? null).toBeNull()
+
+    // 코드 두 개를 고치고 검증 없이 끝남
+    await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/src/a.ts', old_string: 'a', new_string: 'b', tool_use_id: 'e1' } as any)
+    await $.tool.call({ tool: 'Write', file_path: '/repo/order-svc/src/b.ts', content: 'x', tool_use_id: 'e2' } as any)
+    await $.tool.call({ tool: 'Bash', command: 'git status', tool_use_id: 'b0' } as any)
+    await done()
+    expect(mine().unverified).toEqual({ at: NOW + 3_000, files: 2 })
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
+    expect((await pane.find({ type: 'Text', text: /^△ 마지막 코드 수정 뒤 테스트·빌드 없음 · 파일 2 · \d+초 전$/ }))?.props.color).toBe(pal.ask)
+    expect(await pane.find({ type: 'Text', text: /^ △ 검증 없음 1 $/ })).toBeDefined()
+    await pane.unmount()
+
+    // 보조 에이전트가 돌린 테스트도 검증이다
+    await $.tool.call({ tool: 'Bash', command: './gradlew test', agentId: 'sub-1', tool_use_id: 'b1' } as any)
+    await done()
+    expect(mine().unverified).toBeNull()
+
+    // 검증 뒤 다시 고치면 다시 표시
+    await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/src/a.ts', old_string: 'b', new_string: 'c', tool_use_id: 'e3' } as any)
+    await done()
+    expect(mine().unverified?.files).toBe(1)
   })
 })
 

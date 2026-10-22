@@ -107,6 +107,14 @@ export function isReadOnly(command: string): boolean {
   return steps(command).every(s => READ_ONLY.test(s) && !WRITES_FILE.test(s.replace(/'[^']*'|"[^"]*"/g, '')))
 }
 
+/** 검증 명령: 테스트·빌드·타입 검사·린트 (T34 B1) */
+const VERIFY = /^(?:\.\/)?(?:gradlew|gradle|mvnw?|make|ctest|pytest|jest|vitest|mocha|tsc|eslint|ruff|mypy|pyright|rspec|phpunit)\b|^(?:python3?|uv run|poetry run)\s+(?:-m\s+)?(?:pytest|unittest|mypy|ruff)\b|^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|lint|check|typecheck|verify)\b|^(?:npx|bunx|pnpx)\s+(?:-p\s+\S+\s+)?(?:tsc|eslint|jest|vitest|playwright)\b|^cargo (?:test|build|check|clippy)\b|^go (?:test|build|vet)\b|^dotnet (?:test|build)\b|^swift (?:test|build)\b|^claude plugin (?:test|validate)\b/
+
+/** 단계 중 하나라도 검증 명령이면 true. 결과(통과·실패)는 보지 않는다: 돌렸는지만 */
+export function isVerify(command: string): boolean {
+  return steps(command).some(s => VERIFY.test(s))
+}
+
 /**
  * 같은 명령을 다시 돌렸는지 비교할 키: 읽기 전용이 아닌 첫 단계의 앞 두 낱말. `./gradlew test --tests X` → `./gradlew test`
  * 둘째 낱말이 run·-m·exec 이면 세 낱말: `npm run lint` → `npm run lint`.

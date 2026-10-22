@@ -379,6 +379,14 @@ export function overlaps(me: Beat, others: readonly Beat[], now: number): { path
     .sort((a, b) => b.at - a.at)
 }
 
+/** 고친 뒤 검증이 필요 없는 파일: 문서·그림 (T34 B1) */
+const NO_VERIFY = /\.(?:md|mdx|txt|rst|adoc|png|jpe?g|gif|webp|svg)$/i
+
+/** 검증(테스트·빌드)이 필요한 편집인지: 저장소 안의 코드. 저장소 밖(절대 경로)·문서·그림은 아니다 */
+export function needsVerify(path: string): boolean {
+  return !/^(?:\/|[A-Za-z]:)/.test(path) && !NO_VERIFY.test(path)
+}
+
 /** 복귀 요약 (T34 D2): 마지막 요청 뒤에 끝난 단계, 고친 파일, 질문, 숨은 실패 수. 요청이 없거나 그 뒤 아무 일도 없으면 null */
 export function sinceLastPrompt(b: Beat): { at: number; steps: number; files: number; asks: number; fails: number } | null {
   const p = [...b.timeline].reverse().find(t => t.kind === 'prompt')
