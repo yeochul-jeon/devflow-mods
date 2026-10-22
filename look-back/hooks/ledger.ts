@@ -214,7 +214,8 @@ const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|j
 function steps(command: string): string[] {
   // 따옴표 안의 | ; 는 구분자가 아니다: 같은 길이로 가린 사본에서 자를 자리를 찾고 원문을 자른다
   // 주석 줄은 가리기 전에 지운다: 주석 안의 ' 가 뒤의 따옴표와 짝지어지지 않게
-  const src = command.replace(/^[ \t]*#.*$/gm, '')
+  // heredoc 본문은 명령이 아니라 글이다: `cat <<'EOF' … EOF` 는 첫 줄만 남긴다 (<<- 는 닫는 줄의 탭을 허용)
+  const src = command.replace(/<<(-?)\s*(['"]?)(\w+)\2([^\n]*)\n[\s\S]*?\n[ \t]*\3[ \t]*(?=\n|$)/g, '<<$1$3$4').replace(/^[ \t]*#.*$/gm, '')
   const masked = src.replace(/'[^']*'|"[^"]*"/g, m => '_'.repeat(m.length))
   const parts: string[] = []
   let from = 0
