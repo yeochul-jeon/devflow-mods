@@ -962,6 +962,12 @@ export const register: Register = (on, options) => {
     else if (key === 'back') await update($, focus, () => null)
     else if (flowPress) await copyFlow($, flowPress[1]!, Number(flowPress[2]), flowPress[3]!, e.surface)
     else if (key === 'band-board') await $.command.run({ command: 'board', args: '' })
+    else if (key.startsWith('view-')) {
+      // 보조 대화 보기 (T34 D3): 사람이 누른 것이라 엔진이 보기를 옮긴다. 안 되면 엔진이 준 이유를 그대로
+      const agentId = key === 'view-main' ? undefined : key.slice('view-'.length)
+      const r = await $.ui.view(agentId ? { agentId } : {})
+      if (r.deny) await $.ui.toast(`${agentId ? '보조 대화' : '메인 대화'}를 열지 못했어요: ${r.deny}`)
+    }
     else return next(e)
     return { element: key }
   })
@@ -1617,6 +1623,11 @@ export const register: Register = (on, options) => {
       const { done, total } = progress(b.tasks)
       return (
         <Box flexDirection="column" paddingX={1}>
+          {e.props.view?.agentId ? (
+            <Box marginBottom={1}>
+              <Button key="view-main" label="← 메인 대화" onPress={noop} />
+            </Box>
+          ) : null}
           <Box {...cardProps(b)}>
             {headOf(b)}
             {b.prompt ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>) : null}
@@ -1645,13 +1656,19 @@ export const register: Register = (on, options) => {
                 <Text color={pal.dim}>{agentSummary(b.agents)}</Text>
               </Text>
               {b.agents.map(a => (
-                <Text wrap="truncate-end">
-                  <Text color={a.status === 'working' ? pal.work : a.status === 'done' ? pal.ok : pal.bad}>
-                    {a.status === 'working' ? '  ● ' : a.status === 'done' ? '  ✓ ' : '  ✗ '}
-                  </Text>
-                  <Text color={a.status === 'working' ? pal.text : pal.dim}>{a.desc || a.id}</Text>
-                  <Text color={pal.dim}>{`  ${agentMeta(a, now)}`}</Text>
-                </Text>
+                <Box flexDirection="row" columnGap={1}>
+                  <Box flexGrow={1} flexShrink={1}>
+                    <Text wrap="truncate-end">
+                      <Text color={a.status === 'working' ? pal.work : a.status === 'done' ? pal.ok : pal.bad}>
+                        {a.status === 'working' ? '  ● ' : a.status === 'done' ? '  ✓ ' : '  ✗ '}
+                      </Text>
+                      <Text color={a.status === 'working' ? pal.text : pal.dim}>{a.desc || a.id}</Text>
+                      <Text color={pal.dim}>{`  ${agentMeta(a, now)}`}</Text>
+                    </Text>
+                  </Box>
+                  {/* 자기 세션의 보조만 그 대화를 열 수 있다 (T34 D3) */}
+                  {b.id === self.beat?.id ? <Box flexShrink={0}><Button key={`view-${a.id}`} plain label=" 보기 " onPress={noop} /></Box> : null}
+                </Box>
               ))}
             </Box>
           ) : null}

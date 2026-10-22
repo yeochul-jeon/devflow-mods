@@ -1361,6 +1361,63 @@ describe('복귀 요약·세션 나이 (T34 D2·D4)', () => {
   })
 })
 
+describe('보조 에이전트 대화 보기 (T34 D3)', () => {
+  test('자기 세션 자세히의 보조 줄 [보기] 를 누르면 그 대화로, 안 되면 이유를 알린다. 보는 중이면 [← 메인 대화]', async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'sub-1' }))
+    on('agent.list', () => ({ value: [{ id: 'sub-1', status: 'running' }] as any }))
+    const views: any[] = []
+    let deny = ''
+    on('ui.view', ($, e: any) => { views.push({ ...e }); return { value: deny ? { deny } : {} } })
+    const toasts: string[] = []
+    on('ui.toast', ($, e: any) => { toasts.push(e.text); return { value: undefined } })
+    // 다른 세션의 보조는 볼 수 없다 (자기 세션 것만)
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', agents: [{ id: 'p-1', desc: '남의 보조', type: 'Explore', model: 'm', status: 'working', tool: '', startedAt: NOW, endedAt: null, tokens: 0 }] })))
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.agent.spawn({ prompt: '표본 고르기', description: 'G4 표본 고르기', subagentType: 'Explore' } as any)
+    await clock.advance(3_000)
+
+    await $.command.run({ command: 'board', args: 'order-svc' } as any)
+    const detail = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90, view: {} } } as any)
+    expect(await detail.find({ type: 'Button', key: 'view-sub-1' })).toBeDefined()
+    await detail.press({ key: 'view-sub-1' })
+    expect(views).toEqual([{ agentId: 'sub-1' }])
+    deny = 'not person-initiated'
+    await detail.press({ key: 'view-sub-1' })
+    expect(toasts.at(-1)).toBe('보조 대화를 열지 못했어요: not person-initiated')
+    await detail.unmount()
+
+    await $.command.run({ command: 'board', args: 'sub-2' } as any)
+    const peer = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90, view: {} } } as any)
+    expect(await peer.find({ type: 'Button', key: 'view-p-1' })).toBeUndefined()
+    await peer.unmount()
+
+    deny = ''
+    const viewing = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90, view: { agentId: 'sub-1' } } } as any)
+    await viewing.press({ key: 'view-main' })
+    expect(views.at(-1)).toEqual({})
+    await viewing.unmount()
+  })
+})
+
 describe('결정할 것 블록 (T32)', () => {
   test('접힌 줄마다 막대를 잇고 둘째 줄부터 내어 쓴다. 묻는 줄은 ┃, 그 앞에 빈 줄', async ($, on) => {
     const pal = paletteOf('night')
