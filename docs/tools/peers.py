@@ -1,4 +1,4 @@
-# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|ended|decide|none(지우기만)>
+# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|ended|decide|watch|none(지우기만)>
 import json, os, sys, time, glob
 d, sc = sys.argv[1], sys.argv[2]
 for f in glob.glob(os.path.join(d, 'peer-*.json')):
@@ -94,3 +94,20 @@ elif sc == 'decide':
     put('a', 'api-fix', state='working', step='Bash ./gradlew test --tests Order', tasks=t('completed', 'in_progress', 'pending', 'pending'))
     put('3', 'sub-3', last='새 요청 대기')
     put('4', 'sub-4', tasks=t('completed', 'completed', 'completed', 'completed'), last='부하 테스트까지 마쳤습니다.')
+elif sc == 'watch':
+    # T34 (0.28.x): 그새 · 변경 · 검증 없음 · 막힘 · 같은 파일 겹침
+    m = lambda s: now - s * 60_000
+    put('2', 'sub-2', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?', prompt='주문 조회 캐시 정리', promptAt=m(34),
+        tasks=[{'id': '1', 'subject': '느린 쿼리 찾기', 'status': 'completed', 'doneAt': m(25)}, {'id': '2', 'subject': '조회 결과 캐시 붙이기', 'status': 'completed', 'doneAt': m(12)},
+               {'id': '3', 'subject': '캐시 만료 정하기', 'status': 'in_progress'}], planStartAt=m(33),
+        timeline=[{'at': m(34), 'kind': 'prompt', 'text': '주문 조회 캐시 정리'}, {'at': m(2), 'kind': 'ask', 'text': '캐시 만료를 5분으로 할까요, 1시간으로 할까요?'}],
+        touched=[{'path': 'src/order/OrderCache.java', 'at': m(14)}, {'path': 'src/order/OrderService.java', 'at': m(18)}],
+        unverified={'at': m(14), 'files': 2},
+        git={'branch': 'feat/order-cache', 'ahead': 2, 'behind': 0, 'files': 2, 'add': 86, 'del': 12, 'at': m(2)}, cwd='/repo/order-svc-cache')
+    put('a', 'api-fix', state='working', step='Bash ./gradlew test --tests Order', prompt='주문 API 응답 시간 줄이기', promptAt=m(22),
+        timeline=[{'at': m(22), 'kind': 'prompt', 'text': '주문 API 응답 시간 줄이기'}, {'at': m(6), 'kind': 'fail', 'text': './gradlew test · 1 failed'}],
+        touched=[{'path': 'src/order/OrderService.java', 'at': m(4)}],
+        stuck={'at': m(1), 'key': './gradlew test', 'count': 3})
+    put('3', 'sub-3', last='문서 링크 확인 완료', prompt='문서 링크 확인', promptAt=m(50),
+        timeline=[{'at': m(50), 'kind': 'prompt', 'text': '문서 링크 확인'}, {'at': m(41), 'kind': 'done', 'text': '끝'}],
+        touched=[{'path': 'docs/guide.md', 'at': m(45)}])
