@@ -62,6 +62,8 @@ export type Beat = {
   files: string[]
   /** 코드를 고친 뒤 검증 명령 없이 턴이 끝남: 마지막 코드 편집 시각과 그 뒤 검증 안 된 파일 수 (T34 B1, 0.28 전 파일에는 없음) */
   unverified?: { at: number; files: number } | null
+  /** 수정 없이 같은 명령이 3번 연속 실패함: 명령 키, 연속 실패 수 (T34 A4, 0.28 전 파일에는 없음) */
+  stuck?: { at: number; key: string; count: number } | null
   /** 이 기록을 처음 만든 시각 (세션 나이, 0.28 전 파일에는 없음) */
   startedAt?: number
   /** 최근 편집한 경로와 시각, 12개. 같은 파일 겹침을 찾는다 (0.28 전 파일에는 없음) */

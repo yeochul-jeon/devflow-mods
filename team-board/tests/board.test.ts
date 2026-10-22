@@ -2843,3 +2843,76 @@ describe('결정 대화상자 위 맥락 (T34 A1)', () => {
     expect(askContext({ prompt: '', recent: [{ role: 'user', text: '답' }] }, [])).toEqual([])
   })
 })
+
+describe('같은 실패 반복 (T34 A4)', () => {
+  test('수정 없이 같은 명령이 3번 연속 실패하면 Claude 에게 알리고 카드에 막힘 줄. 사이에 고치면 다시 센다. 통과하거나 사람이 요청하면 지운다', async ($, on) => {
+    const pal = paletteOf('night')
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    let pass = false
+    on('tool.call', ($, e: any) => (e.tool === 'Bash'
+      ? (pass ? { result: { stdout: 'ok', stderr: '', interrupted: false }, text: 'ok' } : { result: { stdout: '', stderr: 'FAILED', interrupted: false }, text: 'Exit code 1', isError: true })
+      : { result: 'ok', text: 'ok' }) as any)
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    const bash = (command: string, agentId?: string) => $.tool.call({ tool: 'Bash', command, tool_use_id: 'b', ...(agentId ? { agentId } : {}) } as any) as Promise<any>
+    const edit = () => $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/src/a.ts', old_string: 'a', new_string: 'b', tool_use_id: 'e' } as any)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+
+    // 고치면서 돌리는 것은 막힘이 아니다
+    await bash('./gradlew test --tests A'); await edit()
+    await bash('./gradlew test --tests A'); await edit()
+    expect((await bash('./gradlew test --tests A')).context ?? []).toEqual([])
+    // 수정 없이 같은 명령(키)이 3번째 실패: Claude 에게 한 줄
+    // 2번째까지는 조용하다
+    expect((await bash('./gradlew test --tests B')).context ?? []).toEqual([])
+    await clock.advance(3_000)
+    expect(mine().stuck ?? null).toBeNull()
+    const third = await bash('./gradlew test 2>&1 | tail -5')
+    expect(third.context?.join('\n')).toContain('수정 없이 3번 연속 실패')
+    // 다른 명령의 실패나 보조 에이전트의 실패는 세지 않는다
+    expect((await bash('./gradlew test', 'sub-1')).context ?? []).toEqual([])
+    await clock.advance(3_000)
+    expect(mine().stuck).toMatchObject({ key: './gradlew test', count: 3 })
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
+    expect((await pane.find({ type: 'Text', text: '✕ ./gradlew test · 수정 없이 3번 연속 실패' }))?.props.color).toBe(pal.bad)
+    await pane.unmount()
+
+    // 통과하면 지운다
+    pass = true
+    await bash('./gradlew test')
+    await clock.advance(3_000)
+    expect(mine().stuck ?? null).toBeNull()
+
+    // 사람이 요청을 보내도 지운다
+    pass = false
+    for (let i = 0; i < 3; i++) await bash('npm test')
+    await clock.advance(3_000)
+    expect(mine().stuck).toMatchObject({ key: 'npm test' })
+    await $.prompt.submit({ text: '다른 방법으로 해 봐', origin: { kind: 'composer' } } as any)
+    await clock.advance(3_000)
+    expect(mine().stuck ?? null).toBeNull()
+
+    // 사이에 다른 명령이 실패하면 처음부터 센다 (연속이 아니다)
+    await bash('make a'); await bash('make a')
+    expect((await bash('npm test')).context ?? []).toEqual([])
+    expect((await bash('make a')).context ?? []).toEqual([])
+  })
+})

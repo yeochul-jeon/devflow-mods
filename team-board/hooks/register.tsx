@@ -129,6 +129,8 @@ const self = {
   /** 마지막 검증 명령 뒤에 고친 코드 경로와 마지막 편집 시각 (T34 B1). 보조 에이전트의 편집·검증도 센다 */
   unchecked: new Set<string>(),
   uncheckedAt: 0,
+  /** 수정 없이 연달아 실패한 같은 명령 (T34 A4). 편집하면 다시 센다 */
+  failRun: { key: '', count: 0 },
   beat: null as Beat | null,
   lastWrite: 0,
   /** 마지막으로 시작한 scan 번호. 늦게 끝난 이전 scan 이 새 결과를 덮지 않게 한다 */
@@ -645,7 +647,8 @@ export const register: Register = (on, options) => {
       // 결정과 새 요청을 한 번에 쓴다. 답을 보냈으니 더 이상 결정 대기가 아니다.
       self.htmlKeep = ''
       self.beat.agents = agentClearEnded(self.beat.agents)
-      await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), state: 'working', step: '생각 중' }, true)
+      self.failRun = { key: '', count: 0 }
+      await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), state: 'working', step: '생각 중', stuck: null }, true)
       // 다른 mod 가 보내기를 막았으면(drop) 요청도 답도 아니다. 넘기기 전 상태로 되돌린다
       const r = await next(e)
       if (r.drop !== undefined) {
@@ -732,6 +735,24 @@ export const register: Register = (on, options) => {
       self.unchecked.clear()
       if (self.beat?.unverified) await save($, { unverified: null }, true)
     }
+    // 같은 실패 반복 (T34 A4): 메인이 수정 없이 같은 명령을 3번 연속 실패. 3번째에 Claude 에게 한 줄, 카드에 막힘
+    if (!e.agentId && self.beat && ran.deny === undefined) {
+      const key = commandKey(e.command) || oneLine(e.command, 60)
+      if (ran.isError === true) {
+        self.failRun = key === self.failRun.key ? { key, count: self.failRun.count + 1 } : { key, count: 1 }
+        if (self.failRun.count >= 3) {
+          const at = await $.clock.now()
+          await save($, { stuck: { at, key, count: self.failRun.count } }, true)
+          if (self.failRun.count === 3) {
+            const memo = `team-board: \`${key}\` 이(가) 코드 수정 없이 3번 연속 실패했습니다. 같은 시도를 되풀이하지 말고 원인을 다시 보거나 다른 방법을 쓰거나, 막혔으면 사용자에게 물으세요.`
+            return { ...ran, context: [...(ran.context ?? []), memo] }
+          }
+        }
+      } else if (key === self.failRun.key) {
+        self.failRun = { key: '', count: 0 }
+        if (self.beat.stuck) await save($, { stuck: null }, true)
+      }
+    }
     if (self.failOff || e.agentId || !self.beat) return ran
     // 거부됐거나 exit 0 이 아니면 Claude 가 이미 오류로 받는다
     if (ran.deny !== undefined || ran.isError === true) return ran
@@ -793,6 +814,7 @@ export const register: Register = (on, options) => {
     if (e.tool === PLAN_TOOL) return next(e)
 
     const step = describeTool(e.tool, input)
+    if (EDIT_TOOLS.has(e.tool) && main) self.failRun = { key: '', count: 0 }
     if (EDIT_TOOLS.has(e.tool)) {
       const p = touchPath(self.root, String(input.file_path ?? input.notebook_path ?? ''))
       if (needsVerify(p)) {
@@ -1421,6 +1443,13 @@ export const register: Register = (on, options) => {
       return row('겹침', <Text color={pal.ask} wrap="truncate-end">{`⚠ ${o.path} · ${o.name} ${ago(now - o.at)}${os.length > 1 ? ` 외 ${os.length - 1}건` : ''}`}</Text>, `overlap-${b.id}`)
     }
 
+    // 같은 실패 반복 (T34 A4)
+    const stuckRow = (b: Beat) => {
+      const s = b.stuck
+      if (!s || isStale(b, now)) return null
+      return row('막힘', <Text color={pal.bad} wrap="truncate-end">{`✕ ${s.key} · 수정 없이 ${s.count}번 연속 실패`}</Text>, `stuck-${b.id}`)
+    }
+
     // 검증 없음 (T34 B1)
     const uncheckedRow = (b: Beat) => {
       const u = b.unverified
@@ -1681,6 +1710,7 @@ export const register: Register = (on, options) => {
             {b.startedAt !== undefined ? row('시작', <Text color={pal.dim}>{`${ago(now - b.startedAt)} 시작`}</Text>) : null}
             {sinceRow(b)}
             {failRows(b, true)}
+            {stuckRow(b)}
             {uncheckedRow(b)}
             {overlapRow(b)}
             {b.files.length ? row('편집', <Text color={pal.dim} wrap="truncate-end">{`${b.edits}회 · ${b.files.slice(0, 6).join(', ')}`}</Text>) : null}
@@ -1817,6 +1847,7 @@ export const register: Register = (on, options) => {
                 : null}
               {sinceRow(b)}
               {failRows(b, false)}
+              {stuckRow(b)}
               {uncheckedRow(b)}
               {overlapRow(b)}
               {askBlock(b, 6)}
