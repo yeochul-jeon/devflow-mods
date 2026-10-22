@@ -20,6 +20,9 @@ export type FailAlert = { at: number; command: string; key: string; level: 'high
 /** 이 세션이 편집한 파일 하나: 저장소 안 상대 경로와 마지막 편집 시각 (T34 D1) */
 export type Touch = { path: string; at: number }
 
+/** 작업 폴더의 git 상태: 브랜치, upstream 보다 앞선·뒤진 커밋, 커밋 안 한 파일 수(새 파일 포함), 커밋 안 한 줄 수 (T34 B2) */
+export type GitState = { branch: string; ahead: number; behind: number; files: number; add: number; del: number; at: number }
+
 /** 직전 대화 한 줄: 누가 무엇을 말했는지 (텍스트만, 잘린 것). */
 export type RecentLine = { role: 'user' | 'assistant'; text: string }
 
@@ -64,6 +67,8 @@ export type Beat = {
   unverified?: { at: number; files: number } | null
   /** 수정 없이 같은 명령이 3번 연속 실패함: 명령 키, 연속 실패 수 (T34 A4, 0.28 전 파일에는 없음) */
   stuck?: { at: number; key: string; count: number } | null
+  /** 턴이 끝날 때 읽은 작업 폴더의 git 상태 (T34 B2, 0.28 전 파일에는 없음). git 저장소가 아니면 null */
+  git?: GitState | null
   /** 이 기록을 처음 만든 시각 (세션 나이, 0.28 전 파일에는 없음) */
   startedAt?: number
   /** 최근 편집한 경로와 시각, 12개. 같은 파일 겹침을 찾는다 (0.28 전 파일에는 없음) */

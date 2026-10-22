@@ -43,6 +43,9 @@ import {
   touchPath,
   sinceLastPrompt,
   sinceText,
+  gitText,
+  parseGitStatus,
+  parseShortstat,
   askContext,
   needsVerify,
   progress,
@@ -2914,5 +2917,68 @@ describe('같은 실패 반복 (T34 A4)', () => {
     await bash('make a'); await bash('make a')
     expect((await bash('npm test')).context ?? []).toEqual([])
     expect((await bash('make a')).context ?? []).toEqual([])
+  })
+})
+
+describe('변경 요약 (T34 B2)', () => {
+  test('git status -b 와 diff --shortstat 을 읽는다', async () => {
+    expect(parseGitStatus('## feat/cache...origin/feat/cache [ahead 2, behind 1]\n M src/a.ts\n?? src/new.ts\n')).toEqual({ branch: 'feat/cache', ahead: 2, behind: 1, files: 2 })
+    expect(parseGitStatus('## main\n')).toEqual({ branch: 'main', ahead: 0, behind: 0, files: 0 })
+    expect(parseGitStatus('## HEAD (no branch)\n M a\n')).toEqual({ branch: 'HEAD', ahead: 0, behind: 0, files: 1 })
+    expect(parseGitStatus('')).toBeNull()
+    expect(parseShortstat(' 3 files changed, 120 insertions(+), 30 deletions(-)\n')).toEqual({ add: 120, del: 30 })
+    expect(parseShortstat(' 1 file changed, 1 deletion(-)\n')).toEqual({ add: 0, del: 1 })
+    expect(parseShortstat('')).toEqual({ add: 0, del: 0 })
+    expect(gitText({ branch: 'feat/cache', ahead: 2, behind: 0, files: 3, add: 120, del: 30 })).toBe('feat/cache ↑2 · 커밋 안 함 3파일 +120 −30')
+    expect(gitText({ branch: 'main', ahead: 0, behind: 1, files: 0, add: 0, del: 0 })).toBe('main ↓1')
+    // 깨끗하고 앞선 커밋도 없으면 빈 글 (줄을 숨긴다)
+    expect(gitText({ branch: 'main', ahead: 0, behind: 0, files: 0, add: 0, del: 0 })).toBe('')
+  })
+
+  test('턴이 끝나면 git 상태를 기록하고 자세히에 변경 줄. 다른 작업 폴더(워크트리) 세션은 카드에도', async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    const ran: string[][] = []
+    on('process.run', ($, e: any) => {
+      ran.push(e.argv)
+      const out = e.argv.includes('status') ? '## feat/cache...origin/feat/cache [ahead 2]\n M src/a.ts\n M src/b.ts\n' : e.argv.includes('--shortstat') ? ' 2 files changed, 12 insertions(+), 3 deletions(-)\n' : ''
+      return { value: { stdout: out, stderr: '', exitCode: out ? 0 : 1, isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('turn.complete', () => ({ text: '' }))
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    files.set(`${DIR}/wt.json`, JSON.stringify(beat({ id: 'wt', name: 'wt-2', cwd: '/repo/order-svc-wt', git: { branch: 'fix/x', ahead: 1, behind: 0, files: 0, add: 0, del: 0, at: NOW } })))
+    files.set(`${DIR}/same.json`, JSON.stringify(beat({ id: 'same', name: 'sub-3', cwd: '/repo/order-svc', git: { branch: 'feat/cache', ahead: 2, behind: 0, files: 2, add: 12, del: 3, at: NOW } })))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't' } as any)
+    await clock.advance(3_000)
+    expect(ran.some(a => a.join(' ') === 'git -C /repo/order-svc status --porcelain=v1 -b')).toBe(true)
+    const mine = JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    expect(mine.git).toEqual({ branch: 'feat/cache', ahead: 2, behind: 0, files: 2, add: 12, del: 3, at: NOW })
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
+    // 같은 폴더 세션은 카드에 같은 줄을 되풀이하지 않는다. 다른 워크트리만
+    expect(await pane.find({ type: 'Text', text: 'fix/x ↑1' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^feat\/cache/ })).toBeUndefined()
+    await pane.unmount()
+    await $.command.run({ command: 'board', args: 'order-svc' } as any)
+    const detail = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
+    expect(await detail.find({ type: 'Text', text: 'feat/cache ↑2 · 커밋 안 함 2파일 +12 −3' })).toBeDefined()
+    expect(await detail.find({ type: 'Text', text: /^변경$/ })).toBeDefined()
+    await detail.unmount()
   })
 })

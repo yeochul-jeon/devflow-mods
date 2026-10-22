@@ -15,6 +15,9 @@ import {
   agentStrips,
   askContext,
   fitStrip,
+  gitText,
+  parseGitStatus,
+  parseShortstat,
   wrapCells,
   agentSummary,
   agentSync,
@@ -373,6 +376,16 @@ async function pressHtml($: EngineInterface, id: string): Promise<void> {
   if (sent && sent.id === id && sent.question === target.question) return
   await update($, html, () => ({ id, question: target.question }))
   void $.prompt.submit({ text: htmlPrompt(target) })
+}
+
+/** 작업 폴더의 git 상태 (T34 B2). 턴 끝에 읽는다. git 저장소가 아니거나 git 이 없으면 null */
+async function readGit($: EngineInterface, cwd: string): Promise<Beat['git']> {
+  const run = (args: string[]) => $.process.run(['git', '-C', cwd, ...args], { timeoutMs: 3000 }).catch(() => null)
+  const st = await run(['status', '--porcelain=v1', '-b'])
+  const s = st?.exitCode === 0 ? parseGitStatus(st.stdout) : null
+  if (!s) return null
+  const d = s.files ? await run(['diff', '--shortstat', 'HEAD']) : null
+  return { ...s, ...parseShortstat(d?.exitCode === 0 ? d.stdout : ''), at: await $.clock.now() }
 }
 
 /** claude --name, /rename 으로 정한 세션 이름. 대화 기록 파일의 마지막 customTitle. */
@@ -870,7 +883,8 @@ export const register: Register = (on, options) => {
 
     const usage = await $.session.usage().catch(() => null)
     const contextPct = usage?.context?.percent ?? null
-    // 고친 코드를 검증 없이 턴이 끝났는지 (T34 B1). 아래 어느 쪽 기록에도 함께 쓰인다
+    // 작업 폴더의 git 상태 (T34 B2)와 고친 코드를 검증 없이 턴이 끝났는지 (T34 B1). 아래 어느 쪽 기록에도 함께 쓰인다
+    if (self.beat) self.beat.git = await readGit($, self.beat.cwd)
     if (self.beat) self.beat.unverified = self.unchecked.size ? { at: self.uncheckedAt, files: self.unchecked.size } : null
     const answer = 'answer' in e && typeof e.answer === 'string' ? e.answer : ''
     const undo = self.undo
@@ -1443,6 +1457,13 @@ export const register: Register = (on, options) => {
       return row('겹침', <Text color={pal.ask} wrap="truncate-end">{`⚠ ${o.path} · ${o.name} ${ago(now - o.at)}${os.length > 1 ? ` 외 ${os.length - 1}건` : ''}`}</Text>, `overlap-${b.id}`)
     }
 
+    // 변경 요약 (T34 B2). 전체 보기에서는 다른 작업 폴더(워크트리)의 세션만: 같은 폴더면 모든 카드가 같은 줄이다
+    const gitRow = (b: Beat, always: boolean) => {
+      const text = b.git ? gitText(b.git) : ''
+      if (!text || isStale(b, now) || (!always && b.cwd === self.beat?.cwd)) return null
+      return row('변경', <Text color={pal.text} wrap="truncate-end">{text}</Text>, `git-${b.id}`)
+    }
+
     // 같은 실패 반복 (T34 A4)
     const stuckRow = (b: Beat) => {
       const s = b.stuck
@@ -1709,6 +1730,7 @@ export const register: Register = (on, options) => {
             {b.prompt ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>) : null}
             {b.startedAt !== undefined ? row('시작', <Text color={pal.dim}>{`${ago(now - b.startedAt)} 시작`}</Text>) : null}
             {sinceRow(b)}
+            {gitRow(b, true)}
             {failRows(b, true)}
             {stuckRow(b)}
             {uncheckedRow(b)}
@@ -1846,6 +1868,7 @@ export const register: Register = (on, options) => {
                   )
                 : null}
               {sinceRow(b)}
+              {gitRow(b, false)}
               {failRows(b, false)}
               {stuckRow(b)}
               {uncheckedRow(b)}

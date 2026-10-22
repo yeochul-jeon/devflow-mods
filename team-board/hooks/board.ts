@@ -1,5 +1,5 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
-import type { Beat, Decision, Event, ExplainKind, RecentLine, SubAgent, Task, Touch, WorkPlan } from '../types'
+import type { Beat, Decision, Event, ExplainKind, GitState, RecentLine, SubAgent, Task, Touch, WorkPlan } from '../types'
 import { cells, clip, EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 import { bar } from './palette'
@@ -377,6 +377,27 @@ export function overlaps(me: Beat, others: readonly Beat[], now: number): { path
     .filter(o => o.id !== me.id && o.state !== 'ended' && !isStale(o, now))
     .flatMap(o => fresh(o).filter(t => mine.has(t.path)).map(t => ({ path: t.path, name: o.name, at: t.at })))
     .sort((a, b) => b.at - a.at)
+}
+
+/** `git status --porcelain=v1 -b` 를 읽는다 (T34 B2). 첫 줄이 `## ` 가 아니면 null */
+export function parseGitStatus(text: string): { branch: string; ahead: number; behind: number; files: number } | null {
+  const lines = text.split('\n').filter(Boolean)
+  const head = /^## (?:No commits yet on )?([^.\s]+(?:\.(?!\.)[^.\s]*)*)(?:\.\.\.\S+)?(?: \[(.*)\])?/.exec(lines[0] ?? '')
+  if (!head) return null
+  const n = (word: string) => Number(new RegExp(`${word} (\\d+)`).exec(head[2] ?? '')?.[1] ?? 0)
+  return { branch: head[1]!, ahead: n('ahead'), behind: n('behind'), files: lines.length - 1 }
+}
+
+/** `git diff --shortstat HEAD` 를 읽는다. 없으면 0 */
+export function parseShortstat(text: string): { add: number; del: number } {
+  return { add: Number(/(\d+) insertion/.exec(text)?.[1] ?? 0), del: Number(/(\d+) deletion/.exec(text)?.[1] ?? 0) }
+}
+
+/** 변경 요약 한 줄: `feat/x ↑2 · 커밋 안 함 3파일 +120 −30`. 깨끗하고 앞뒤 커밋도 없으면 '' */
+export function gitText(g: Omit<GitState, 'at'>): string {
+  if (!g.files && !g.ahead && !g.behind) return ''
+  const head = `${g.branch}${g.ahead ? ` ↑${g.ahead}` : ''}${g.behind ? ` ↓${g.behind}` : ''}`
+  return g.files ? `${head} · 커밋 안 함 ${g.files}파일 +${g.add} −${g.del}` : head
 }
 
 /** 결정 질문 대화상자 위 맥락 줄 (T34 A1): 요청, 지금 계획 단계, 질문 직전 Claude 의 글. 줄마다 width 칸으로 자른다. 아는 것이 없으면 [] */
