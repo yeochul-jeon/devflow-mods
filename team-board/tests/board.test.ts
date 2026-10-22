@@ -44,6 +44,7 @@ import {
   todoStrips,
   tokensText,
   visible,
+  withMe,
   waitsOnAgents,
   label,
 } from '../hooks/board'
@@ -181,12 +182,17 @@ describe('자세히 할 일 띠 (T25)', () => {
     expect(todoStrips(tasks, 'asking')[1]).toMatchObject({ end: '질문 대기', tone: 'ask' })
     // 중단·오류로 끝난 턴 (work-plan 0.4.1 은 남은 단계를 그대로 둔다)
     expect(todoStrips(tasks, 'idle')[1]).toMatchObject({ end: '멈춤', tone: 'stop' })
+    // 끝난 계획은 다음 턴이 일하는 동안에도 멈춤 (T27)
+    expect(todoStrips(tasks, 'working', true)[1]).toMatchObject({ end: '멈춤', tone: 'stop' })
   })
 
   test('막대 알약 색 (T25): 작업 중이 아닌데 진행 중 단계가 남으면 멈춤. 결정·실패가 먼저', async () => {
     const doing = [{ id: '1', subject: '읽기', status: 'completed' }, { id: '2', subject: '고치기', status: 'in_progress' }] as any
     const done = [{ id: '1', subject: '읽기', status: 'completed' }] as any
     expect(pillToneOf({ state: 'working', tasks: doing, fail: null } as any, false)).toBe('run')
+    expect(pillToneOf({ state: 'working', tasks: doing, fail: null, planEnded: true } as any, false)).toBe('stop') // T27
+    // 자기 칸은 끝난 계획 표시도 바로 덮는다 (3초 늦게 파랗게 보이지 않게)
+    expect(withMe([{ id: 'me', planEnded: false } as any], { id: 'me', planEnded: true } as any)[0]!.planEnded).toBe(true)
     expect(pillToneOf({ state: 'idle', tasks: doing, fail: null } as any, false)).toBe('stop')
     expect(pillToneOf({ state: 'idle', tasks: done, fail: null } as any, false)).toBe('run')
     expect(pillToneOf({ state: 'asking', tasks: doing, fail: null } as any, false)).toBe('ask')
@@ -539,12 +545,13 @@ describe('board (순수 함수)', () => {
         { id: '4', subject: '막힘: 배포 승인', status: 'pending' },
       ],
       step: '할 일: 테스트 쓰기',
+      ended: false,
     })
     // compaction 뒤 새 보고 전
     expect(tasksFromPlan(plan({ stale: true }))!.step).toBe('할 일(압축 전): 테스트 쓰기')
     // 진행 중인 단계가 없으면 단계 줄은 비운다 (team-board 자신의 줄을 덮지 않는다)
     expect(tasksFromPlan(plan({ steps: [{ title: 'a', status: 'todo' }] }))!.step).toBe('')
-    expect(tasksFromPlan({ ...plan(), steps: [] })).toEqual({ tasks: [], step: '' })
+    expect(tasksFromPlan({ ...plan(), steps: [] })).toEqual({ tasks: [], step: '', ended: false })
     // 모르는 모양·없음
     expect(tasksFromPlan(plan({ v: 2 }))).toBeNull()
     expect(tasksFromPlan(undefined)).toBeNull()
@@ -563,6 +570,8 @@ describe('board (순수 함수)', () => {
     expect(tasksFromPlan(ended('answer'))!.step).toBe('')
     for (const reason of ['aborted', 'error', 'refusal']) {
       expect(statuses(tasksFromPlan(ended(reason)))).toEqual(['completed', 'in_progress', 'pending'])
+      // 끝난 계획은 진행 중 단계가 남아도 단계 줄을 비운다 (T27)
+      expect(tasksFromPlan(ended(reason))).toMatchObject({ step: '', ended: true })
     }
   })
 
@@ -1805,6 +1814,19 @@ describe('work-plan 연동', () => {
     expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
     const stopped = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, bodyColumns: 120, maxRows: 10 } } as any)
     expect((await stopped.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
+
+    // 끝난 계획 뒤 계획 없이 일하는 턴 (T27): 옛 단계를 진행 중으로 그리지 않는다
+    await $.turn.start({ text: 'git status', turnId: 't4' } as any)
+    await flush()
+    expect(mine()).toMatchObject({ state: 'working', planEnded: true })
+    expect(await (await $.ui.mount({ ...SPIN, props: spinProps })).find({ type: 'Text', text: /2\/3/ })).toBeUndefined()
+    const busy = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
+    expect((await busy.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
+    // 새 보고가 오면 다시 지금 단계
+    await setPlan(plan(STEPS))
+    await flush()
+    expect(mine().planEnded).toBe(false)
+    expect(await (await $.ui.mount({ ...SPIN, props: spinProps })).find({ type: 'Text', text: '2/3 테스트 쓰기' })).toBeDefined()
   })
 })
 

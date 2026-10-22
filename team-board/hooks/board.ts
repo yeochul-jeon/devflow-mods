@@ -267,17 +267,19 @@ export function applyTaskTool(
  * 결정 대기에 멈춘 막대는 실제로 한 일보다 적게 보였다, T24 재시험). 중단·오류로 끝났으면 보고된 그대로 둔다.
  * compaction 뒤 새 보고 전이면 단계 줄에 그렇게 적는다.
  */
-export function tasksFromPlan(plan: unknown): { tasks: Task[]; step: string } | null {
+export function tasksFromPlan(plan: unknown): { tasks: Task[]; step: string; ended: boolean } | null {
   const p = plan as WorkPlan | null | undefined
   if (!p || p.v !== 1 || !Array.isArray(p.steps)) return null
   const closed = p.ended?.reason === 'answer'
+  // 끝난 계획은 새 보고 전까지 다음 턴이 일해도 진행 중이 아니다: 단계 줄을 비운다 (T27)
+  const ended = !!p.ended
   const tasks = p.steps.slice(0, 30).map((s, i): Task => ({
     id: String(i + 1),
     subject: oneLine(s.status === 'blocked' ? `막힘: ${s.title}` : s.title, 60),
     status: closed || s.status === 'done' ? 'completed' : s.status === 'doing' ? 'in_progress' : 'pending',
   }))
   const cur = progress(tasks).current
-  return { tasks, step: cur ? `${p.stale ? '할 일(압축 전)' : '할 일'}: ${cur.subject}` : '' }
+  return { tasks, step: cur && !ended ? `${p.stale ? '할 일(압축 전)' : '할 일'}: ${cur.subject}` : '', ended }
 }
 
 export function progress(tasks: readonly Task[]): { done: number; total: number; current: Task | undefined } {
@@ -298,7 +300,7 @@ export function progressBar(done: number, total: number, width = 8): string {
  * 할 일을 덮지 않으면 첫 계획 보고 뒤 몇 초 동안 칸이 막대 대신 단계 글로 보였다 (T24 재시험). */
 export function withMe(beats: readonly Beat[], mine: Beat | null): Beat[] {
   if (!mine) return [...beats]
-  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question, tasks: mine.tasks } : b))
+  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question, tasks: mine.tasks, planEnded: mine.planEnded } : b))
 }
 
 /** 보여줄 세션만, 보여줄 순서로: 결정 필요 > 작업 중 > 보조 기다림 > 대기 > 오래됨. */
@@ -489,11 +491,12 @@ export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, t
 /**
  * 세션 막대의 알약 색. 결정 대기 노랑 ?, 숨은 실패 빨강 ✕, 작업 중이 아닌데 진행 중 단계가 남았으면(중단·오류로 끝난 턴) 노랑 '멈춤',
  * 그 밖은 작업색 (다 끝났으면 pillBar 가 초록 ✓). 자세히의 할 일 띠 '멈춤' 과 같은 판정.
+ * 끝난 계획이면 다음 턴이 일하는 동안에도 '멈춤' (T27: 새 턴에 옛 단계가 파랗게 진행 중으로 보였다).
  */
-export function pillToneOf(b: Pick<Beat, 'state' | 'tasks' | 'fail'>, stale: boolean): PillTone {
+export function pillToneOf(b: Pick<Beat, 'state' | 'tasks' | 'fail' | 'planEnded'>, stale: boolean): PillTone {
   if (b.state === 'asking' && !stale) return 'ask'
   if (b.fail?.level === 'high' && !stale) return 'err'
-  if (b.state !== 'working' && b.tasks.some(t => t.status === 'in_progress')) return 'stop'
+  if ((b.state !== 'working' || b.planEnded) && b.tasks.some(t => t.status === 'in_progress')) return 'stop'
   return 'run'
 }
 
@@ -539,12 +542,12 @@ export function agentStrips(list: readonly SubAgent[], now: number, max = 3): St
  */
 export type TodoStrip = { n: number; label: string; end: string; tone: PillTone | 'todo' }
 
-export function todoStrips(tasks: readonly Task[], state: Beat['state']): TodoStrip[] {
+export function todoStrips(tasks: readonly Task[], state: Beat['state'], planEnded = false): TodoStrip[] {
   return tasks.map((t, i): TodoStrip => {
     const n = i + 1
     if (t.status === 'completed') return { n, label: t.subject, end: '끝남', tone: 'ok' }
     if (t.status === 'in_progress') {
-      return state === 'working' ? { n, label: t.subject, end: '진행 중', tone: 'run' }
+      return state === 'working' && !planEnded ? { n, label: t.subject, end: '진행 중', tone: 'run' }
         : state === 'asking' ? { n, label: t.subject, end: '질문 대기', tone: 'ask' }
         : { n, label: t.subject, end: '멈춤', tone: 'stop' }
     }

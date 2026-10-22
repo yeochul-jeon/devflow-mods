@@ -43,6 +43,8 @@ export type Beat = {
   recent: RecentLine[]
   contextPct: number | null
   tasks: Task[]
+  /** tasks 가 이미 끝난(중단·오류) work-plan 계획인지. 새 보고 전까지 작업 중이어도 진행 중으로 그리지 않는다 (0.24.3 전 파일에는 없음) */
+  planEnded?: boolean
   decisions: Decision[]
   timeline: Event[]
   edits: number
