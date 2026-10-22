@@ -66,8 +66,10 @@ elif sc == 'ended':
 elif sc == 'flow':
     m = lambda s: now - s * 60_000
     sub = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '주문 수정 때 캐시 무효화', '부하 테스트']
-    put('3', 'sub-3', state='working', step='할 일: 주문 수정 때 캐시 무효화', tasks=[{'id': str(i + 1), 'subject': x, 'status': st} for i, (x, st) in
-        enumerate(zip(sub, ['completed', 'completed', 'in_progress', 'pending']))], last='주문 조회 테스트 통과', edits=4,
+    # 단계별 시간 (0.26.0): 끝난 단계에 doneAt, 계획 첫 보고 planStartAt
+    done_at = [m(27) + 12_000, m(20) - 30_000, None, None]
+    put('3', 'sub-3', state='working', step='할 일: 주문 수정 때 캐시 무효화', planStartAt=m(31), tasks=[{'id': str(i + 1), 'subject': x, 'status': st, **({'doneAt': d} if d else {})} for i, (x, st, d) in
+        enumerate(zip(sub, ['completed', 'completed', 'in_progress', 'pending'], done_at))], last='주문 조회 테스트 통과', edits=4,
         files=['src/order/OrderService.java', 'src/order/OrderCache.java'],
         decisions=[{'at': m(20), 'question': '캐시 만료를 5분으로 할까요, 1시간으로 할까요?', 'answer': '5분으로 해 주세요'}],
         timeline=[{'at': m(32), 'kind': 'prompt', 'text': '주문 조회가 느려요. 캐시를 붙여 주세요'},

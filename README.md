@@ -129,7 +129,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 `/board sub-3` 은 할 일, 결정 기록(질문 → 답), 흐름(요청 → 질문 → 결정 → 완료)을 시간 순으로 보여 줍니다. 흐름 줄을 누르면 그 원문 전체가 클립보드에 복사됩니다. 다른 세션에 같은 요청을 다시 보낼 때 씁니다.
 
-<img src="docs/images/flow.webp" alt="/board sub-3: 할 일 4개, 결정 기록 1건, 흐름 여섯 줄" width="560">
+<img src="docs/images/flow.webp" alt="/board sub-3: 알약 진행 막대가 있는 작업 카드, 할 일 4개(끝남 4분 12초 · 끝남 6분 18초 · 진행 중 20분 41초 · 대기), 결정 기록 1건, 흐름 여섯 줄" width="560">
 
 **6. 좁은 패널에서 보기**
 
