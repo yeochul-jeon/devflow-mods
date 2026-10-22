@@ -1,6 +1,12 @@
 export type BeatState = 'working' | 'idle' | 'asking' | 'ended'
 
-export type Task = { id: string; subject: string; status: 'pending' | 'in_progress' | 'completed' }
+export type Task = {
+  id: string
+  subject: string
+  status: 'pending' | 'in_progress' | 'completed'
+  /** work-plan 보고에서 이 단계가 끝났다고 처음 본 보고 시각 (T25 B, 0.26.0 전 파일·할 일 도구 목록에는 없음) */
+  doneAt?: number
+}
 
 /** 내려진 결정 하나: 무엇을 물었고 무엇으로 정했는지. */
 export type Decision = { at: number; question: string; answer: string }
@@ -45,6 +51,8 @@ export type Beat = {
   tasks: Task[]
   /** tasks 가 이미 끝난(중단·오류) work-plan 계획인지. 새 보고 전까지 작업 중이어도 진행 중으로 그리지 않는다 (0.24.3 전 파일에는 없음) */
   planEnded?: boolean
+  /** work-plan 계획의 첫 보고 시각. 첫 단계의 걸린 시간을 여기서부터 잰다 (T25 B) */
+  planStartAt?: number
   decisions: Decision[]
   timeline: Event[]
   edits: number

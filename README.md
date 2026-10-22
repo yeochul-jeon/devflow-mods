@@ -107,7 +107,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 결정 대기 카드의 탭을 누르면 Haiku가 그 질문을 풀어 설명합니다. `12살` 은 비유와 선택지별 흐름 그림, `ASD-STE100` 은 "X를 고르면 Y가 일어납니다" 꼴의 짧은 문장입니다. 설명을 다시 받으려면 탭 옆 `↻` 를, 페이지로 보려면 `[ HTML ]` 을 누르세요.
 
-<img src="docs/images/explain.webp" alt="12살 탭: 왜 지금, 비유, 선택지 세 개의 흐름 상자, 맥락과 제안, 먼저 정할 것" width="560">
+<img src="docs/images/explain.webp" alt="12살 탭: 알약 진행 막대가 있는 결정 카드 아래 왜 지금, 비유, 선택지 두 개의 흐름 상자, 맥락, 먼저 정할 것" width="560">
 
 <img src="docs/images/ste.webp" alt="ASD-STE100 탭: 정할 것, 선택지마다 고르면 일어나는 일, 세션 제안" width="560">
 
@@ -117,13 +117,13 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 <img src="docs/images/agents-band.webp" alt="팀 창: api-fix 칸에 보조 배지와 보조 1개 기다리는 중" width="760">
 
-<img src="docs/images/agents.webp" alt="/board api-fix: 보조 에이전트 두 개, 하나는 Grep 실행 중, 하나는 끝나고 21k 토큰" width="560">
+<img src="docs/images/agents.webp" alt="/board api-fix: 카드의 보조 줄 두 개(↳ 1 Grep 실행 중, ↳ 2 끝남)와 아래 보조 에이전트 목록(끝난 것 21k 토큰)" width="560">
 
 **4. 성공처럼 끝난 실패 찾기**
 
 `./gradlew test 2>&1 | tail -20` 처럼 파이프 때문에 exit 0 으로 끝났지만 출력에 실패가 있으면 카드가 빨갛게 바뀝니다. Claude에게도 알려서 성공이라고 보고하지 않게 합니다.
 
-<img src="docs/images/silent-failure.webp" alt="숨은 실패: 빨간 주의 띠와 함께 명령과 실패 흔적을 보여 주는 카드" width="460">
+<img src="docs/images/silent-failure.webp" alt="숨은 실패: 머리줄의 ⚠ 숨은 실패 1 칩과, 빨간 주의 띠 아래 exit 0 인데 실패한 명령과 실패 흔적을 보여 주는 카드" width="460">
 
 **5. 한 세션의 흐름을 되짚고 원문 복사하기**
 
@@ -135,7 +135,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(ctx 막대, 몇 초 전, 캐시)부터 덜어 내 한 줄을 지킵니다. 탭 줄은 탭 단위로 줄을 바꿉니다.
 
-<img src="docs/images/narrow.webp" alt="40칸 패널: 머리줄 한 줄, 탭 줄이 세 줄로 나뉨" width="300">
+<img src="docs/images/narrow.webp" alt="40칸 패널: 카드 머리줄 한 줄(ctx 20% 만 남김), 알약 진행 막대, 탭 줄이 세 줄로 나뉨, ASD-STE100 펼침" width="300">
 
 팀 창 모양, 세션 이름, 카드 기호, 숨은 실패 판정 규칙, 기록하는 내용은 [docs/team-board.md](docs/team-board.md)를 보세요.
 

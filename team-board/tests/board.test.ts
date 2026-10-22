@@ -2,6 +2,9 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import {
   agentStrips,
+  fitStrip,
+  stampTasks,
+  stepTimes,
   soundCommands,
   soundOs,
   pillBar,
@@ -189,6 +192,49 @@ describe('자세히 할 일 띠 (T25)', () => {
     expect(todoStrips(tasks, 'working', true)[1]).toMatchObject({ end: '멈춤', tone: 'stop' })
   })
 
+  test('단계마다 걸린 시간 (T25 B): 보고 시각으로 끝난 시각을 붙이고 앞 단계 끝부터 잰다', async () => {
+    const t = (subject: string, status: string) => ({ id: subject, subject, status }) as any
+    const T0 = 1_000_000
+    // 첫 보고: 새 계획
+    let s = stampTasks([], undefined, [t('읽기', 'in_progress'), t('고치기', 'pending'), t('확인', 'pending')], T0)
+    expect(s.planStartAt).toBe(T0)
+    expect(s.tasks.every(x => x.doneAt === undefined)).toBe(true)
+    // 72초 뒤 읽기 끝 (doing 보고 없이 고치기는 건너뛰고 한 번에 둘 끝남은 아래)
+    s = stampTasks(s.tasks, s.planStartAt, [t('읽기', 'completed'), t('고치기', 'in_progress'), t('확인', 'pending')], T0 + 72_000)
+    expect(s.tasks[0]!.doneAt).toBe(T0 + 72_000)
+    // 같은 계획을 다시 받아도(세션 시작·턴 끝) 끝난 시각은 그대로
+    s = stampTasks(s.tasks, s.planStartAt, [t('읽기', 'completed'), t('고치기', 'in_progress'), t('확인', 'pending')], T0 + 90_000)
+    expect(s.tasks[0]!.doneAt).toBe(T0 + 72_000)
+    expect(stepTimes(s.tasks, s.planStartAt, T0 + 256_000)).toEqual(['1분 12초', '3분 4초', ''])
+    // 고치기와 확인이 한 보고에 함께 끝남: 뒤 것은 모름
+    s = stampTasks(s.tasks, s.planStartAt, [t('읽기', 'completed'), t('고치기', 'completed'), t('확인', 'completed')], T0 + 300_000)
+    expect(stepTimes(s.tasks, s.planStartAt, T0 + 400_000)).toEqual(['1분 12초', '3분 48초', ''])
+    // 이름이 하나도 겹치지 않으면 새 계획: 시작 시각과 끝난 시각을 새로
+    const n = stampTasks(s.tasks, s.planStartAt, [t('배포', 'completed')], T0 + 500_000)
+    expect(n.planStartAt).toBe(T0 + 500_000)
+    expect(n.tasks[0]!.doneAt).toBe(T0 + 500_000)
+    // 끝난 계획 뒤의 새 보고는 같은 이름 단계가 있어도 새 계획
+    const again = stampTasks(s.tasks, s.planStartAt, [t('README 읽기', 'in_progress'), t('확인', 'pending')], T0 + 600_000, true)
+    expect(again.planStartAt).toBe(T0 + 600_000)
+    expect(again.tasks.every(x => x.doneAt === undefined)).toBe(true)
+    // 시각이 없는 목록(옛 파일·할 일 도구)은 시간 없음
+    expect(stepTimes([t('a', 'completed')], undefined, T0)).toEqual([''])
+  })
+
+  test('할 일 띠의 시간은 끝남·진행 중에만 붙는다', async () => {
+    const T0 = 1_000_000
+    const tasks = [
+      { id: '1', subject: '읽기', status: 'completed', doneAt: T0 + 12_000 },
+      { id: '2', subject: '고치기', status: 'in_progress' },
+      { id: '3', subject: '확인', status: 'pending' },
+    ] as any
+    const run = todoStrips(tasks, 'working', false, { planStartAt: T0, now: T0 + 42_000 })
+    expect(run.map(r => r.time)).toEqual(['12초', '30초', undefined])
+    // 멈춤·질문 대기에는 시간을 붙이지 않는다
+    expect(todoStrips(tasks, 'idle', false, { planStartAt: T0, now: T0 + 42_000 })[1]!.time).toBeUndefined()
+    expect(todoStrips(tasks, 'asking', false, { planStartAt: T0, now: T0 + 42_000 })[1]!.time).toBeUndefined()
+  })
+
   test('막대 알약 색 (T25): 작업 중이 아닌데 진행 중 단계가 남으면 멈춤. 결정·실패가 먼저', async () => {
     const doing = [{ id: '1', subject: '읽기', status: 'completed' }, { id: '2', subject: '고치기', status: 'in_progress' }] as any
     const done = [{ id: '1', subject: '읽기', status: 'completed' }] as any
@@ -276,6 +322,23 @@ describe('알약 막대 (T24 B안)', () => {
     expect(turnTook([ev('prompt', NOW)])).toBe('')
     // 요청 없이 끝난 턴(`!` 명령에 답한 턴)은 세지 않는다
     expect(turnTook([ev('prompt', NOW), ev('done', NOW + 26_000), ev('done', NOW + 57_000)])).toBe('26초')
+  })
+
+  test('보조 줄을 폭에 맞춘다: 시간은 남기고 이름·모델·도구를 덜어 낸다 (좁은 도킹 창)', async () => {
+    const r = { n: 1, label: '주문 API 호출처 찾기', model: 'haiku 5.5', tool: 'Grep', time: '2분 36초' }
+    const wide = fitStrip(r, 80)
+    expect(wide).toEqual({ label: r.label, model: r.model, tool: 'Grep' })
+    const line = (f: ReturnType<typeof fitStrip>) => `↳ 1 ${f.label}${f.model ? ` (${f.model})` : ''}${f.tool ? `  ${f.tool}` : ''}  ${r.time}`
+    for (const w of [36, 30, 24]) {
+      const f = fitStrip(r, w)
+      expect(f.model).toBe('')
+      expect(f.tool).toBe('Grep')
+      expect(cells(line(f))).toBeLessThanOrEqual(w)
+    }
+    // 긴 도구 글은 이름과 나눠 쓴다
+    const long = fitStrip({ ...r, tool: 'Bash ./gradlew test --tests OrderServiceTest' }, 36)
+    expect(long.tool.endsWith('…')).toBe(true)
+    expect(cells(line(long))).toBeLessThanOrEqual(36)
   })
 
   test('보조 줄: 도는 것 먼저, 넘치면 마지막 줄을 +k 요약으로', async () => {
@@ -1784,10 +1847,13 @@ describe('work-plan 연동', () => {
 
     // 일하는 중: 할 일과 단계 줄. plan_update 호출 자체는 단계 줄을 덮지 않는다
     await $.turn.start({ text: 'math.py 와 테스트', turnId: 't1' } as any)
-    await setPlan(plan(STEPS))
+    await setPlan(plan(STEPS, { updatedAt: NOW + 1_000 }))
     await $.tool.call({ tool: 'mcp__work-plan__plan_update', steps: [], tool_use_id: 'pu' } as any)
     await flush()
     expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
+    // 단계별 시간 (T25 B): 끝난 시각은 기록한 때(지금)가 아니라 보고 시각, 계획 시작은 첫 보고 시각
+    expect(mine().tasks[0].doneAt).toBe(NOW + 1_000)
+    expect(mine().planStartAt).toBe(NOW)
     expect(mine().step).toBe('할 일: 테스트 쓰기')
 
     // Spinner 줄 (T24): 지금 단계로 글을 바꾼다. 엔진이 자기 문구를 띄운 동안은 두고, 지금 단계가 없으면 두지 않는다
@@ -1809,15 +1875,20 @@ describe('work-plan 연동', () => {
     expect(mine().tasks).toHaveLength(3)
 
     // 질문으로 끝난 턴도 남은 단계를 완료로 그린다. 모델은 질문 전에 마지막 done 을 보내지 않는다 (T24 재시험: 1/3 에 멈춰 보였다)
-    await setPlan(plan(STEPS, { ended: { reason: 'answer', at: NOW } }))
+    await setPlan(plan(STEPS, { updatedAt: NOW + 1_000, ended: { reason: 'answer', at: NOW + 9_000 } }))
     await $.turn.complete({ reason: 'answer', answer: '테스트 파일 이름을 무엇으로 할까요?', durationMs: 1, isAborted: false, turnId: 't1' } as any)
     await flush()
     expect(mine().state).toBe('asking')
     expect(statuses()).toEqual(['completed', 'completed', 'completed'])
+    // 턴 끝에 완료로 그린 단계는 턴이 끝난 시각: 지금 단계(테스트 쓰기)는 8초, 보고 없이 끝난 실행은 모름
+    expect(stepTimes(mine().tasks, mine().planStartAt, NOW + 20_000)).toEqual(['1초', '8초', ''])
 
     // 답으로 끝난 턴: 남은 단계도 완료. 표시가 나중에 와도(바깥 hook) 같다
     await $.turn.start({ text: 'test_math.py', turnId: 't2' } as any)
-    await setPlan(plan(STEPS))
+    await setPlan(plan(STEPS, { updatedAt: NOW + 30_000 }))
+    await flush()
+    // 끝난 계획 뒤의 보고는 이름이 같아도 새 계획: 시작 시각을 새 보고로
+    expect(mine().planStartAt).toBe(NOW + 30_000)
     await $.turn.complete({ reason: 'answer', answer: '세 단계를 마쳤습니다.', durationMs: 1, isAborted: false, turnId: 't2' } as any)
     await setPlan(plan(STEPS, { ended: { reason: 'answer', at: NOW + 1 } }))
     await flush()

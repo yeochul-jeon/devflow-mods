@@ -13,6 +13,7 @@ import {
   agentPatch,
   agentStart,
   agentStrips,
+  fitStrip,
   agentSummary,
   agentSync,
   waitsOnAgents,
@@ -63,6 +64,7 @@ import {
   stripMarkdown,
   headParts,
   steStacked,
+  stampTasks,
   tasksFromPlan,
   todoStrips,
   turnTook,
@@ -220,10 +222,16 @@ async function coachPending($: EngineInterface, question: string | null): Promis
 
 async function syncPlan($: EngineInterface, plan?: unknown): Promise<void> {
   if (!self.beat) return
-  const r = tasksFromPlan(plan === undefined ? await read($, workPlan) : plan)
+  const p = plan === undefined ? await read($, workPlan) : plan
+  const r = tasksFromPlan(p)
   if (!r) return
+  // 단계가 끝난 시각은 보고 시각으로 (syncPlan 은 세션 시작·턴 끝에도 불려 지금 시각이면 늦게 찍힌다).
+  // 답으로 끝난 턴은 남은 단계를 그때 완료로 그리므로 턴이 끝난 시각 (마지막 보고 시각이면 지금 단계가 앞 단계와 함께 끝난 것으로 보였다)
+  const wp = p as WorkPlan
+  const s = stampTasks(self.beat.tasks, self.beat.planStartAt, r.tasks, wp.ended?.at ?? wp.updatedAt, self.beat.planEnded === true && !r.ended)
+  const base = { tasks: s.tasks, planStartAt: s.planStartAt, planEnded: r.ended }
   // 계획 보고는 한 턴에 몇 번뿐이라 바로 쓴다: 묶어 쓰기(1.5초)에 걸리면 띠가 Spinner 보다 한 단계 늦다 (T24 실화면)
-  await save($, r.step && self.beat.state === 'working' ? { tasks: r.tasks, step: r.step, planEnded: r.ended } : { tasks: r.tasks, planEnded: r.ended }, true)
+  await save($, r.step && self.beat.state === 'working' ? { ...base, step: r.step } : base, true)
 }
 
 async function note($: EngineInterface, kind: Parameters<typeof event>[1], text: string, patch: Partial<Beat> = {}, force = false, full = text) {
@@ -502,18 +510,19 @@ export const register: Register = (on, options) => {
     </Text>
   )
   // 막대 아래 보조 에이전트 한 줄
-  const stripOf = (Text: any, r: Strip) =>
-    'more' in r ? (
-      <Text color={pal.dim} wrap="truncate-end">{`↳ +${r.more} 보조 ${r.more}개 · ${r.done}개 끝남`}</Text>
-    ) : (
+  const stripOf = (Text: any, r: Strip, width: number) => {
+    if ('more' in r) return <Text color={pal.dim} wrap="truncate-end">{`↳ +${r.more} 보조 ${r.more}개 · ${r.done}개 끝남`}</Text>
+    const f = fitStrip(r, width)
+    return (
       <Text wrap="truncate-end">
         <Text color={pal.dim}>{`↳ ${r.n} `}</Text>
-        <Text color={r.status === 'working' ? pal.text : pal.dim}>{r.label}</Text>
-        {r.model ? <Text color={pal.dim}>{` (${r.model})`}</Text> : null}
-        {r.tool ? <Text color={r.status === 'failed' ? pal.bad : pal.work}>{`  ${r.tool}`}</Text> : null}
+        <Text color={r.status === 'working' ? pal.text : pal.dim}>{f.label}</Text>
+        {f.model ? <Text color={pal.dim}>{` (${f.model})`}</Text> : null}
+        {f.tool ? <Text color={r.status === 'failed' ? pal.bad : pal.work}>{`  ${f.tool}`}</Text> : null}
         <Text color={pal.dim}>{`  ${r.time}`}</Text>
       </Text>
     )
+  }
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -745,7 +754,7 @@ export const register: Register = (on, options) => {
       const tasks = applyTaskTool(self.beat?.tasks ?? [], e.tool, input, (r as { result?: unknown }).result)
       if (tasks) {
         const cur = progress(tasks).current
-        await save($, { tasks, planEnded: false, step: cur ? `할 일: ${cur.subject}` : describeTool(e.tool, input) })
+        await save($, { tasks, planEnded: false, planStartAt: undefined, step: cur ? `할 일: ${cur.subject}` : describeTool(e.tool, input) })
       }
       return r
     }
@@ -1149,7 +1158,7 @@ export const register: Register = (on, options) => {
       const hue = r.tone === 'todo' ? pal.dim : STRIP_HUE[r.tone]
       const bg = r.tone !== 'todo' && pal.isRaw ? { backgroundColor: mix(hue, pal.card || '#000000', 0.78) } : {}
       const head = ` ● ${r.n}  `
-      const tail = r.end ? `  ${r.end} ` : ' '
+      const tail = r.end ? `  ${r.end}${r.time ? ` ${r.time}` : ''} ` : ' '
       const room = Math.max(4, width - widthOf(head) - widthOf(tail))
       const label = widthClip(r.label, room)
       return (
@@ -1282,7 +1291,7 @@ export const register: Register = (on, options) => {
               {titleRow(b)}
               {second}
               {progressRow(b) ?? (b.prompt && !showsPrompt ? row('요청', <Text color={pal.dim} wrap="truncate-end">{b.prompt}</Text>) : null)}
-              {agentStrips(b.agents, now).map((r, i) => row(i === 0 ? '보조' : '', stripOf(Text, r), `strip-${b.id}-${i}`))}
+              {agentStrips(b.agents, now).map((r, i) => row(i === 0 ? '보조' : '', stripOf(Text, r, rightWidth - 6), `strip-${b.id}-${i}`))}
             </Box>
           </Box>
         </Box>
@@ -1552,7 +1561,7 @@ export const register: Register = (on, options) => {
                 <Text color={pal.accent} bold>할 일 </Text>
                 <Text color={pal.dim}>{`${done}/${total}`}</Text>
               </Text>
-              {todoStrips(b.tasks, b.state, b.planEnded).map(r => todoRowOf(r, cols - 2))}
+              {todoStrips(b.tasks, b.state, b.planEnded, { planStartAt: b.planStartAt, now }).map(r => todoRowOf(r, cols - 2))}
             </Box>
           ) : null}
 

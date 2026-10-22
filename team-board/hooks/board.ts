@@ -282,6 +282,39 @@ export function tasksFromPlan(plan: unknown): { tasks: Task[]; step: string; end
   return { tasks, step: cur && !ended ? `${p.stale ? '할 일(압축 전)' : '할 일'}: ${cur.subject}` : '', ended }
 }
 
+/**
+ * 계획 보고를 받을 때 단계가 끝난 시각을 붙인다 (T25 B). work-plan 보고에는 단계별 시각이 없어 team-board 가 적는다.
+ * 앞 보고에 같은 이름으로 끝난 단계가 있으면 그 시각을 잇고, 이번에 처음 끝난 단계는 보고 시각 at.
+ * 끝난 계획 뒤에 끝나지 않은 보고가 오거나(restart), 앞 목록과 이름이 하나도 겹치지 않으면 새 계획으로 보고 시작 시각을 at 으로 둔다
+ * (앞뒤 계획에 '한 줄 요약' 같은 같은 이름이 있으면 이름만으로는 새 계획을 몰라 첫 단계가 앞 계획부터 재어졌다).
+ */
+export function stampTasks(prev: readonly Task[], prevStart: number | undefined, next: readonly Task[], at: number, restart = false): { tasks: Task[]; planStartAt: number } {
+  const fresh = restart || prevStart === undefined || !next.some(t => prev.some(p => p.subject === t.subject))
+  const doneAt = new Map(fresh ? [] : prev.filter(t => t.doneAt !== undefined).map(t => [t.subject, t.doneAt!]))
+  return {
+    planStartAt: fresh ? at : prevStart,
+    tasks: next.map(t => (t.status === 'completed' ? { ...t, doneAt: doneAt.get(t.subject) ?? at } : t)),
+  }
+}
+
+/**
+ * 단계마다 걸린 시간 (T25 B): 그 단계가 끝난 시각 - 그보다 먼저 끝난 단계의 마지막 시각(없으면 계획 시작).
+ * 앞 단계의 doing 보고를 건너뛰어도 잴 수 있다. 같은 보고에서 함께 끝난 단계는 0 이라 '' (모름).
+ * 진행 중 단계는 마지막으로 끝난 시각부터 now 까지. 시각이 없으면(옛 파일·할 일 도구) ''.
+ */
+export function stepTimes(tasks: readonly Task[], planStartAt: number | undefined, now: number): string[] {
+  if (planStartAt === undefined) return tasks.map(() => '')
+  const ends = tasks.flatMap(t => (t.doneAt !== undefined ? [t.doneAt] : []))
+  // 같은 시각에 끝난 단계끼리는 목록 앞 단계를 먼저 끝난 것으로 본다
+  const before = (at: number, i: number) => Math.max(planStartAt, ...tasks.flatMap((u, j) => (u.doneAt !== undefined && (u.doneAt < at || (u.doneAt === at && j < i)) ? [u.doneAt] : [])))
+  return tasks.map((t, i) => {
+    const ms = t.status === 'completed' ? (t.doneAt === undefined ? 0 : t.doneAt - before(t.doneAt, i))
+      : t.status === 'in_progress' ? now - Math.max(planStartAt, ...ends)
+      : 0
+    return ms >= 1000 ? took(ms) : ''
+  })
+}
+
 export function progress(tasks: readonly Task[]): { done: number; total: number; current: Task | undefined } {
   return {
     done: tasks.filter(t => t.status === 'completed').length,
@@ -300,7 +333,7 @@ export function progressBar(done: number, total: number, width = 8): string {
  * 할 일을 덮지 않으면 첫 계획 보고 뒤 몇 초 동안 칸이 막대 대신 단계 글로 보였다 (T24 재시험). */
 export function withMe(beats: readonly Beat[], mine: Beat | null): Beat[] {
   if (!mine) return [...beats]
-  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question, tasks: mine.tasks, planEnded: mine.planEnded } : b))
+  return beats.map(b => (b.id === mine.id ? { ...b, state: mine.state, step: mine.step, question: mine.question, tasks: mine.tasks, planEnded: mine.planEnded, planStartAt: mine.planStartAt } : b))
 }
 
 /** 보여줄 세션만, 보여줄 순서로: 결정 필요 > 작업 중 > 보조 기다림 > 대기 > 오래됨. */
@@ -544,15 +577,31 @@ export function agentStrips(list: readonly SubAgent[], now: number, max = 3): St
 }
 
 /**
+ * 보조 줄 한 줄을 width 칸에 맞춘다. 시간은 늘 남기고 이름 → 모델(뺌) → 도구 순으로 덜어 낸다
+ * (줄 끝을 자르면 좁은 도킹 창에서 도구·시간이 먼저 사라졌다).
+ */
+export function fitStrip(r: { n: number; label: string; model: string; tool: string; time: string }, width: number): { label: string; model: string; tool: string } {
+  const room = width - cells(`↳ ${r.n} `) - cells(`  ${r.time}`)
+  const toolW = (t: string) => (t ? cells(`  ${t}`) : 0)
+  if (cells(r.label) + (r.model ? cells(` (${r.model})`) : 0) + toolW(r.tool) <= room) return { label: r.label, model: r.model, tool: r.tool }
+  const tool = r.tool && cells(r.label) + toolW(r.tool) > room ? clip(r.tool, Math.max(6, Math.floor(room / 2) - 2)) : r.tool
+  return { label: clip(r.label, Math.max(4, room - toolW(tool))), model: '', tool }
+}
+
+/**
  * /board 자세히의 할 일 한 줄 (T25, plan-progress 의 보조 띠 모양). 끝남 초록, 막힘 빨강.
  * 지금 단계는 작업 중이면 '진행 중', 결정 대기면 '질문 대기', 그 밖(중단·오류로 끝난 턴)이면 '멈춤'.
  * 끝난 계획에 진행 중 단계가 없으면 남은 첫 단계를 '멈춤'으로: 막대 알약이 '멈춤: 그 단계' 로 보이므로 맞춘다.
  */
-export type TodoStrip = { n: number; label: string; end: string; tone: PillTone | 'todo' }
+export type TodoStrip = { n: number; label: string; end: string; tone: PillTone | 'todo'; time?: string }
 
-export function todoStrips(tasks: readonly Task[], state: Beat['state'], planEnded = false): TodoStrip[] {
+export function todoStrips(tasks: readonly Task[], state: Beat['state'], planEnded = false, clock?: { planStartAt?: number; now: number }): TodoStrip[] {
   const stoppedAt = planEnded && !tasks.some(t => t.status === 'in_progress') ? tasks.findIndex(t => t.status !== 'completed') : -1
-  return tasks.map((t, i): TodoStrip => {
+  const times = clock ? stepTimes(tasks, clock.planStartAt, clock.now) : []
+  // 시간은 끝남(걸린 시간)과 진행 중(지금까지)에만 붙인다
+  return tasks.map((t, i): TodoStrip => strip(t, i)).map((r, i) => (times[i] && (r.tone === 'ok' || r.tone === 'run') ? { ...r, time: times[i] } : r))
+
+  function strip(t: Task, i: number): TodoStrip {
     const n = i + 1
     if (t.status === 'completed') return { n, label: t.subject, end: '끝남', tone: 'ok' }
     if (i === stoppedAt && !t.subject.startsWith('막힘: ')) return { n, label: t.subject, end: '멈춤', tone: 'stop' }
@@ -562,7 +611,7 @@ export function todoStrips(tasks: readonly Task[], state: Beat['state'], planEnd
         : { n, label: t.subject, end: '멈춤', tone: 'stop' }
     }
     return t.subject.startsWith('막힘: ') ? { n, label: t.subject.slice(4), end: '막힘', tone: 'err' } : { n, label: t.subject, end: '', tone: 'todo' }
-  })
+  }
 }
 
 /** 같은 이름의 세션이 여럿이면 화면용 이름 뒤에 ·2, ·3 을 붙인다 (기록은 그대로). */
