@@ -493,11 +493,13 @@ export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, t
  * 세션 막대의 알약 색. 결정 대기 노랑 ?, 숨은 실패 빨강 ✕, 작업 중이 아닌데 진행 중 단계가 남았으면(중단·오류로 끝난 턴) 노랑 '멈춤',
  * 그 밖은 작업색 (다 끝났으면 pillBar 가 초록 ✓). 자세히의 할 일 띠 '멈춤' 과 같은 판정.
  * 끝난 계획이면 다음 턴이 일하는 동안에도 '멈춤' (T27: 새 턴에 옛 단계가 파랗게 진행 중으로 보였다).
+ * 끝난 계획에 진행 중 단계 없이 남은 단계만 있어도 '멈춤' (단계 하나를 끝냈다고 보고하고 다음을 시작하기 전에 중단된 턴이 파란 작업색으로 보였다).
  */
 export function pillToneOf(b: Pick<Beat, 'state' | 'tasks' | 'fail' | 'planEnded'>, stale: boolean): PillTone {
   if (b.state === 'asking' && !stale) return 'ask'
   if (b.fail?.level === 'high' && !stale) return 'err'
   if ((b.state !== 'working' || b.planEnded) && b.tasks.some(t => t.status === 'in_progress')) return 'stop'
+  if (b.planEnded && b.tasks.some(t => t.status !== 'completed')) return 'stop'
   return 'run'
 }
 
@@ -544,13 +546,16 @@ export function agentStrips(list: readonly SubAgent[], now: number, max = 3): St
 /**
  * /board 자세히의 할 일 한 줄 (T25, plan-progress 의 보조 띠 모양). 끝남 초록, 막힘 빨강.
  * 지금 단계는 작업 중이면 '진행 중', 결정 대기면 '질문 대기', 그 밖(중단·오류로 끝난 턴)이면 '멈춤'.
+ * 끝난 계획에 진행 중 단계가 없으면 남은 첫 단계를 '멈춤'으로: 막대 알약이 '멈춤: 그 단계' 로 보이므로 맞춘다.
  */
 export type TodoStrip = { n: number; label: string; end: string; tone: PillTone | 'todo' }
 
 export function todoStrips(tasks: readonly Task[], state: Beat['state'], planEnded = false): TodoStrip[] {
+  const stoppedAt = planEnded && !tasks.some(t => t.status === 'in_progress') ? tasks.findIndex(t => t.status !== 'completed') : -1
   return tasks.map((t, i): TodoStrip => {
     const n = i + 1
     if (t.status === 'completed') return { n, label: t.subject, end: '끝남', tone: 'ok' }
+    if (i === stoppedAt && !t.subject.startsWith('막힘: ')) return { n, label: t.subject, end: '멈춤', tone: 'stop' }
     if (t.status === 'in_progress') {
       return state === 'working' && !planEnded ? { n, label: t.subject, end: '진행 중', tone: 'run' }
         : state === 'asking' ? { n, label: t.subject, end: '질문 대기', tone: 'ask' }

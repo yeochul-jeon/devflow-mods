@@ -205,6 +205,20 @@ describe('자세히 할 일 띠 (T25)', () => {
     expect(pb.pill).toBe(' 멈춤: 고치기 ')
     expect(pb.tone).toBe('stop')
   })
+
+  test('끝난 계획에 진행 중 단계 없이 남은 단계만 있어도 멈춤 (단계를 끝내고 다음을 시작하기 전에 중단)', async () => {
+    const left = [{ id: '1', subject: '읽기', status: 'completed' }, { id: '2', subject: '고치기', status: 'pending' }, { id: '3', subject: '확인', status: 'pending' }] as any
+    expect(pillToneOf({ state: 'idle', tasks: left, fail: null, planEnded: true } as any, false)).toBe('stop')
+    expect(pillToneOf({ state: 'working', tasks: left, fail: null, planEnded: true } as any, false)).toBe('stop')
+    // 끝나지 않은 계획(TodoWrite 등)의 남은 단계는 그대로 작업색
+    expect(pillToneOf({ state: 'idle', tasks: left, fail: null, planEnded: false } as any, false)).toBe('run')
+    const pb = pillBar(left, 40, 'stop')!
+    expect(pb.pill).toBe(' 멈춤: 고치기 ')
+    expect(todoStrips(left, 'idle', true).map(r => r.end)).toEqual(['끝남', '멈춤', ''])
+    expect(todoStrips(left, 'idle', false).map(r => r.end)).toEqual(['끝남', '', ''])
+    const blocked = [left[0], { id: '2', subject: '막힘: 배포 승인', status: 'pending' }] as any
+    expect(todoStrips(blocked, 'idle', true)[1]).toMatchObject({ end: '막힘', tone: 'err' })
+  })
 })
 
 describe('알약 막대 (T24 B안)', () => {

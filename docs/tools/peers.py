@@ -1,4 +1,4 @@
-# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|none(지우기만)>
+# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|ended|none(지우기만)>
 import json, os, sys, time, glob
 d, sc = sys.argv[1], sys.argv[2]
 for f in glob.glob(os.path.join(d, 'peer-*.json')):
@@ -57,6 +57,12 @@ elif sc == 'bars':
     put('3', 'sub-3', last='중단됨', planEnded=True, tasks=plan('completed', 'completed', 'in_progress', 'pending'))
     put('4', 'sub-4', last='부하 테스트까지 마쳤습니다.', tasks=plan('completed', 'completed', 'completed', 'completed'),
         timeline=[{'at': now - 200_000, 'kind': 'prompt', 'text': '주문 조회 캐시'}, {'at': now - 8_000, 'kind': 'done', 'text': '끝'}])
+elif sc == 'ended':
+    # 끝난 계획 두 가지: 진행 중 단계가 남은 것, 단계를 끝내고 다음을 시작하기 전에 중단된 것 (둘 다 멈춤)
+    sub = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '캐시 무효화', '부하 테스트']
+    plan = lambda *st: [{'id': str(i + 1), 'subject': x, 'status': s} for i, (x, s) in enumerate(zip(sub, st))]
+    put('3', 'sub-3', last='중단됨', planEnded=True, tasks=plan('completed', 'completed', 'in_progress', 'pending'))
+    put('5', 'sub-5', last='중단됨', planEnded=True, tasks=plan('completed', 'pending', 'pending', 'pending'))
 elif sc == 'flow':
     m = lambda s: now - s * 60_000
     sub = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '주문 수정 때 캐시 무효화', '부하 테스트']
