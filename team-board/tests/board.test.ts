@@ -909,6 +909,15 @@ describe('숨은 실패', () => {
     expect(isReadOnly('grep -n FAILED build/test.log | head -20')).toBe(true)
   })
 
+  test('heredoc 본문은 단계가 아니다 (2026-10-23 오탐: 본문의 테스트 코드 줄이 명령 키가 됨)', async () => {
+    expect(isReadOnly("cat <<'EOF'\nrm -rf build\n./gradlew test\nEOF")).toBe(true)
+    expect(isReadOnly("cat <<-EOF\n\tnpm test\n\tEOF\ngrep -n x a.ts")).toBe(true)
+    expect(commandKey("cat >> tests/a.test.ts <<'EOF'\ndescribe('x', () => {\n})\nEOF\ncd .. && ./gradlew test 2>&1 | grep fail")).toBe('./gradlew test')
+    expect(commandKey("python3 - <<'EOF'\nimport os\nEOF\n./gradlew test")).toBe('python3 -')
+    // 본문 뒤 명령은 그대로 판정한다
+    expect(isReadOnly("cat <<'EOF'\nx\nEOF\n./gradlew test")).toBe(false)
+  })
+
   test('{ } · ( ) 묶음은 벗기고 안쪽 명령으로 판정한다 (2026-10-23 오탐)', async () => {
     // 계획 파일을 읽은 출력 속 테스트 문자열이 「실패한 테스트」로 잡힌 명령 형태
     expect(isReadOnly('cd $R 2>/dev/null && { ls; find . -maxdepth 3 -name "*.md" | head -30; }; head -30 a.md | cut -c1-160')).toBe(true)
