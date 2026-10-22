@@ -104,11 +104,13 @@ async function load($: EngineInterface, period: Period): Promise<void> {
   const decisions = await teamBoardDecisions($, entries, Date.parse(since), Date.parse(until))
   for (const root of new Set([...entries.map(e => e.root), ...Object.keys(decisions)])) {
     const r = await $.process
-      .run(['git', '-C', root, 'log', `--since=${since}`, `--until=${until}`, '--format=%ct%x09%h%x09%s'], { timeoutMs: 5000 })
+      // --since 는 기간 전 커밋을 만나면 걷기를 멈춰서, committer 날짜가 부모보다 이른 커밋이 HEAD 쪽에 있으면 0건이 된다. 거르기만 하는 --since-as-filter (git 2.37+)
+      .run(['git', '-C', root, 'log', `--since-as-filter=${since}`, `--until=${until}`, '--format=%ct%x09%h%x09%s'], { timeoutMs: 5000 })
       .catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: err instanceof Error ? err.message : String(err) }))
     if (r.exitCode === 0) commits[root] = { commits: parseGitLog(r.stdout), error: '' }
     // 저장소가 아닌 폴더는 커밋이 없을 뿐이다
     else if (/not a git repository/.test(r.stderr)) commits[root] = { commits: [], error: '' }
+    else if (/unrecognized argument: --since-as-filter/.test(r.stderr)) commits[root] = { commits: [], error: '커밋 못 읽음 (git 2.37 이상 필요)' }
     else commits[root] = { commits: [], error: '커밋 못 읽음' }
   }
   const report = buildReport(period, days, entries, commits, decisions)

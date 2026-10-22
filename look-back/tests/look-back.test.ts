@@ -198,6 +198,7 @@ function boot(on: any, interactive = true) {
   const files = new Map<string, string>()
   const mtimes = new Map<string, number>()
   const gitCalls: string[][] = []
+  const git = { stderr: '' }
   const clock = mock.clock(on, { now: NOW })
   on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repo/order-svc/sub' }))
@@ -220,6 +221,7 @@ function boot(on: any, interactive = true) {
   on('process.run', ($: any, e: any) => {
     if (e.argv[0] === 'date') return { value: { stdout: '+0900\n', stderr: '', exitCode: 0, isStdoutTruncated: false, isStderrTruncated: false } }
     gitCalls.push(e.argv)
+    if (git.stderr) return { value: { stdout: '', stderr: git.stderr, exitCode: 128, isStdoutTruncated: false, isStderrTruncated: false } }
     return { value: { stdout: `${Math.floor(NOW / 1000) - 60}\tabc1234\tadd order api\n`, stderr: '', exitCode: 0, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('prompt.submit', ($: any, e: any) => (e.text.includes('막힘') ? { drop: 'blocked' } : { text: e.text }))
@@ -235,7 +237,7 @@ function boot(on: any, interactive = true) {
   const store = new Map<string, unknown>()
   on('store.get', ($: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', ($: any, e: any) => { store.set(e.key, e.value); return { value: undefined } })
-  return { files, mtimes, gitCalls, clock, interactive }
+  return { files, mtimes, gitCalls, clock, interactive, git }
 }
 
 const submit = ($: any, text: string, kind = 'composer', turnId?: string) => $.prompt.submit({ text, origin: { kind }, wait: false, ...(turnId ? { turnId } : {}) } as any)
@@ -338,7 +340,7 @@ describe('look-back (hook)', () => {
     expect((await $.command.run({ command: 'lookback', args: '지난달' } as any)).text).toBe('/lookback [오늘|어제|7일|30일|올해] · /lookback report on|off')
     const { text } = await $.command.run({ command: 'lookback', args: '' } as any)
     expect(text).toContain('옆 패널')
-    expect(gitCalls).toEqual([['git', '-C', '/repo/order-svc', 'log', '--since=2026-10-18T00:00:00+09:00', '--until=2026-10-19T00:00:00+09:00', '--format=%ct%x09%h%x09%s']])
+    expect(gitCalls).toEqual([['git', '-C', '/repo/order-svc', 'log', '--since-as-filter=2026-10-18T00:00:00+09:00', '--until=2026-10-19T00:00:00+09:00', '--format=%ct%x09%h%x09%s']])
 
     const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /^오늘 한 일$/ })).toBeDefined()
@@ -361,6 +363,18 @@ describe('look-back (hook)', () => {
     expect(await ui2.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
     expect(await ui2.find({ type: 'Text', text: /어제 요청/ })).toBeDefined()
     await ui2.unmount()
+  })
+
+  test('/lookback: git 이 --since-as-filter 를 모르면(2.37 전) 이유를 적는다', async ($, on) => {
+    const { files, git } = boot(on)
+    files.set('/home/me/.claude/look-back/2026-10-18/other000-aaaa.json', JSON.stringify({ v: 1, entries: [entry(NOW - 3_600_000, '/repo/order-svc', { text: '결제 버그 고쳐 줘' })] }))
+    git.stderr = 'fatal: unrecognized argument: --since-as-filter=2026-10-18T00:00:00+09:00\n'
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'lookback', args: '' } as any)
+
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: '커밋 못 읽음 (git 2.37 이상 필요)' })).toBeDefined()
+    await ui.unmount()
   })
 
   test('/lookback: team-board 가 기록한 결정을 기간으로 걸러 프로젝트별로 보인다', async ($, on) => {
