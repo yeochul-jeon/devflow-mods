@@ -78,7 +78,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 ## 🧭 team-board: 팀 상황판
 
-<img src="docs/images/hud.webp" alt="팀 창: 결정 대기 sub-2 는 노란 칸, 작업 중 api-fix 는 파란 배지, 끝난 sub-3 은 초록 진행 막대, sub-4 는 캐시 8분 남음" width="760">
+<img src="docs/images/hud.webp" alt="팀 창: 결정 대기 sub-2 는 노란 ▌ 막대와 노란 질문 요약, 작업 중 api-fix 는 파란 배지, 끝난 sub-3 은 초록 진행 막대, sub-4 는 캐시 8분 남음" width="760">
 
 같은 저장소에서 실행 중인 Claude Code 세션을 모두 보여 줍니다. 워크트리도 포함합니다.
 
@@ -107,7 +107,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 결정 대기 카드의 탭을 누르면 Haiku가 그 질문을 풀어 설명합니다. `12살` 은 비유와 선택지별 흐름 그림, `ASD-STE100` 은 "X를 고르면 Y가 일어납니다" 꼴의 짧은 문장입니다. 설명을 다시 받으려면 탭 옆 `↻` 를, 페이지로 보려면 `[ HTML ]` 을 누르세요.
 
-<img src="docs/images/explain.webp" alt="12살 탭: 알약 진행 막대가 있는 결정 카드 아래 왜 지금, 비유, 선택지 두 개의 흐름 상자, 맥락, 먼저 정할 것" width="560">
+<img src="docs/images/explain.webp" alt="12살 탭: 알약 진행 막대와 질문 줄이 있는 결정 카드 아래 왜 지금, 비유, 선택지 두 개의 흐름 상자, 맥락, 먼저 정할 것" width="560">
 
 <img src="docs/images/ste.webp" alt="ASD-STE100 탭: 정할 것, 선택지마다 고르면 일어나는 일, 세션 제안" width="560">
 
@@ -115,7 +115,7 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 턴은 끝났지만 서브에이전트가 아직 도는 세션은 ` 대기 ` 가 아니라 ` 보조 ` 배지와 `보조 n개 기다리는 중` 으로 보입니다. `/board <세션>` 에서 에이전트마다 하는 일, 지금 도구, 경과 시간, 끝난 뒤 토큰을 봅니다.
 
-<img src="docs/images/agents-band.webp" alt="팀 창: api-fix 칸에 보조 배지와 보조 1개 기다리는 중" width="760">
+<img src="docs/images/agents-band.webp" alt="팀 창: 결정 대기 sub-2 는 노란 ▌ 막대, api-fix 칸에 보조 배지와 보조 1개 기다리는 중" width="760">
 
 <img src="docs/images/agents.webp" alt="/board api-fix: 카드의 보조 줄 두 개(↳ 1 Grep 실행 중, ↳ 2 끝남)와 아래 보조 에이전트 목록(끝난 것 21k 토큰)" width="560">
 
@@ -129,13 +129,13 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 `/board sub-3` 은 할 일, 결정 기록(질문 → 답), 흐름(요청 → 질문 → 결정 → 완료)을 시간 순으로 보여 줍니다. 흐름 줄을 누르면 그 원문 전체가 클립보드에 복사됩니다. 다른 세션에 같은 요청을 다시 보낼 때 씁니다.
 
-<img src="docs/images/flow.webp" alt="/board sub-3: 알약 진행 막대가 있는 작업 카드, 할 일 4개(끝남 4분 12초 · 끝남 6분 18초 · 진행 중 20분 41초 · 대기), 결정 기록 1건, 흐름 여섯 줄" width="560">
+<img src="docs/images/flow.webp" alt="/board sub-3: 알약 진행 막대가 있는 작업 카드, 할 일 4개(끝남 4분 12초 · 끝남 6분 18초 · 진행 중 20분 34초 · 대기), ✓ 결정 기록 1건, 흐름 여섯 줄" width="560">
 
 **6. 좁은 패널에서 보기**
 
 Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(ctx 막대, 몇 초 전, 캐시)부터 덜어 내 한 줄을 지킵니다. 탭 줄은 탭 단위로 줄을 바꿉니다.
 
-<img src="docs/images/narrow.webp" alt="40칸 패널: 카드 머리줄 한 줄(ctx 20% 만 남김), 알약 진행 막대, 탭 줄이 세 줄로 나뉨, ASD-STE100 펼침" width="300">
+<img src="docs/images/narrow.webp" alt="40칸 패널: 카드 머리줄 한 줄(ctx 20% 만 남김), 알약 진행 막대, 접힌 질문 줄에도 ┃ 막대, 탭 줄이 세 줄로 나뉨, ASD-STE100 펼침" width="300">
 
 팀 창 모양, 세션 이름, 카드 기호, 숨은 실패 판정 규칙, 기록하는 내용은 [docs/team-board.md](docs/team-board.md)를 보세요.
 
