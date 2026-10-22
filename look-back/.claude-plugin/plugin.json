@@ -1,6 +1,6 @@
 {
   "name": "look-back",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "/lookback: 오늘·어제·7일·30일·올해 동안 한 일을 옆 패널에. 한눈에 숫자·차트(Work Report)와 프로젝트별 요청·결정·커밋 (기록은 토큰 0, 요약은 누를 때만 Haiku 1회)",
   "author": {
     "name": "yeochul-jeon",

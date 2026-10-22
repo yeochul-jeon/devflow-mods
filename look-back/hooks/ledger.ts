@@ -224,7 +224,10 @@ function steps(command: string): string[] {
   }
   parts.push(src.slice(from))
   return parts
-    .map(s => s.trim().replace(/^(?:[A-Za-z_]\w*=(?!\S*(?:\$\(|`))\S*(?:\s+|$))+/, ''))
+    // { } · ( ) 묶음은 벗긴다: `{ ls; find …; }`, `( cd x && grep … )`. 짝 없는 닫는 괄호만 지워 `$(date)` 는 그대로
+    .map(s => s.trim().replace(/^[{(]\s*/, '').replace(/\s*}$/, ''))
+    .map(s => (s.split(')').length > s.split('(').length ? s.replace(/\s*\)$/, '') : s))
+    .map(s => s.replace(/^(?:[A-Za-z_]\w*=(?!\S*(?:\$\(|`))\S*(?:\s+|$))+/, ''))
     // 셸 구문은 건너뛰고 안쪽 명령만 본다: `for f in …; do grep …; done`, `if [ -f x ]; then cat x; fi`
     .map(s => s.replace(/^(?:do|then|else|elif|if|until)\s+/, '').replace(/^(?:\/usr)?\/bin\//, ''))
     .filter(s => s && !/^cd\s/.test(s) && !/^(?:true|:)$/.test(s) && !SHELL_SYNTAX.test(s))

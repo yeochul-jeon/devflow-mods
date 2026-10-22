@@ -111,6 +111,10 @@ describe('Work Report (순수 함수)', () => {
     expect(kindAfter(undefined, 'Bash', true, 'for f in *.ts; do wc -l $f; done')).toBe('research')
     expect(kindAfter(undefined, 'Bash', true, 'cat a.txt && bun test')).toBe('run')
     expect(kindAfter(undefined, 'Bash', true, 'git show HEAD > out.txt')).toBe('run') // 파일로 쓰면 읽기만이 아니다
+    // { } · ( ) 묶음은 벗기고 안쪽 명령으로 (team-board 0.27.2 와 같은 고침)
+    expect(kindAfter(undefined, 'Bash', true, 'cd /r && { ls; find . -name "*.md" | head; }; head -5 a.md')).toBe('research')
+    expect(kindAfter(undefined, 'Bash', true, '( cd svc && grep -n FAILED build/test.log )')).toBe('research')
+    expect(kindAfter(undefined, 'Bash', true, '{ ls; ./gradlew test; }')).toBe('run')
     expect(kindAfter(undefined, 'Bash', true, "sed -i '' s/a/b/ a.txt")).toBe('run')
     expect(kindAfter(undefined, 'Bash', true, "python3 -c 'print(1)'")).toBe('run')
     expect(kindAfter('run', 'Bash', true, 'ls')).toBe('run') // 앞 것이 이긴다
