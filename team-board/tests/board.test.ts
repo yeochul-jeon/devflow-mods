@@ -41,6 +41,8 @@ import {
   overlaps,
   pushTouch,
   touchPath,
+  sinceLastPrompt,
+  sinceText,
   progress,
   questionSummary,
   recentTurns,
@@ -1286,6 +1288,76 @@ describe('같은 파일 겹침 (T34 D1)', () => {
     expect(await pane.find({ type: 'Text', text: /^⚠ src\/order\.ts · order-svc \d+초 전$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^ ⚠ 겹침 1 $/ })).toBeDefined()
     await pane.unmount()
+  })
+})
+
+describe('복귀 요약·세션 나이 (T34 D2·D4)', () => {
+  const T0 = NOW - 30 * 60_000
+  const peer = beat({
+    id: 'peer', name: 'sub-2', state: 'asking', question: '캐시 만료를 5분으로 할까요?', startedAt: NOW - 3 * 60 * 60_000,
+    timeline: [
+      { at: NOW - 2 * 60 * 60_000, kind: 'prompt', text: '옛 요청' },
+      { at: NOW - 2 * 60 * 60_000 + 1, kind: 'fail', text: '옛 실패' },
+      { at: T0, kind: 'prompt', text: '캐시 정리' },
+      { at: T0 + 60_000, kind: 'fail', text: './gradlew test · 1 failed' },
+      { at: T0 + 20 * 60_000, kind: 'ask', text: '캐시 만료를 5분으로 할까요?' },
+    ],
+    tasks: [
+      { id: '1', subject: '조사', status: 'completed', doneAt: T0 - 1 },
+      { id: '2', subject: '구현', status: 'completed', doneAt: T0 + 5 * 60_000 },
+      { id: '3', subject: '테스트', status: 'completed', doneAt: T0 + 9 * 60_000 },
+      { id: '4', subject: '문서', status: 'in_progress' },
+    ],
+    touched: [{ path: 'src/a.ts', at: T0 + 2 * 60_000 }, { path: 'src/b.ts', at: T0 + 3 * 60_000 }, { path: 'README.md', at: T0 - 60_000 }],
+  })
+
+  test('마지막 요청 뒤에 끝난 단계·고친 파일·질문·실패를 센다', async () => {
+    expect(sinceLastPrompt(peer)).toEqual({ at: T0, steps: 2, files: 2, asks: 1, fails: 1 })
+    expect(sinceText(sinceLastPrompt(peer)!, NOW)).toBe('30분 전 요청 뒤 · ✓ 단계 2 · 파일 2 · ⚑ 질문 1 · ⚠ 실패 1')
+    // 요청이 없거나, 그 뒤 아무 일도 없으면 null
+    expect(sinceLastPrompt(beat({ timeline: [] }))).toBeNull()
+    expect(sinceLastPrompt(beat({ timeline: [{ at: T0, kind: 'prompt', text: 'x' }, { at: T0 + 1, kind: 'done', text: '끝' }] }))).toBeNull()
+  })
+
+  test('보드 카드에 그새 줄(요청 5분 뒤부터), 자세히에 시작 시각', async ($, on) => {
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    const files = new Map<string, string>()
+    files.set(`${DIR}/peer.json`, JSON.stringify(peer))
+    files.set(`${DIR}/fresh.json`, JSON.stringify(beat({ id: 'fresh', name: 'sub-3', timeline: [{ at: NOW - 60_000, kind: 'prompt', text: '방금' }], touched: [{ path: 'x.ts', at: NOW - 30_000 }] })))
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    // 새 세션 기록에는 시작 시각이 있다
+    const mine = JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    expect(mine.startedAt).toBe(NOW)
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
+    expect(await pane.find({ type: 'Text', text: '30분 전 요청 뒤 · ✓ 단계 2 · 파일 2 · ⚑ 질문 1 · ⚠ 실패 1' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^그새$/ })).toBeDefined()
+    // 요청한 지 5분이 안 된 세션은 그새 줄이 없다
+    expect((await pane.findAll({ type: 'Text', text: /요청 뒤 · / })).length).toBe(1)
+    await pane.unmount()
+
+    await $.command.run({ command: 'board', args: 'sub-2' } as any)
+    const detail = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
+    expect(await detail.find({ type: 'Text', text: '3시간 전 시작' })).toBeDefined()
+    expect(await detail.find({ type: 'Text', text: /요청 뒤 · ✓ 단계 2/ })).toBeDefined()
+    await detail.unmount()
   })
 })
 

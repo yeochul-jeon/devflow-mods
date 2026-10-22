@@ -57,6 +57,8 @@ import {
   pushCapped,
   pushTouch,
   questionSummary,
+  sinceLastPrompt,
+  sinceText,
   questionText,
   recentTurns,
   repoKey,
@@ -560,7 +562,7 @@ export const register: Register = (on, options) => {
     const prev = await read($, me)
     self.beat = prev
       ? { ...prev, state: prev.state === 'ended' ? 'idle' : prev.state }
-      : emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd)
+      : { ...emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd), startedAt: await $.clock.now() }
     // 앞서 남긴 원문을 이어 쓴다 (없으면 처음부터)
     self.flow = prev ? await readFlow($, self.dir, self.beat.id) : {}
     // 다시 시작했으면 앞 프로세스의 보조 에이전트는 끝났다. 모듈만 다시 로드됐으면 엔진 목록에 남아 있다
@@ -1373,6 +1375,13 @@ export const register: Register = (on, options) => {
       return row('겹침', <Text color={pal.ask} wrap="truncate-end">{`⚠ ${o.path} · ${o.name} ${ago(now - o.at)}${os.length > 1 ? ` 외 ${os.length - 1}건` : ''}`}</Text>, `overlap-${b.id}`)
     }
 
+    // 복귀 요약 (T34 D2): 마지막 요청 뒤 무엇이 바뀌었나. 요청한 지 5분이 안 됐으면 보고 있던 참이라 뺀다
+    const sinceRow = (b: Beat) => {
+      const s = sinceLastPrompt(b)
+      if (!s || now - s.at < 5 * 60_000) return null
+      return row('그새', <Text color={pal.text} wrap="truncate-end">{sinceText(s, now)}</Text>, `since-${b.id}`)
+    }
+
     // 설명 상자 안쪽 폭: 패널 폭에서 패널·카드·상자의 테두리와 여백, 들여쓰기를 뺀다.
     const artWidth = Math.max(20, cols - 18)
 
@@ -1611,6 +1620,8 @@ export const register: Register = (on, options) => {
           <Box {...cardProps(b)}>
             {headOf(b)}
             {b.prompt ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>) : null}
+            {b.startedAt !== undefined ? row('시작', <Text color={pal.dim}>{`${ago(now - b.startedAt)} 시작`}</Text>) : null}
+            {sinceRow(b)}
             {failRows(b, true)}
             {overlapRow(b)}
             {b.files.length ? row('편집', <Text color={pal.dim} wrap="truncate-end">{`${b.edits}회 · ${b.files.slice(0, 6).join(', ')}`}</Text>) : null}
@@ -1738,6 +1749,7 @@ export const register: Register = (on, options) => {
                     </Text>,
                   )
                 : null}
+              {sinceRow(b)}
               {failRows(b, false)}
               {overlapRow(b)}
               {askBlock(b, 6)}

@@ -60,6 +60,8 @@ export type Beat = {
   timeline: Event[]
   edits: number
   files: string[]
+  /** 이 기록을 처음 만든 시각 (세션 나이, 0.28 전 파일에는 없음) */
+  startedAt?: number
   /** 최근 편집한 경로와 시각, 12개. 같은 파일 겹침을 찾는다 (0.28 전 파일에는 없음) */
   touched?: Touch[]
   /** 아직 풀리지 않은 숨은 실패 (같은 명령이 깨끗하게 다시 돌면 지워짐) */

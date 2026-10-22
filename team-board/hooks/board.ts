@@ -379,6 +379,29 @@ export function overlaps(me: Beat, others: readonly Beat[], now: number): { path
     .sort((a, b) => b.at - a.at)
 }
 
+/** 복귀 요약 (T34 D2): 마지막 요청 뒤에 끝난 단계, 고친 파일, 질문, 숨은 실패 수. 요청이 없거나 그 뒤 아무 일도 없으면 null */
+export function sinceLastPrompt(b: Beat): { at: number; steps: number; files: number; asks: number; fails: number } | null {
+  const p = [...b.timeline].reverse().find(t => t.kind === 'prompt')
+  if (!p) return null
+  const after = (at: number | undefined) => at !== undefined && at >= p.at
+  const steps = b.tasks.filter(t => after(t.doneAt)).length
+  const files = (b.touched ?? []).filter(t => after(t.at)).length
+  const asks = b.timeline.filter(t => t.kind === 'ask' && after(t.at)).length
+  const fails = b.timeline.filter(t => t.kind === 'fail' && after(t.at)).length
+  return steps + files + asks + fails ? { at: p.at, steps, files, asks, fails } : null
+}
+
+/** 복귀 요약 한 줄. 0 인 항목은 뺀다 */
+export function sinceText(s: NonNullable<ReturnType<typeof sinceLastPrompt>>, now: number): string {
+  const parts = [
+    s.steps ? `✓ 단계 ${s.steps}` : '',
+    s.files ? `파일 ${s.files}` : '',
+    s.asks ? `⚑ 질문 ${s.asks}` : '',
+    s.fails ? `⚠ 실패 ${s.fails}` : '',
+  ].filter(Boolean)
+  return [`${ago(now - s.at)} 요청 뒤`, ...parts].join(' · ')
+}
+
 export function isStale(b: Beat, now: number): boolean {
   return now - b.updatedAt > STALE_MS
 }
