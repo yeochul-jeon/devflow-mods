@@ -895,6 +895,16 @@ describe('숨은 실패', () => {
     expect(isReadOnly('grep -n FAILED build/test.log | head -20')).toBe(true)
   })
 
+  test('{ } · ( ) 묶음은 벗기고 안쪽 명령으로 판정한다 (2026-10-23 오탐)', async () => {
+    // 계획 파일을 읽은 출력 속 테스트 문자열이 「실패한 테스트」로 잡힌 명령 형태
+    expect(isReadOnly('cd $R 2>/dev/null && { ls; find . -maxdepth 3 -name "*.md" | head -30; }; head -30 a.md | cut -c1-160')).toBe(true)
+    expect(isReadOnly('( cd svc && grep -n FAILED build/test.log )')).toBe(true)
+    expect(isReadOnly('{ ls; ./gradlew test; }')).toBe(false)
+    expect(isReadOnly('(./gradlew test)')).toBe(false)
+    expect(commandKey('(./gradlew test)')).toBe('./gradlew test')
+    expect(commandKey('{ ./gradlew test; }')).toBe('./gradlew test')
+  })
+
   test('반복·조건 구문은 건너뛰고 안쪽 명령으로 판정한다, 파일로 쓰는 단계는 읽기 전용이 아니다 (2026-10-18 표본)', async () => {
     // 로그 보기: 표본의 오탐
     expect(isReadOnly('D=data/logs; for f in a b; do echo "== $f"; grep -m3 ERROR $D/$f.log; done')).toBe(true)
