@@ -43,6 +43,7 @@ import {
   touchPath,
   sinceLastPrompt,
   sinceText,
+  askContext,
   needsVerify,
   progress,
   questionSummary,
@@ -2820,5 +2821,25 @@ describe('자기 세션 표시', () => {
     await $.tool.call({ tool: 'SetPlan', plan, tool_use_id: 'sp' } as any)
     expect(await bandHas(/^ 읽기 $/)).toBe(true)
     expect(await bandHas(/할 일: 읽기/)).toBe(false)
+  })
+})
+
+describe('결정 대화상자 위 맥락 (T34 A1)', () => {
+  // 대화상자 둘레 그리기는 엔진 노드가 있어야 해서 테스트 키트로는 띄우지 못한다 (실화면 시험으로 확인). 내용만 여기서
+  test('요청·계획 단계·직전 Claude 글을 줄마다 78칸 안으로, 아는 것이 없으면 []', async () => {
+    const tasks = [
+      { id: '1', subject: '조사', status: 'completed' as const },
+      { id: '2', subject: '만료 정하기', status: 'in_progress' as const },
+      { id: '3', subject: '구현', status: 'pending' as const },
+    ]
+    const said = '조회 로그를 보니 같은 주문을 3분 안에 다시 읽는 비율이 82%입니다. 만료를 정해야 구현을 시작할 수 있어요. '.repeat(3)
+    const lines = askContext({ prompt: '주문 조회 캐시를 정리해 줘', recent: [{ role: 'user', text: '주문 조회 캐시를 정리해 줘' }, { role: 'assistant', text: said }] }, tasks)
+    expect(lines.slice(0, 2)).toEqual(['요청 · 주문 조회 캐시를 정리해 줘', '계획 · 2/3 만료 정하기'])
+    expect(lines[2]).toMatch(/^직전 · 조회 로그를 보니.*…$/)
+    // 40칸마다 한 줄로 세는 대화상자 규칙: 머리 1 + 줄마다 2 = 7줄 이하 (12줄 넘으면 엔진 것만 그려진다)
+    for (const l of lines) expect(cells(l)).toBeLessThanOrEqual(78)
+    expect(askContext({ prompt: '', recent: [] }, [])).toEqual([])
+    // 사용자의 글은 직전 글로 쓰지 않는다
+    expect(askContext({ prompt: '', recent: [{ role: 'user', text: '답' }] }, [])).toEqual([])
   })
 })

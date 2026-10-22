@@ -13,6 +13,7 @@ import {
   agentPatch,
   agentStart,
   agentStrips,
+  askContext,
   fitStrip,
   wrapCells,
   agentSummary,
@@ -1180,6 +1181,27 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {below}
         {hud}
+      </Box>
+    )
+  })
+
+  // 결정 질문 대화상자 위 맥락 (T34 A1): 무엇을 하던 중에 왜 묻는지. 엔진 노드는 한 번, 아래에는 아무것도 두지 않는다.
+  // 터미널은 대화상자 둘레 12줄까지(40칸마다 한 줄로 셈, 넘으면 엔진 것만 그려진다 — 탐침). 줄마다 78칸으로 잘라 머리 1 + 3×2 = 7줄 안
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    const node = await next(e)
+    const b = self.beat
+    if (!b) return node
+    const plan = tasksFromPlan(await read($, workPlan))
+    const lines = askContext(b, plan && !plan.ended ? plan.tasks : b.tasks)
+    if (!lines.length) return node
+    const { Box, Text } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column">
+        <Text color={pal.ask} bold>◆ 결정 맥락 · team-board</Text>
+        {lines.map(l => (
+          <Text color={l.startsWith('직전') ? pal.dim : pal.text}>{l}</Text>
+        ))}
+        {node}
       </Box>
     )
   })

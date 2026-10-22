@@ -379,6 +379,17 @@ export function overlaps(me: Beat, others: readonly Beat[], now: number): { path
     .sort((a, b) => b.at - a.at)
 }
 
+/** 결정 질문 대화상자 위 맥락 줄 (T34 A1): 요청, 지금 계획 단계, 질문 직전 Claude 의 글. 줄마다 width 칸으로 자른다. 아는 것이 없으면 [] */
+export function askContext(b: Pick<Beat, 'prompt' | 'recent'>, tasks: readonly Task[], width = 78): string[] {
+  const { total, current } = progress(tasks)
+  const said = [...b.recent].reverse().find(l => l.role === 'assistant')?.text ?? ''
+  return [
+    b.prompt ? `요청 · ${b.prompt}` : '',
+    current ? `계획 · ${tasks.indexOf(current) + 1}/${total} ${current.subject}` : '',
+    said ? `직전 · ${said}` : '',
+  ].filter(Boolean).map(l => clip(l, width))
+}
+
 /** 고친 뒤 검증이 필요 없는 파일: 문서·그림 (T34 B1) */
 const NO_VERIFY = /\.(?:md|mdx|txt|rst|adoc|png|jpe?g|gif|webp|svg)$/i
 
