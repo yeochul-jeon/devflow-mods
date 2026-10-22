@@ -17,6 +17,9 @@ export type Event = { at: number; kind: 'prompt' | 'done' | 'ask' | 'decide' | '
 /** exit 0 인데 출력에 실패 흔적이 있던 Bash 실행. high = 실패, warn = 확인 필요(건너뛴 테스트 등). */
 export type FailAlert = { at: number; command: string; key: string; level: 'high' | 'warn'; signs: string[]; masks: string[] }
 
+/** 이 세션이 편집한 파일 하나: 저장소 안 상대 경로와 마지막 편집 시각 (T34 D1) */
+export type Touch = { path: string; at: number }
+
 /** 직전 대화 한 줄: 누가 무엇을 말했는지 (텍스트만, 잘린 것). */
 export type RecentLine = { role: 'user' | 'assistant'; text: string }
 
@@ -57,6 +60,8 @@ export type Beat = {
   timeline: Event[]
   edits: number
   files: string[]
+  /** 최근 편집한 경로와 시각, 12개. 같은 파일 겹침을 찾는다 (0.28 전 파일에는 없음) */
+  touched?: Touch[]
   /** 아직 풀리지 않은 숨은 실패 (같은 명령이 깨끗하게 다시 돌면 지워짐) */
   fail: FailAlert | null
   /** 이 세션의 보조 에이전트. 사람이 다음 프롬프트를 보내면 끝난 것을 지운다 (0.18 전 파일에는 없음) */

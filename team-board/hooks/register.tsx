@@ -48,12 +48,14 @@ import {
   normalize,
   notificationTokens,
   oneLine,
+  overlaps,
   pillBar,
   pillToneOf,
   progress,
   soundCommands,
   soundOs,
   pushCapped,
+  pushTouch,
   questionSummary,
   questionText,
   recentTurns,
@@ -68,6 +70,7 @@ import {
   stampTasks,
   tasksFromPlan,
   todoStrips,
+  touchPath,
   turnTook,
   unwrapPaste,
   visible,
@@ -115,6 +118,10 @@ const ALERT_AFTER_MS = 20_000
 // 이 세션 자신의 상태와 파일 위치. 세션마다 하나.
 const self = {
   dir: '',
+  /** 저장소 루트 (없으면 작업 폴더). 편집 경로를 상대 경로로 쓴다 */
+  root: '',
+  /** 같은 파일 겹침을 Claude 에게 이미 알린 것: `<경로>|<세션 id>` */
+  overlapTold: new Set<string>(),
   beat: null as Beat | null,
   lastWrite: 0,
   /** 마지막으로 시작한 scan 번호. 늦게 끝난 이전 scan 이 새 결과를 덮지 않게 한다 */
@@ -533,6 +540,7 @@ export const register: Register = (on, options) => {
     const repo = await $.session.repo()
     const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? cwd
     self.dir = `${home}/.claude/team-board/${repoKey(repo?.root ?? cwd)}`
+    self.root = repo?.root ?? cwd
     // 세션 id 가 같은 프로세스가 둘일 수 있어(재개, 상위 세션이 띄운 세션) 프로세스마다 꼬리표를 붙인다.
     // 모듈이 다시 로드된 경우(플러그인 갱신, 엔진 작업자 재시작)엔 같은 세션 기록을 이어 쓴다.
     self.sessionId = await $.session.id()
@@ -764,9 +772,21 @@ export const register: Register = (on, options) => {
 
     const step = describeTool(e.tool, input)
     if (EDIT_TOOLS.has(e.tool) && main && self.beat) {
-      const file = basename(String(input.file_path ?? input.notebook_path ?? ''))
+      const full = String(input.file_path ?? input.notebook_path ?? '')
+      const file = basename(full)
       const files = [file, ...self.beat.files.filter(f => f !== file)].slice(0, 12)
-      await save($, { step, edits: self.beat.edits + 1, files })
+      const path = touchPath(self.root, full)
+      const now = await $.clock.now()
+      const touched = pushTouch(self.beat.touched ?? [], path, now)
+      await save($, { step, edits: self.beat.edits + 1, files, touched })
+      // 같은 파일을 다른 세션도 1시간 안에 고쳤으면 Claude 에게 한 번 알린다 (T34 D1). 세션 목록은 3초마다 읽은 것
+      const told = overlaps(self.beat, await read($, beats), now).filter(o => o.path === path && !self.overlapTold.has(`${path}|${o.name}`))
+      if (!told.length) return next(e)
+      for (const o of told) self.overlapTold.add(`${path}|${o.name}`)
+      const r = await next(e)
+      if (r.deny !== undefined) return r
+      const memo = `team-board: 같은 저장소의 다른 세션도 이 파일(${path})을 최근에 고쳤습니다: ${told.map(o => `${o.name} ${ago(now - o.at)}`).join(', ')}. 같은 부분을 고치고 있지 않은지 확인하세요 (git diff, /board ${told[0]!.name}).`
+      return { ...r, context: [...(r.context ?? []), memo] }
     } else if (main) {
       await save($, { step })
     } else if (self.beat && e.agentId) {
@@ -1333,6 +1353,15 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // 같은 파일 겹침 (T34 D1): 가장 최근 것 하나와 남은 수
+    const overlapRow = (b: Beat) => {
+      if (isStale(b, now)) return null
+      const os = overlaps(b, list, now)
+      if (!os.length) return null
+      const o = os[0]!
+      return row('겹침', <Text color={pal.ask} wrap="truncate-end">{`⚠ ${o.path} · ${o.name} ${ago(now - o.at)}${os.length > 1 ? ` 외 ${os.length - 1}건` : ''}`}</Text>, `overlap-${b.id}`)
+    }
+
     // 설명 상자 안쪽 폭: 패널 폭에서 패널·카드·상자의 테두리와 여백, 들여쓰기를 뺀다.
     const artWidth = Math.max(20, cols - 18)
 
@@ -1572,6 +1601,7 @@ export const register: Register = (on, options) => {
             {headOf(b)}
             {b.prompt ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>) : null}
             {failRows(b, true)}
+            {overlapRow(b)}
             {b.files.length ? row('편집', <Text color={pal.dim} wrap="truncate-end">{`${b.edits}회 · ${b.files.slice(0, 6).join(', ')}`}</Text>) : null}
             {askBlock(b, 40)}
           </Box>
@@ -1667,12 +1697,14 @@ export const register: Register = (on, options) => {
     const count = (s: Beat['state']) => list.filter(b => b.state === s && !isStale(b, now) && !(s === 'idle' && waitsOnAgents(b))).length
     const waiting = list.filter(b => !isStale(b, now) && waitsOnAgents(b)).length
     const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
+    const overlapped = new Set(list.filter(b => !isStale(b, now)).flatMap(b => overlaps(b, list, now).map(o => o.path))).size
     return (
       <Box flexDirection="column" paddingX={1}>
         <Box flexDirection="row" columnGap={2} flexWrap="wrap" marginBottom={1}>
           <Text color={pal.accent} bold>TEAM BOARD</Text>
           {count('asking') ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 대기 ${count('asking')} `}</Text> : null}
           {list.some(b => b.fail?.level === 'high' && !isStale(b, now)) ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 숨은 실패 ${list.filter(b => b.fail?.level === 'high' && !isStale(b, now)).length} `}</Text> : null}
+          {overlapped ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` ⚠ 겹침 ${overlapped} `}</Text> : null}
           <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
           {waiting ? <Text color={pal.work}>{`◐ 보조 기다림 ${waiting}`}</Text> : null}
           <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
@@ -1696,6 +1728,7 @@ export const register: Register = (on, options) => {
                   )
                 : null}
               {failRows(b, false)}
+              {overlapRow(b)}
               {askBlock(b, 6)}
               <Box flexDirection="row" justifyContent="flex-end">
                 <Button key={`detail-${b.id}`} label="자세히 →" onPress={noop} />

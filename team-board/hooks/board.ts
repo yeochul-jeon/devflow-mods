@@ -1,5 +1,5 @@
 // 순수 함수만 둔다. $ 에 의존하지 않아 테스트와 이식이 쉽다.
-import type { Beat, Decision, Event, ExplainKind, RecentLine, SubAgent, Task, WorkPlan } from '../types'
+import type { Beat, Decision, Event, ExplainKind, RecentLine, SubAgent, Task, Touch, WorkPlan } from '../types'
 import { cells, clip, EXPLAIN_JSON_SPEC, STE_JSON_SPEC } from './diagram'
 import { redact } from './failure'
 import { bar } from './palette'
@@ -353,6 +353,30 @@ export function visible(beats: readonly Beat[], now: number): Beat[] {
 export function findByName(beats: readonly Beat[], name: string): Beat | undefined {
   const n = name.trim().toLowerCase()
   return beats.find(b => b.name.toLowerCase() === n) ?? beats.find(b => b.name.toLowerCase().startsWith(n))
+}
+
+/** 두 세션이 이 시간 안에 같은 파일을 고쳤으면 겹침으로 본다 (T34 D1) */
+export const OVERLAP_MS = 60 * 60_000
+
+/** 편집한 파일의 저장소 안 상대 경로. 저장소 밖이면 그대로 둔다. 다른 폴더의 같은 파일 이름을 겹침으로 보지 않으려고 basename 을 쓰지 않는다 */
+export function touchPath(root: string, file: string): string {
+  const base = root.replace(/[\\/]+$/, '')
+  return base && file.startsWith(`${base}/`) ? file.slice(base.length + 1) : file
+}
+
+/** 최근 편집한 경로: 같은 경로는 맨 앞으로 옮기고 시각을 새로, 12개까지 */
+export function pushTouch(list: readonly Touch[], path: string, at: number): Touch[] {
+  return [{ path, at }, ...list.filter(t => t.path !== path)].slice(0, 12)
+}
+
+/** 이 세션이 1시간 안에 고친 파일을, 살아 있는 다른 세션도 1시간 안에 고쳤는지. 다른 세션의 최근 편집 순 */
+export function overlaps(me: Beat, others: readonly Beat[], now: number): { path: string; name: string; at: number }[] {
+  const fresh = (b: Beat) => (b.touched ?? []).filter(t => now - t.at < OVERLAP_MS)
+  const mine = new Set(fresh(me).map(t => t.path))
+  return others
+    .filter(o => o.id !== me.id && o.state !== 'ended' && !isStale(o, now))
+    .flatMap(o => fresh(o).filter(t => mine.has(t.path)).map(t => ({ path: t.path, name: o.name, at: t.at })))
+    .sort((a, b) => b.at - a.at)
 }
 
 export function isStale(b: Beat, now: number): boolean {

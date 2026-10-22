@@ -38,6 +38,9 @@ import {
   looksLikeQuestion,
   normalize,
   notificationTokens,
+  overlaps,
+  pushTouch,
+  touchPath,
   progress,
   questionSummary,
   recentTurns,
@@ -1218,6 +1221,67 @@ describe('프롬프트 캐시', () => {
     const asking = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
     expect((await asking.find({ type: 'Text', text: /^캐시 만료 시간 · 배포 시점$/ }))?.props.color).toBe(paletteOf('night').ask)
     await asking.unmount()
+  })
+})
+
+describe('같은 파일 겹침 (T34 D1)', () => {
+  test('저장소 안 경로는 상대 경로로, 1시간 안에 두 살아 있는 세션이 고친 같은 경로만 겹침', async () => {
+    expect(touchPath('/repo/order-svc', '/repo/order-svc/src/a.ts')).toBe('src/a.ts')
+    expect(touchPath('/repo/order-svc', '/tmp/x.ts')).toBe('/tmp/x.ts')
+    expect(pushTouch([{ path: 'a', at: 1 }, { path: 'b', at: 2 }], 'a', 3)).toEqual([{ path: 'a', at: 3 }, { path: 'b', at: 2 }])
+    const me = beat({ id: 'me', touched: [{ path: 'src/a.ts', at: NOW - 5 * 60_000 }, { path: 'README.md', at: NOW - 2 * 60 * 60_000 }] })
+    const peer = beat({ id: 'p', name: 'sub-2', touched: [{ path: 'src/a.ts', at: NOW - 12 * 60_000 }, { path: 'README.md', at: NOW - 60_000 }] })
+    // 다른 폴더의 같은 이름(basename)은 겹침이 아니다
+    const other = beat({ id: 'o', name: 'sub-3', touched: [{ path: 'lib/a.ts', at: NOW }] })
+    expect(overlaps(me, [me, peer, other], NOW)).toEqual([{ path: 'src/a.ts', name: 'sub-2', at: NOW - 12 * 60_000 }])
+    // 오래된(소식 없는) 세션·옛 파일(touched 없음)은 빼고 본다
+    expect(overlaps(me, [beat({ ...peer, updatedAt: NOW - 10 * 60_000 })], NOW)).toEqual([])
+    expect(overlaps(me, [normalize({ id: 'old', name: 'old', cwd: '/r', updatedAt: NOW } as any)], NOW)).toEqual([])
+  })
+
+  test('다른 세션이 1시간 안에 고친 파일을 고치면 Claude 에게 한 번 알리고, 보드 카드에 겹침 줄', async ($, on) => {
+    const pal = paletteOf('night')
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    const files = new Map<string, string>()
+    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'working', touched: [{ path: 'src/order.ts', at: NOW - 12 * 60_000 }] })))
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+
+    const edit = (file_path: string) => $.tool.call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b' } as any) as Promise<any>
+    const first = await edit('/repo/order-svc/src/order.ts')
+    expect(first.context?.join('\n')).toMatch(/src\/order\.ts.*sub-2 12분 전/)
+    // 같은 파일·같은 세션은 다시 알리지 않는다. 겹치지 않는 파일은 조용하다
+    expect((await edit('/repo/order-svc/src/order.ts')).context ?? []).toEqual([])
+    expect((await edit('/repo/order-svc/src/other.ts')).context ?? []).toEqual([])
+    // 도구 호출이 몰리면 1.5초에 한 번만 쓰고 다음 틱에 쓴다
+    await clock.advance(3_000)
+    const mine = JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    expect(mine.touched.map((t: any) => t.path)).toEqual(['src/other.ts', 'src/order.ts'])
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    // 양쪽 카드에 모두: 내 카드에는 상대 이름, 상대 카드에는 내 이름
+    expect((await pane.find({ type: 'Text', text: /^⚠ src\/order\.ts · sub-2 12분 전$/ }))?.props.color).toBe(pal.ask)
+    expect(await pane.find({ type: 'Text', text: /^⚠ src\/order\.ts · order-svc \d+초 전$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^ ⚠ 겹침 1 $/ })).toBeDefined()
+    await pane.unmount()
   })
 })
 
