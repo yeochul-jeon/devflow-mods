@@ -26,7 +26,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | --- | --- | --- | --- |
 | 색 `palette` | team-board | `claude plugin configure team-board@devflow-mods` | `night` |
 | 팀 창 켜기·끄기, 모양 | team-board | `/board band on\|off\|hud\|line`, `/board band solo off` | 켜짐, `hud` |
-| 결정 대기 음성 알림 | team-board | `/board sound on\|off\|test` | 켜짐, macOS만 |
+| 결정 대기 알림 (소리·OS 알림) | team-board | `/board sound on\|off\|test` | 켜짐. 음성은 macOS만, OS 알림은 `preferredNotifChannel` |
 | 숨은 실패 감지 | team-board | `/board fail on\|off\|clear` | 켜짐 |
 | 세션 표시 이름 | team-board | `/board name <이름>` | 세션 이름 → 브랜치 → 폴더 |
 | 다른 mod보다 앞에 두기 | team-board | `~/.claude/settings.json` 의 `prependPlugins` | 없음 |

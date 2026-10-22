@@ -411,9 +411,13 @@ describe('알림 소리 (T24, 모든 터미널)', () => {
     })
     on('audio.play', () => ({ value: undefined }))
     on('audio.speak', () => { spoke += 1; return { value: { via: 'system' as const } } })
+    on('ui.notify', () => ({ value: { isSent: false, reason: 'no-channel' } }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/a' } as any)
     runs.length = 0
-    await $.command.run({ command: 'board', args: 'sound test' } as any)
+    // OS 알림이 나가지 않으면 이유와 켜는 법을 그대로 보인다 (T34 A2: Orca·Warp 기본 설정은 no-channel)
+    const tested = await $.command.run({ command: 'board', args: 'sound test' } as any)
+    expect(tested.text).toContain('OS 알림: 안 나감 (no-channel)')
+    expect(tested.text).toContain('preferredNotifChannel')
     expect(runs.map(a => a[0])).toEqual(['uname', 'paplay', 'aplay'])
     expect(runs[1]![1]).toMatch(/\/sounds\/chime\.wav$/)
     expect(spoke).toBe(0)
@@ -1494,6 +1498,8 @@ describe('팀 상황판', () => {
     const spoken: string[] = []
     on('audio.play', () => ({ value: undefined }))
     on('audio.speak', ($, e: any) => { spoken.push(e.text); return { value: { via: 'system' as const } } })
+    const notified: { text: string; title?: string }[] = []
+    on('ui.notify', ($, e: any) => { notified.push({ text: e.text, title: e.title }); return { value: { isSent: true, channel: 'iterm2' } } })
     let calls = 0
     const JSON_ANSWER = JSON.stringify({
       why: 'PR38 착수가 이 답을 기다림',
@@ -1582,13 +1588,17 @@ describe('팀 상황판', () => {
     expect(spoken).toEqual([])
     await clock.advance(12_000)
     expect(spoken).toEqual(['order-svc 세션이 결정을 기다립니다'])
+    // OS 알림도 함께: 세션 이름과 질문 한 줄 (T34 A2)
+    expect(notified).toEqual([{ title: 'team-board 결정 대기', text: 'order-svc: push 를 develop 까지 할까요?' }])
     await clock.advance(60_000)
     expect(spoken.length).toBe(1)
+    expect(notified.length).toBe(1)
     // 끄면 새 질문이어도 조용
     await $.command.run({ command: 'board', args: 'sound off' } as any)
     await $.turn.complete({ reason: 'answer', answer: '테스트 범위는 어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't3' } as any)
     await clock.advance(30_000)
     expect(spoken.length).toBe(1)
+    expect(notified.length).toBe(1)
     await $.command.run({ command: 'board', args: 'sound on' } as any)
     // 사용자가 치지 않은 입력(백그라운드 작업 알림)은 요청으로도, 결정의 답으로도 기록하지 않는다
     const decided = mine().decisions.length

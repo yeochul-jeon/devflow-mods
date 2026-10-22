@@ -312,6 +312,15 @@ macOS에서만 동작합니다. 기본은 켜짐입니다.
 - Yuna를 받으려면 macOS 시스템 설정 → 손쉬운 사용 → 읽기 및 말하기 → 시스템 목소리에서 한국어(Yuna)를 내려받으세요.
 - `/board sound test` 로 소리를 확인하세요.
 
+### OS 알림
+
+소리와 함께 OS 알림도 보냅니다(0.28.1). 제목은 `team-board 결정 대기`, 내용은 `<세션>: <질문 한 줄>` 입니다.
+
+- 알림은 사용자의 `preferredNotifChannel` 설정을 따릅니다. 기본값(`auto`)은 터미널을 보고 고릅니다. iTerm2, kitty, Ghostty 는 알림이 나가고, **Orca·Warp 는 기본값에서 알림 채널이 없습니다**(2026-10-23 엔진 2.1.308 탐침).
+- 알림을 받으려면 `~/.claude/settings.json` 에 `"preferredNotifChannel"` 을 넣으세요. 값: `iterm2`, `iterm2_with_bell`, `kitty`, `ghostty`, `terminal_bell`(벨만, 글은 안 보임).
+- `/board sound test` 의 답 끝에 `OS 알림: 보냄 (iterm2)` 또는 `OS 알림: 안 나감 (no-channel)` 이 나옵니다. 보냄이어도 터미널이 알림 신호를 버리면 배너가 뜨지 않을 수 있습니다(엔진은 확인할 수 없음).
+- `/board sound off` 는 소리와 OS 알림을 함께 끕니다.
+
 ## 보조 에이전트
 
 세션이 띄운 서브에이전트(Agent 도구), 워크플로 에이전트, 팀원을 보여 줍니다. 턴은 끝났지만 보조가 아직 도는 세션은 ` 대기 ` 가 아니라 ` 보조 ` 배지와 `보조 n개 기다리는 중` 으로 보여, 멈춘 세션과 구별합니다.

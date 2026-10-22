@@ -391,9 +391,9 @@ const BOARD_HELP = [
   '  /board band hud | line     창 모양 / 한 줄 모양',
   '  /board band solo off | on  세션이 하나일 때 숨기기 / 보이기',
   '',
-  '결정 대기 음성 알림 (macOS)',
+  '결정 대기 알림 (소리는 macOS 음성·chime, OS 알림은 preferredNotifChannel)',
   '  /board sound off | on      끄기 / 켜기 (기본 켜짐)',
-  '  /board sound test          미리 듣기',
+  '  /board sound test          미리 듣기, OS 알림이 나가는지 확인',
   '',
   '숨은 실패 (exit 0 인데 실패한 빌드·테스트)',
   '  /board fail                보고서',
@@ -475,8 +475,18 @@ async function maybeAlert($: EngineInterface): Promise<void> {
   if ((await $.clock.now()) - self.askingSince < ALERT_AFTER_MS) return
   self.alertedFor = b.question
   if ((await $.store.get(SOUND_KEY)) === true) return
+  // 음성은 몇 초 걸리므로 OS 알림을 먼저 (T34 A2). 기본 설정의 Orca·Warp 는 no-channel 이라 소리를 대신하지 않고 덧붙인다
+  await notifyOs($, `${b.name}: ${questionSummary(b.question)}`)
   await announce($, `${b.name} 세션이 결정을 기다립니다`)
 }
+
+/** OS 알림 (T34 A2): 사용자의 preferredNotifChannel 로. 나간 채널 또는 안 나간 이유를 한 줄로 돌려준다 */
+async function notifyOs($: EngineInterface, text: string): Promise<string> {
+  const r = await $.ui.notify(text, { title: 'team-board 결정 대기' }).catch((err: unknown) => ({ isSent: false as const, reason: err instanceof Error ? err.message : String(err) }))
+  return r.isSent ? `OS 알림: 보냄 (${r.channel})` : `OS 알림: 안 나감 (${r.reason})`
+}
+
+const NOTIFY_HINT = 'OS 알림을 받으려면 ~/.claude/settings.json 에 "preferredNotifChannel" 을 터미널에 맞게 넣으세요: iterm2, kitty, ghostty, 또는 벨만 울리는 terminal_bell. 기본값(auto)에서 Orca·Warp 는 알림 채널이 없습니다.'
 
 // 이 기기의 소리 재생 방식. 처음 울릴 때 한 번 정한다
 let soundOsOf: SoundOs | null = null
@@ -864,12 +874,13 @@ export const register: Register = (on, options) => {
     }
     if (sub === 'sound' && (rest[0] === 'on' || rest[0] === 'off' || rest[0] === 'test')) {
       if (rest[0] === 'test') {
+        const sent = await notifyOs($, `${self.beat?.name ?? '이'}: 알림 시험`)
         await announce($, `${self.beat?.name ?? '이'} 세션이 결정을 기다립니다`)
-        return { text: '알림 소리를 재생했어요. 음성은 macOS 에서만, chime 은 Windows(PowerShell)·Linux(paplay 또는 aplay)에서도 들립니다.' }
+        return { text: `알림 소리를 재생했어요. 음성은 macOS 에서만, chime 은 Windows(PowerShell)·Linux(paplay 또는 aplay)에서도 들립니다.\n${sent}${sent.includes('안 나감') ? `\n${NOTIFY_HINT}` : ''}` }
       }
       const off = rest[0] === 'off'
       await $.store.set(SOUND_KEY, off)
-      return { text: off ? '결정 대기 음성 알림을 껐어요.' : '결정 대기 음성 알림을 켰어요. 결정을 20초 넘게 기다리면 그 세션이 알려 줍니다.' }
+      return { text: off ? '결정 대기 알림(소리·OS 알림)을 껐어요.' : '결정 대기 알림을 켰어요. 결정을 20초 넘게 기다리면 그 세션이 소리와 OS 알림으로 알려 줍니다. OS 알림이 나가는지는 /board sound test' }
     }
     if (sub === 'band' && rest[0] === 'solo' && (rest[1] === 'on' || rest[1] === 'off')) {
       const off = rest[1] === 'off'
