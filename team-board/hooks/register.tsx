@@ -487,14 +487,17 @@ async function announce($: EngineInterface, text: string): Promise<void> {
 export const register: Register = (on, options) => {
   const pal = paletteOf(options.palette)
 
-  // 알약 막대 한 줄 (T24 B안). Text 는 그리는 화면의 것. 채움은 상태색을 카드 바탕 쪽으로 흐리게.
-  // 이름 색 팔레트(theme)는 섞을 수 없어 흐린 글자(dimColor)로: 같은 색이면 채움과 알약이 붙어 보인다 (밝은 테마 실화면)
+  // 알약 막대 한 줄 (T24 B안). Text 는 그리는 화면의 것. 채움 선은 상태색을 카드 바탕 쪽으로 조금 흐리게.
+  // 알약은 상태색을 카드 바탕 쪽으로 30% 어둡게 칠해 위 줄의 배지(상태색 그대로)와 구분한다 (T27 D2).
+  // 이름 색 팔레트(theme)는 섞을 수 없어 채움은 흐린 글자(dimColor), 알약은 상태색 그대로 (밝은 테마 실화면)
   const PILL_HUE: Record<PillTone, string> = { run: pal.work, ask: pal.ask, err: pal.bad, ok: pal.ok, stop: pal.ask }
+  const pillBg = (tone: PillTone) => mix(PILL_HUE[tone], pal.card || '#000000', 0.3)
   const pillOf = (Text: any, pb: PillBar) => (
     <Text wrap="truncate-end">
-      <Text color={mix(PILL_HUE[pb.tone], pal.card || '#000000', 0.45)} dimColor={!pal.isRaw}>{pb.fill}</Text>
-      <Text backgroundColor={PILL_HUE[pb.tone]} color={pal.onBadge} bold>{pb.pill}</Text>
-      <Text color={pal.dim}>{pb.rest}</Text>
+      <Text color={pal.dim}>{pb.cap}</Text>
+      <Text color={mix(PILL_HUE[pb.tone], pal.card || '#000000', 0.2)} dimColor={!pal.isRaw}>{pb.fill}</Text>
+      <Text backgroundColor={pillBg(pb.tone)} color={pal.onBadge} bold>{pb.pill}</Text>
+      <Text color={mix(pal.dim, pal.card || '#000000', 0.3)}>{pb.rest}</Text>
       <Text color={PILL_HUE[pb.tone]} bold>{`  ${pb.pct}%`}</Text>
     </Text>
   )

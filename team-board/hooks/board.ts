@@ -464,12 +464,13 @@ export function routeLine(tasks: readonly Task[], width: number): Seg[] {
 
 /**
  * 알약 막대 (T24 B안, plan-progress 의 막대를 글자로):  ████████ 테스트 실행 ···│···│···
- * 채움(█) 끝에 지금 단계 이름 알약이 붙고, 남은 구간은 · 와 단계 경계 눈금 │ 로 그린다.
+ * 왼쪽 경계 ▏ 뒤 채움 선(━) 끝에 지금 단계 이름 알약이 붙고, 남은 구간은 ╌ 와 단계 경계 눈금 │ 로 그린다.
+ * 선과 경계는 위 줄의 칠한 상태 배지와 모양이 달라 둘이 붙어 보이지 않게 한다 (T27 D2: 칠한 채움·알약이 배지 밑에서 탭처럼 보였다).
  * 알약 글은 상태로 정한다: 작업 = 지금 단계, 결정 = ? 단계, 실패 = ✕ 단계, 끝남 = ✓ 걸린 시간(없으면 도착).
- * 폭 1 BMP 문자만 쓴다. width 는 채움 + 알약 + 남은 구간의 칸 수. 너무 좁으면 null (부르는 쪽이 경로선으로).
+ * 폭 1 BMP 문자만 쓴다. width 는 경계 + 채움 + 알약 + 남은 구간의 칸 수. 너무 좁으면 null (부르는 쪽이 경로선으로).
  */
 export type PillTone = 'run' | 'ask' | 'err' | 'ok' | 'stop'
-export type PillBar = { fill: string; pill: string; rest: string; pct: number; tone: PillTone }
+export type PillBar = { cap: string; fill: string; pill: string; rest: string; pct: number; tone: PillTone }
 
 export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, took = ''): PillBar | null {
   const { done, total, current } = progress(tasks)
@@ -480,12 +481,12 @@ export function pillBar(tasks: readonly Task[], width: number, tone: PillTone, t
   // 다 끝난 계획의 결정 대기는 단계 이름 대신 '질문 대기': 초록 ✓ 로 그리면 일을 멈추고 묻는 세션과 구별되지 않는다
   const label = tn === 'ok' ? `✓ ${took || '도착'}` : `${tn === 'ask' ? '? ' : tn === 'err' ? '✕ ' : tn === 'stop' ? '멈춤: ' : ''}${step?.subject ?? (tn === 'ask' ? '질문 대기' : '')}`
   const pill = ` ${clip(label, Math.max(4, Math.floor(width / 2) - 2))} `
-  const room = Math.max(0, width - cells(pill))
+  const room = Math.max(0, width - 1 - cells(pill))
   const filled = tn === 'ok' ? room : Math.min(room, Math.round((done / total) * room))
   const ticks = new Set(Array.from({ length: total - 1 }, (_, k) => Math.round(((k + 1) * room) / total)))
   let rest = ''
-  for (let i = filled; i < room; i++) rest += ticks.has(i) && i > filled ? '│' : '·'
-  return { fill: '█'.repeat(filled), pill, rest, pct: Math.round((done / total) * 100), tone: tn }
+  for (let i = filled; i < room; i++) rest += ticks.has(i) && i > filled ? '│' : '╌'
+  return { cap: '▏', fill: '━'.repeat(filled), pill, rest, pct: Math.round((done / total) * 100), tone: tn }
 }
 
 /**

@@ -48,10 +48,13 @@ import {
   waitsOnAgents,
   label,
 } from '../hooks/board'
-import { bar, contextTone, paletteOf } from '../hooks/palette'
+import { bar, contextTone, mix, paletteOf } from '../hooks/palette'
 import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
 import { ICONS, sprite } from '../hooks/pixel'
 import { commandKey, isReadOnly, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
+
+// 알약 바탕: 상태색을 카드 바탕 쪽으로 30% (위 줄 배지와 구분, T27 D2)
+const chip = (tone: 'ask' | 'work') => mix(paletteOf('night')[tone], paletteOf('night').card, 0.3)
 
 const NOW = 1_800_000_000_000
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -207,19 +210,20 @@ describe('자세히 할 일 띠 (T25)', () => {
 describe('알약 막대 (T24 B안)', () => {
   const t = (status: string, i: number, subject = 's' + i) => ({ id: String(i), subject, status }) as any
   const five = (doneN: number) => Array.from({ length: 5 }, (_, i) => t(i < doneN ? 'completed' : i === doneN ? 'in_progress' : 'pending', i, i === doneN ? '테스트 실행' : 's' + i))
-  const line = (b: any) => b.fill + b.pill + b.rest
+  const line = (b: any) => b.cap + b.fill + b.pill + b.rest
 
-  test('채움 끝에 지금 단계 알약, 남은 구간은 · 와 눈금 │, 폭을 넘지 않는다', async () => {
+  test('경계 ▏ 뒤 채움 선 끝에 지금 단계 알약, 남은 구간은 ╌ 와 눈금 │, 폭을 넘지 않는다', async () => {
     const b = pillBar(five(2), 40, 'run')!
     expect(b.pill).toBe(' 테스트 실행 ')
     expect(b.pct).toBe(40)
     expect(b.tone).toBe('run')
-    expect(b.fill).toMatch(/^█+$/)
-    expect(b.rest).toMatch(/^[·│]+$/)
+    expect(b.cap).toBe('▏')
+    expect(b.fill).toMatch(/^━+$/)
+    expect(b.rest).toMatch(/^[╌│]+$/)
     expect(b.rest).toContain('│')
     expect(cells(line(b))).toBe(40)
     // 채움 비율은 알약을 뺀 칸 기준
-    expect(b.fill.length).toBe(Math.round(0.4 * (40 - cells(b.pill))))
+    expect(b.fill.length).toBe(Math.round(0.4 * (40 - 1 - cells(b.pill))))
   })
 
   test('상태별 알약 글: 결정 ?, 실패 ✕, 다 끝나면 ✓ 걸린 시간(없으면 도착)', async () => {
@@ -1427,8 +1431,8 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /^[▰▱]+$/ })).toBeUndefined()
     expect(await pane.find({ type: 'Text', text: /→ 예, release 만/ })).toBeDefined()
     // 알약 막대 (T24 B안): 채움 끝에 결정을 기다리는 지금 단계, 남은 구간, %
-    expect((await pane.find({ type: 'Text', text: /^ \? PR38 래퍼 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
-    expect(await pane.find({ type: 'Text', text: /^█+$/ })).toBeDefined()
+    expect((await pane.find({ type: 'Text', text: /^ \? PR38 래퍼 $/ }))?.props.backgroundColor).toBe(chip('ask'))
+    expect(await pane.find({ type: 'Text', text: /^━+$/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^  50%$/ })).toBeDefined()
     expect(await pane.find({ type: 'Raster' })).toBeDefined() // 픽셀 아이콘
     expect(await pane.find({ type: 'Text', text: /PR38 래퍼/ })).toBeDefined()
@@ -1777,11 +1781,11 @@ describe('work-plan 연동', () => {
     expect(await (await $.ui.mount({ ...SPIN, props: { ...spinProps, message: 'Waiting for permission' } })).find({ type: 'Text', text: /2\/3/ })).toBeUndefined()
     // 혼자 띠: 알약 막대에 지금 단계와 %
     const solo = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
-    expect((await solo.find({ type: 'Text', text: /^ 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').work)
+    expect((await solo.find({ type: 'Text', text: /^ 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(chip('work'))
     // % 는 알약과 같은 상태색 굵은 글자 (흐린 글자는 잘 안 보였다)
     expect((await solo.find({ type: 'Text', text: /^  33%$/ }))?.props).toMatchObject({ color: paletteOf('night').work, bold: true })
     // 섞은 색이라 흐린 글자 표시는 없다 (theme 팔레트만 dimColor)
-    expect((await solo.find({ type: 'Text', text: /^█+$/ }))?.props.dimColor).toBe(false)
+    expect((await solo.find({ type: 'Text', text: /^━+$/ }))?.props.dimColor).toBe(false)
 
     // 모르는 모양은 무시
     await setPlan({ ...plan(STEPS), v: 2, steps: [] })
@@ -1813,7 +1817,7 @@ describe('work-plan 연동', () => {
     expect(mine().state).toBe('idle')
     expect(statuses()).toEqual(['completed', 'in_progress', 'pending'])
     const stopped = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, bodyColumns: 120, maxRows: 10 } } as any)
-    expect((await stopped.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
+    expect((await stopped.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(chip('ask'))
 
     // 끝난 계획 뒤 계획 없이 일하는 턴 (T27): 옛 단계를 진행 중으로 그리지 않는다
     await $.turn.start({ text: 'git status', turnId: 't4' } as any)
@@ -1821,7 +1825,7 @@ describe('work-plan 연동', () => {
     expect(mine()).toMatchObject({ state: 'working', planEnded: true })
     expect(await (await $.ui.mount({ ...SPIN, props: spinProps })).find({ type: 'Text', text: /2\/3/ })).toBeUndefined()
     const busy = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
-    expect((await busy.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
+    expect((await busy.find({ type: 'Text', text: /^ 멈춤: 테스트 쓰기 $/ }))?.props.backgroundColor).toBe(chip('ask'))
     // 새 보고가 오면 다시 지금 단계
     await setPlan(plan(STEPS))
     await flush()
@@ -1855,7 +1859,7 @@ describe('알약 막대 팔레트 (T24)', () => {
     await $.tool.call({ tool: 'SetPlan', plan: { v: 1, steps: [{ title: 'a', status: 'done' }, { title: '테스트 쓰기', status: 'doing' }, { title: 'c', status: 'todo' }], updatedAt: NOW, stale: false, ended: null }, tool_use_id: 'sp' } as any)
     await clock.advance(3_000)
     const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: true, bodyColumns: 120, maxRows: 10 } } as any)
-    expect((await band.find({ type: 'Text', text: /^█+$/ }))?.props).toMatchObject({ color: 'suggestion', dimColor: true })
+    expect((await band.find({ type: 'Text', text: /^━+$/ }))?.props).toMatchObject({ color: 'suggestion', dimColor: true })
     expect((await band.find({ type: 'Text', text: /^ 테스트 쓰기 $/ }))?.props.backgroundColor).toBe('suggestion')
   })
 })
