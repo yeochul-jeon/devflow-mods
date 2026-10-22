@@ -3,6 +3,7 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import {
   agentStrips,
   fitStrip,
+  wrapCells,
   stampTasks,
   stepTimes,
   soundCommands,
@@ -339,6 +340,25 @@ describe('알약 막대 (T24 B안)', () => {
     const long = fitStrip({ ...r, tool: 'Bash ./gradlew test --tests OrderServiceTest' }, 36)
     expect(long.tool.endsWith('…')).toBe(true)
     expect(cells(line(long))).toBeLessThanOrEqual(36)
+  })
+
+  test('결정할 것 줄 접기 (T32): 칸 폭에 맞추고 둘째 줄부터 2칸 내어 쓴다', async () => {
+    const line = '- 캐시 후보 조사(CACHE_NOTES.md, 09-18): 주문 조회 밖의 후보 29개를 살펴봤고, 새로 붙일 것은 0건으로 정했습니다.'
+    for (const w of [82, 40, 32, 20]) {
+      const parts = wrapCells(line, w)
+      expect(parts.length).toBeGreaterThan(1)
+      for (const p of parts) expect(cells(p)).toBeLessThanOrEqual(w)
+      for (const p of parts.slice(1)) expect(p).toMatch(/^  \S/)
+      // 글자는 빠지지 않는다. 줄보다 긴 낱말이 없으면 띄어쓰기에서만 끊어 이어 붙이면 원문 그대로
+      expect(parts.join('').replace(/ /g, '')).toBe(line.replace(/ /g, ''))
+      if (w >= 32) expect(parts.map(p => p.trim()).join(' ')).toBe(line)
+    }
+    expect(wrapCells('짧은 줄', 40)).toEqual(['짧은 줄'])
+    // 들여쓴 원문은 첫 줄 들여쓰기를 지킨다
+    expect(wrapCells('  - 하위 항목', 40)).toEqual(['  - 하위 항목'])
+    // 띄어쓰기 없는 긴 낱말은 글자 단위로 자른다
+    const long = wrapCells('가'.repeat(30), 20)
+    expect(long).toEqual(['가'.repeat(10), '  ' + '가'.repeat(9), '  ' + '가'.repeat(9), '  ' + '가'.repeat(2)])
   })
 
   test('보조 줄: 도는 것 먼저, 넘치면 마지막 줄을 +k 요약으로', async () => {
@@ -1187,6 +1207,56 @@ describe('프롬프트 캐시', () => {
   })
 })
 
+describe('결정할 것 블록 (T32)', () => {
+  test('접힌 줄마다 막대를 잇고 둘째 줄부터 내어 쓴다. 묻는 줄은 ┃, 그 앞에 빈 줄', async ($, on) => {
+    const pal = paletteOf('night')
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    const files = new Map<string, string>()
+    const question = [
+      '- 캐시 후보 조사(CACHE_NOTES.md, 09-18): 주문 조회 밖의 후보 29개를 살펴봤고, 새로 붙일 것은 0건으로 정했습니다.',
+      '결정할 사항',
+      '캐시 만료를 5분으로 할지 정해 주세요.',
+    ].join('\n')
+    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'asking', question })))
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: JSON.parse(files.get(k)!).updatedAt, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'board', args: '' } as any)
+
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 40 } } as any)
+    // 첫 원문 줄은 40 - 8 = 32칸으로 접혀 여러 줄. 줄마다 │ 가 붙는다
+    const parts = wrapCells(question.split('\n')[0]!, 32)
+    expect(parts.length).toBeGreaterThan(2)
+    for (const p of parts) expect(await pane.find({ type: 'Text', text: p })).toBeDefined()
+    // 노란 │ 만 센다 (탭 줄의 흐린 │ 는 구분자)
+    const bars = (await pane.findAll({ type: 'Text', text: /^│$/ })).filter(t => t.props.color === pal.ask)
+    expect(bars.length).toBe(parts.length + 1) // + '결정할 사항'
+
+    // 묻는 줄: ┃ 노랑 굵게, 앞에 빈 줄 하나 (marginTop)
+    expect((await pane.findAll({ type: 'Text', text: /^┃$/ })).length).toBeGreaterThan(0)
+    const asking = await pane.find({ type: 'Text', text: /^캐시 만료를 5분으로/ })
+    expect(asking?.props).toMatchObject({ color: pal.ask, bold: true })
+    const groups = (await pane.findAll({ type: 'Box' })).filter(x => x.props.marginTop === 1 && JSON.stringify(x).includes('┃') && !JSON.stringify(x).includes('⚑'))
+    expect(groups.length).toBe(1)
+    await pane.unmount()
+  })
+})
+
 describe('팀 창 배지', () => {
   test('칸마다 이름 앞에 상태 배지, 머리줄은 개수 있는 상태만 블록', async ($, on) => {
     const pal = paletteOf('night')
@@ -1473,12 +1543,15 @@ describe('팀 상황판', () => {
     expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
     // 머리줄에 세션 단계 합계 막대는 없다 (T25: 서로 다른 작업의 단계를 더한 수라 뜻이 없었다)
     expect(await band.find({ type: 'Text', text: /^[▰▱]{8}$/ })).toBeUndefined()
-    // 결정 대기 칸: 칸이 노랗게 칠해져 있어 배지는 반전색. 이름 앞 표시(⚑)는 배지로 바뀌었다
+    // 결정 대기 칸 (T32): 칸을 노랗게 칠하지 않고 왼쪽 막대 ▌ 로 표시한다. 배지 노랑 · 이름 흰 글자 · 질문 노란 글자
+    // (칸 전체가 노랑이면 배지·이름·질문이 한 색이었다). 이름 앞 표시(⚑)는 배지로 바뀌었다
     const askBadge = await band.find({ type: 'Text', text: /^ 결정 $/ })
-    expect(askBadge?.props).toMatchObject({ color: paletteOf('night').ask, backgroundColor: paletteOf('night').onBadge })
-    // 노란 칸의 질문 요약은 어두운 글자
-    expect((await band.find({ type: 'Text', text: /^5\. PR38을 지금 시작할까요\?$/ }))?.props.color).toBe(paletteOf('night').onBadge)
-    expect(await band.find({ type: 'Text', text: /^sub-2$/ })).toBeDefined()
+    expect(askBadge?.props).toMatchObject({ color: paletteOf('night').onBadge, backgroundColor: paletteOf('night').ask })
+    expect((await band.find({ type: 'Text', text: /^5\. PR38을 지금 시작할까요\?$/ }))?.props.color).toBe(paletteOf('night').ask)
+    expect((await band.find({ type: 'Text', text: /^sub-2$/ }))?.props.color).toBe(paletteOf('night').text)
+    expect((await band.findAll({ type: 'Text', text: /^▌$/ })).map(t => t.props.color)).toEqual([paletteOf('night').ask, paletteOf('night').ask])
+    const askSlot = (await band.findAll({ type: 'Box' })).find(x => x.key === 'slot-peer')
+    expect(askSlot?.props.backgroundColor).toBe(paletteOf('night').card)
     expect(await band.find({ type: 'Text', text: /⚑/ })).toBeUndefined()
     expect(await band.find({ type: 'Text', text: /sub-2·2/ })).toBeUndefined()
     expect(await band.find({ key: 'band-board' })).toBeDefined()
@@ -1509,6 +1582,13 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /결정 대기 1/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^[▰▱]+$/ })).toBeUndefined()
     expect(await pane.find({ type: 'Text', text: /→ 예, release 만/ })).toBeDefined()
+    // 이름표 (T32): 기다리는 질문은 '질문', 이미 내린 결정은 '답함' + ✓. 둘 다 '결정' 이라 구분되지 않았다
+    expect(await pane.find({ type: 'Text', text: /^질문$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^답함$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^결정$/ })).toBeUndefined()
+    expect((await pane.find({ type: 'Text', text: /^✓ $/ }))?.props.color).toBe(paletteOf('night').ok)
+    // 결정할 것 블록에서 묻는 줄은 굵은 노란 막대 ┃
+    expect((await pane.find({ type: 'Text', text: /^┃$/ }))?.props.color).toBe(paletteOf('night').ask)
     // 알약 막대 (T24 B안): 채움 끝에 결정을 기다리는 지금 단계, 남은 구간, %
     expect((await pane.find({ type: 'Text', text: /^ \? PR38 래퍼 $/ }))?.props.backgroundColor).toBe(chip('ask'))
     expect(await pane.find({ type: 'Text', text: /^━+$/ })).toBeDefined()

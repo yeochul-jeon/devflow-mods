@@ -14,6 +14,7 @@ import {
   agentStart,
   agentStrips,
   fitStrip,
+  wrapCells,
   agentSummary,
   agentSync,
   waitsOnAgents,
@@ -1001,11 +1002,11 @@ export const register: Register = (on, options) => {
       const cool = !stale && !hot && !bad && cacheWarn(b, now)
       return { stale, hot, bad, cool }
     }
-    // 이름 앞 상태 배지: 폭 6칸으로 같아서 칸마다 이름 시작 위치가 맞는다. filled = 칸이 노랗게 칠해짐(반전색)
-    const badgeOf = (b: Beat, filled = false) => {
+    // 이름 앞 상태 배지: 폭 6칸으로 같아서 칸마다 이름 시작 위치가 맞는다
+    const badgeOf = (b: Beat) => {
       const s = stateOf(b)
       const [text, bg, fg] = s.stale ? ['  zz  ', pal.frame, pal.dim]
-        : s.hot ? [' 결정 ', filled ? pal.onBadge : pal.ask, filled ? pal.ask : pal.onBadge]
+        : s.hot ? [' 결정 ', pal.ask, pal.onBadge]
           : s.bad ? [' 실패 ', pal.bad, pal.onBadge]
             : b.state === 'working' ? [' 작업 ', pal.work, pal.onBadge]
               : waitsOnAgents(b) ? [' 보조 ', pal.work, pal.onBadge]
@@ -1021,13 +1022,12 @@ export const register: Register = (on, options) => {
       return pb ? pillOf(Text, pb) : null
     }
 
-    // filled: 칸이 노랗게 칠해졌는지 (HUD 칸). 혼자 띠는 바탕이 칠해지지 않아 질문을 노란 글자로 쓴다
-    const secondOf = (b: Beat, width: number, filled = true) => {
+    const secondOf = (b: Beat, width: number) => {
       const hot = b.state === 'asking' && !isStale(b, now)
       const bad = !hot && failed(b)
       const { done, total } = progress(b.tasks)
       return hot
-        ? <Text color={filled ? pal.onBadge : pal.ask} wrap="truncate-end">{questionSummary(b.question)}</Text>
+        ? <Text color={pal.ask} wrap="truncate-end">{questionSummary(b.question)}</Text>
         : bad
           ? <Text color={pal.bad} wrap="truncate-end">{signLine(b.fail!.signs[0] ?? b.fail!.key)}</Text>
         : total
@@ -1042,24 +1042,35 @@ export const register: Register = (on, options) => {
           : <Text color={b.state === 'working' ? pal.work : pal.dim} wrap="truncate-end">{b.state === 'working' ? b.step || '생각 중' : b.last || b.prompt || '새 요청 대기'}</Text>
     }
 
+    // 결정 칸: 바탕은 다른 칸과 같고 왼쪽 여백 자리에 노란 막대 ▌. 배지 노랑 · 이름 흰 글자 · 질문 노란 글자로 나눈다
+    // (T32: 칸 전체를 노랗게 칠하면 배지·이름·질문이 한 색이라 구분되지 않았다)
     const slot = (b: Beat) => {
       const { hot, cool } = stateOf(b)
       return (
         <Box
           key={`slot-${b.id}`}
           width={slotW}
-          flexDirection="column"
-          paddingX={1}
-          {...(hot ? { backgroundColor: pal.ask } : pal.card ? { backgroundColor: isMe(b) ? pal.frame : pal.card } : {})}
+          flexDirection="row"
+          paddingLeft={hot ? 0 : 1}
+          paddingRight={1}
+          {...(pal.card ? { backgroundColor: isMe(b) ? pal.frame : pal.card } : {})}
         >
-          <Box flexDirection="row" columnGap={1}>
-            <Box flexShrink={0}>{badgeOf(b, hot)}</Box>
-            <Text color={hot ? pal.onBadge : tone(b)} bold wrap="truncate-end">
-              {`${b.name}${isMe(b) ? '*' : ''}`}
-            </Text>
-            {cool ? <Box flexShrink={0}>{minutesOf(b)}</Box> : null}
+          {hot ? (
+            <Box width={1} flexShrink={0} flexDirection="column">
+              <Text color={pal.ask}>▌</Text>
+              {layout.mode === 'full' ? <Text color={pal.ask}>▌</Text> : null}
+            </Box>
+          ) : null}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexDirection="row" columnGap={1}>
+              <Box flexShrink={0}>{badgeOf(b)}</Box>
+              <Text color={hot ? pal.text : tone(b)} bold wrap="truncate-end">
+                {`${b.name}${isMe(b) ? '*' : ''}`}
+              </Text>
+              {cool ? <Box flexShrink={0}>{minutesOf(b)}</Box> : null}
+            </Box>
+            {layout.mode === 'full' ? <Box>{secondOf(b, slotW)}</Box> : null}
           </Box>
-          {layout.mode === 'full' ? <Box>{secondOf(b, slotW)}</Box> : null}
         </Box>
       )
     }
@@ -1101,7 +1112,7 @@ export const register: Register = (on, options) => {
                 {badgeOf(b)}
                 {cool ? minutesOf(b) : null}
               </Box>
-              <Box flexShrink={1}>{secondOf(b, Math.min(64, slotW - 40), false)}</Box>
+              <Box flexShrink={1}>{secondOf(b, Math.min(64, slotW - 40))}</Box>
             </Box>
             <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
           </Box>
@@ -1274,7 +1285,7 @@ export const register: Register = (on, options) => {
       const showsPrompt = !(b.state === 'asking' && b.question) && !(b.state === 'working' && b.step) && !b.last
       const second =
         b.state === 'asking' && b.question
-          ? row('결정', <Text color={pal.ask} bold wrap="truncate-end">{questionSummary(b.question)}</Text>)
+          ? row('질문', <Text color={pal.ask} bold wrap="truncate-end">{questionSummary(b.question)}</Text>)
           : b.state === 'working' && b.step
             ? row('지금', <Text color={pal.work} wrap="truncate-end">{b.step}</Text>)
             : b.last
@@ -1515,21 +1526,31 @@ export const register: Register = (on, options) => {
     const askBlock = (b: Beat, maxLines: number) => {
       if (b.state !== 'asking' || !b.question) return null
       const all = b.question.split('\n').filter(l => l.trim())
+      const shown = all.slice(-maxLines)
       return (
         <Box flexDirection="column" marginTop={1}>
           <Text color={pal.ask} bold>⚑ 결정할 것</Text>
           {/* 질문은 보통 답변 끝에 있으니 끝부분을 보여준다 */}
           {all.length > maxLines ? <Text color={pal.dim}>{`│ … 앞 ${all.length - maxLines}줄 (자세히에서 전체)`}</Text> : null}
-          {all.slice(-maxLines).map(l => (
-            <Box flexDirection="row">
-              <Box width={2} flexShrink={0}>
-                <Text color={pal.ask}>│</Text>
+          {/* 줄을 직접 접어 접힌 줄에도 막대를 잇고 둘째 줄부터 내어 쓴다. 묻는 줄은 굵은 막대 ┃, 그 앞에 빈 줄 하나 (T32).
+              접는 폭: 카드 안쪽(cols - 6) 에서 막대 칸 2 */}
+          {shown.map((l, i) => {
+            const asks = isAskingLine(l)
+            return (
+              <Box flexDirection="column" marginTop={asks && i > 0 && !isAskingLine(shown[i - 1]!) ? 1 : 0}>
+                {wrapCells(l, cols - 8).map(part => (
+                  <Box flexDirection="row">
+                    <Box width={2} flexShrink={0}>
+                      <Text color={pal.ask}>{asks ? '┃' : '│'}</Text>
+                    </Box>
+                    <Box flexGrow={1} flexShrink={1}>
+                      <Text wrap="truncate-end" color={asks ? pal.ask : pal.text} bold={asks}>{part}</Text>
+                    </Box>
+                  </Box>
+                ))}
               </Box>
-              <Box flexGrow={1} flexShrink={1}>
-                <Text wrap="wrap" color={isAskingLine(l) ? pal.ask : pal.text} bold={isAskingLine(l)}>{l}</Text>
-              </Box>
-            </Box>
-          ))}
+            )
+          })}
           {/* 질문과 탭 줄을 나눈다. 카드 테두리가 이미 노랑이라 흐리게. truncate 는 끝에 … 를 붙여서,
               줄바꿈시키고 한 줄 높이 Box 가 넘친 줄을 숨긴다 */}
           <Box key={`sep-${b.id}`} height={1} overflow="hidden" marginTop={1}>
@@ -1665,9 +1686,9 @@ export const register: Register = (on, options) => {
               {headOf(b)}
               {lastDecision
                 ? row(
-                    '결정',
+                    '답함',
                     <Text wrap="truncate-end">
-                      <Text color={pal.ok}>◆ </Text>
+                      <Text color={pal.ok}>✓ </Text>
                       <Text color={pal.text}>{lastDecision.question}</Text>
                       <Text color={pal.ok} bold>{` → ${lastDecision.answer}`}</Text>
                       {b.decisions.length > 1 ? <Text color={pal.dim}>{`  외 ${b.decisions.length - 1}건`}</Text> : null}

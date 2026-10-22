@@ -1,4 +1,4 @@
-# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|ended|none(지우기만)>
+# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|ended|decide|none(지우기만)>
 import json, os, sys, time, glob
 d, sc = sys.argv[1], sys.argv[2]
 for f in glob.glob(os.path.join(d, 'peer-*.json')):
@@ -78,3 +78,19 @@ elif sc == 'flow':
                   {'at': m(20), 'kind': 'prompt', 'text': '5분으로 해 주세요'},
                   {'at': m(9), 'kind': 'done', 'text': '주문 조회에 5분 캐시를 붙였고 테스트가 통과했습니다.'},
                   {'at': m(3), 'kind': 'prompt', 'text': '캐시 무효화도 주문 수정 때 하게 해 줘'}])
+elif sc == 'decide':
+    # T32: 여러 줄 결정 요청(접히는 긴 줄 + 묻는 줄)과 이미 내린 결정이 함께 있는 카드, 띠의 결정 칸
+    q = '\n'.join([
+        '조회 캐시 조사 결과를 정리했습니다.',
+        '- 느린 쿼리(SLOW_QUERY.md, 09-18): 주문 조회 밖의 후보 29개를 살펴봤고, 캐시를 새로 붙일 곳은 0건이었습니다.',
+        '- 「캐시 무효화」라고 이름 붙인 코드는 없습니다. 실제로는 OrderService 의 save 와 cancel 이 그 역할을 합니다.',
+        '- 부하 테스트: 5분 만료에서 적중률 82%, 1시간 만료에서 91% 였습니다.',
+        '헷갈리기 쉬운 점: 주문 수정 직후 조회가 5분 동안 옛 값을 보일 수 있습니다. 1시간이면 그 시간이 더 길어집니다.',
+        '결정할 사항',
+        '- 캐시 만료를 5분으로 할까요, 1시간으로 할까요? 제안은 5분이고, 주문 수정 때는 바로 지우는 것입니다.',
+    ])
+    put('2', 'sub-2', state='asking', question=q, prompt='주문 조회 캐시 정리', tasks=t('completed', 'completed', 'in_progress'),
+        decisions=[{'at': now - 9 * 60_000, 'question': '먼저 느린 쿼리부터 찾을까요, 캐시부터 붙일까요?', 'answer': '느린 쿼리부터'}])
+    put('a', 'api-fix', state='working', step='Bash ./gradlew test --tests Order', tasks=t('completed', 'in_progress', 'pending', 'pending'))
+    put('3', 'sub-3', last='새 요청 대기')
+    put('4', 'sub-4', tasks=t('completed', 'completed', 'completed', 'completed'), last='부하 테스트까지 마쳤습니다.')

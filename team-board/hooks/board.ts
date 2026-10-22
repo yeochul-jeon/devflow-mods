@@ -589,6 +589,37 @@ export function fitStrip(r: { n: number; label: string; model: string; tool: str
 }
 
 /**
+ * 한 줄을 width 칸에 맞게 접는다. 둘째 줄부터 hang 칸 들여쓴다 (T32: 결정할 것 블록은 접힌 줄에도 │ 를 이어 그리고
+ * 다음 항목의 시작과 구분하려고 직접 접는다). 띄어쓰기에서 끊고, 한 낱말이 줄보다 길면 글자 단위로 자른다.
+ */
+export function wrapCells(text: string, width: number, hang = 2): string[] {
+  const out: string[] = []
+  const room = () => Math.max(1, out.length ? width - hang : width)
+  const push = (s: string) => out.push((out.length ? ' '.repeat(hang) : '') + s.trimEnd())
+  let line = ''
+  for (const tok of text.split(/(?<= )/)) {
+    if (cells((line + tok).trimEnd()) <= room()) {
+      line += tok
+      continue
+    }
+    if (line.trim()) push(line)
+    let rest = tok.trimStart()
+    while (cells(rest.trimEnd()) > room()) {
+      let head = ''
+      for (const ch of rest) {
+        if (head && cells(head + ch) > room()) break
+        head += ch
+      }
+      push(head)
+      rest = rest.slice(head.length)
+    }
+    line = rest
+  }
+  if (line.trim() || !out.length) push(line)
+  return out
+}
+
+/**
  * /board 자세히의 할 일 한 줄 (T25, plan-progress 의 보조 띠 모양). 끝남 초록, 막힘 빨강.
  * 지금 단계는 작업 중이면 '진행 중', 결정 대기면 '질문 대기', 그 밖(중단·오류로 끝난 턴)이면 '멈춤'.
  * 끝난 계획에 진행 중 단계가 없으면 남은 첫 단계를 '멈춤'으로: 막대 알약이 '멈춤: 그 단계' 로 보이므로 맞춘다.
