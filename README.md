@@ -6,7 +6,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
 <p align="center">
-  <img src="docs/images/board.webp" alt="team-board: 결정을 기다리는 세션은 주의 띠와 느낌표 아이콘, 할 일은 경로선으로 표시" width="560">
+  <img src="docs/images/board.webp" alt="team-board: 결정을 기다리는 세션은 주의 띠와 느낌표 아이콘, 할 일은 진행 막대로 표시" width="560">
 </p>
 
 ## mod 목록
@@ -14,7 +14,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | | mod | 하는 일 | 명령 |
 | :---: | --- | --- | --- |
 | 🧭 | [**team-board**](#-team-board-팀-상황판) | 같은 저장소의 여러 세션을 한 화면에 보여 줍니다. 진행 현황, 결정 기록, 결정 대기 알림, 숨은 실패, 프롬프트 캐시 남은 시간을 표시합니다. | `/board` |
-| 📋 | [**work-plan**](#-work-plan-작업-계획-보고) | Claude가 여러 단계 작업의 계획과 진행을 보고합니다. team-board의 할 일 경로선이 이 보고로 채워집니다. | 없음 (도구 `plan_update`) |
+| 📋 | [**work-plan**](#-work-plan-작업-계획-보고) | Claude가 여러 단계 작업의 계획과 진행을 보고합니다. team-board의 진행 막대가 이 보고로 채워집니다. | 없음 (도구 `plan_update`) |
 | 🔤 | [**plain-terms**](#-plain-terms-용어-풀이) | Claude가 약어, 작업 번호, 코드 이름을 처음 쓸 때 괄호로 풀어 씁니다. | 없음 (규칙만) |
 | 📐 | [**draw**](#-draw-흐름-그림) | 직전 답변의 흐름을 원문 낱말 그대로 옆 패널에 그림으로 보여 줍니다. | `/draw [낱말]` |
 | 📅 | [**look-back**](#-look-back-돌아보기) | 오늘·어제·7일·30일·올해 동안 한 일을 보여 줍니다. 한눈에 숫자·차트(아낀 시간 추정, 종류·모델별)와 프로젝트별 요청, 결정, 커밋. | `/lookback [기간]` |
@@ -78,11 +78,11 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 
 ## 🧭 team-board: 팀 상황판
 
-<img src="docs/images/hud.webp" alt="팀 창: 결정 대기 sub-2 는 노란 칸, 작업 중 api-fix 는 파란 배지, sub-3 은 할 일 경로선, sub-4 는 캐시 8분 남음" width="760">
+<img src="docs/images/hud.webp" alt="팀 창: 결정 대기 sub-2 는 노란 칸, 작업 중 api-fix 는 파란 배지, 끝난 sub-3 은 초록 진행 막대, sub-4 는 캐시 8분 남음" width="760">
 
 같은 저장소에서 실행 중인 Claude Code 세션을 모두 보여 줍니다. 워크트리도 포함합니다.
 
-- **팀 창**: 입력창 위에 세션마다 칸을 그립니다. 칸은 상태, 진행 막대, 결정 대기 질문, 숨은 실패를 보여 줍니다. 진행 막대는 채움 끝에 지금 단계 이름을 붙이고(`████ 테스트 실행 ··│··│··  40%`), 끝나면 걸린 시간을 보입니다(`✓ 3분 12초`). 칸이 좁으면 예전 경로선 `●━◉─○─◎` 으로 그립니다.
+- **팀 창**: 입력창 위에 세션마다 칸을 그립니다. 칸은 상태, 진행 막대, 결정 대기 질문, 숨은 실패를 보여 줍니다. 진행 막대는 채움 선 끝에 지금 단계 이름 칩을 붙이고(`▏━━━━ 테스트 실행 ╌╌│╌╌│╌╌  40%`), 멈춘 세션은 노란 `멈춤: <단계>`, 끝나면 걸린 시간(`✓ 3분 12초`)을 보입니다. 칸이 좁으면 예전 경로선 `●━◉─○─◎` 으로 그립니다.
 - **지금 단계 줄**: 턴이 도는 동안 입력창 바로 위 줄(`✻ Sauteing… (12s)`)을 지금 단계 `2/5 테스트 실행… (12s)` 로 바꿉니다. 엔진이 권한 대기 같은 자기 문구를 띄우면 그대로 둡니다.
 - **보드**: `/board` 는 세션별 요청, 진행, 결정 기록을 보여 줍니다. 결정 대기 항목을 12살 버전·ASD-STE100 기준 탭으로 설명하고, HTML 페이지(Artifact)를 요청할 수 있습니다.
 - **숨은 실패**: exit 0으로 끝났지만 출력에 실패 흔적이 있는 빌드·테스트를 찾습니다. Claude와 모든 탭에 알립니다.
@@ -144,7 +144,10 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 ## 📋 work-plan: 작업 계획 보고
 
 - Claude가 여러 단계 작업의 계획과 진행을 `plan_update` 도구로 보고합니다. team-board가 이 보고로 진행 막대와 지금 단계 줄을 그립니다.
-- Opus 5.5 같은 새 모델에는 할 일 도구(TodoWrite, TaskCreate)가 없어 경로선이 비어 있습니다. 이 mod가 그 자리를 채웁니다.
+
+<img src="docs/images/work-plan-turn.webp" alt="plan_update 로 3단계 계획 보고, Spinner 줄 2/3 파일 3개 읽기, 팀 창 막대 33%" width="760">
+
+- Opus 5.5 같은 새 모델에는 할 일 도구(TodoWrite, TaskCreate)가 없어 진행 막대가 비어 있습니다. 이 mod가 그 자리를 채웁니다.
 - 혼자 설치하면 화면에 보이는 것이 없습니다. team-board와 함께 설치하세요.
 - 보고는 모델이 하므로 짧은 작업에서는 빠질 수 있습니다.
 
@@ -158,6 +161,9 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 ## 🔤 plain-terms: 용어 풀이
 
 - Claude가 답변에서 약어(`tsc`), 작업 번호(`T6`), 코드 이름(`scanGen`)을 처음 쓸 때 괄호로 짧게 풀어 씁니다. 예: `tsc(TypeScript 타입 검사기)`
+
+<img src="docs/images/plain-terms-answer.webp" alt="답변의 TTL, LRU, getOrder(id) 뒤에 괄호 풀이" width="760">
+
 - 화면에 그리는 것은 없습니다. 혼자 설치해도 동작합니다.
 - 효과: 처음 나온 용어 중 풀이가 붙은 비율이 시험 프롬프트 5개에서 44.9% → 81.1% 로 올랐습니다. 평소 답변 20개의 기준값은 20.8% 였습니다.
 - 비용: 대화 첫 요청에 규칙 약 280 토큰. 요청 수는 늘지 않았고 답변은 평균 11.5% 길어졌습니다.
@@ -172,6 +178,8 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 - 상자 이름은 원문 낱말과 식별자를 그대로 씁니다. 설명을 쉽게 바꾸는 것은 `/eli12` 입니다.
 - 효과: 실제 긴 답변 10개에서 상자 이름 99.3% 가 원문 낱말이었고, 9/10 이 원문 단계를 빠뜨리지 않았습니다(2회 측정).
 - 비용: 실행마다 Haiku 1회. 메인 대화 요청은 늘지 않습니다. Esc로 패널을 닫습니다.
+
+<img src="docs/images/draw-panel.webp" alt="왼쪽 답변, 오른쪽 패널에 place_order 네 갈래 흐름 그림" width="760">
 
 측정 방법과 알아둘 것은 [draw/README.md](draw/README.md)를 보세요.
 
@@ -209,6 +217,10 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 - 제안은 대화 언어를 따릅니다. 파일 이름, 명령, 식별자는 그대로 둡니다.
 - `/next` 는 이번 세션 사용량을 보여 줍니다. `/next off` 와 `/next on` 은 다음 세션에도 유지됩니다.
 
+<img src="docs/images/next-steps-list.webp" alt="답변 아래 ── next-steps ── 가로줄과 제안 목록" width="760">
+
+그림과 사용 예는 [next-steps/README.md](next-steps/README.md)를 보세요.
+
 <details>
 <summary>비용과 주의</summary>
 
@@ -224,6 +236,10 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 ---
 
 ## 📝 prompt-coach: 초안 다듬기
+
+<img src="docs/images/prompt-coach-question.webp" alt="초안 place_order 재고 해제 고쳐줘 에 대해 prompt-coach 가 객관식 질문 1/2 를 띄운 띠" width="760">
+
+옵션별 그림과 사용 예는 [prompt-coach/README.md](prompt-coach/README.md)를 보세요.
 
 - 입력창에 초안을 쓰면 위에 띠가 보입니다. 굵은 회색 가로줄 `━━ prompt-coach ━━` 아래에 (위 대화와는 빈 줄 하나로 띄움) `[다듬기]` 버튼이 있습니다. 입력창을 비우면 띠가 사라집니다.
 - 다듬기는 두 단계입니다.

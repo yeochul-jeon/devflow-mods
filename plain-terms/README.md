@@ -7,6 +7,10 @@ tsc(TypeScript 타입 검사기) 오류 3개 …
 E1(work-plan의 Enterprise 설치 확인): …
 ```
 
+<img src="../docs/images/plain-terms-answer.webp" alt="캐시 동작 설명 답변: TTL(Time To Live, 항목 만료 시간), LRU(Least Recently Used, 오래 안 쓴 항목부터 버리는 방식), getOrder(id)(주문 조회 진입점) 처럼 처음 나온 용어 뒤에 괄호 풀이" width="760">
+
+이럴 때: 여러 세션의 답을 번갈아 읽다 보면 약어나 함수 이름이 무엇이었는지 놓칩니다. 처음 나온 자리에서 바로 풀어 주어 위로 다시 올라가 찾지 않아도 됩니다.
+
 - 여러 세션을 동시에 볼 때 `T6`, `G4b`, `STE`, `scanGen` 같은 말이 무엇인지 놓치는 문제를 줄이려고 만들었습니다.
 - 다른 mod가 없어도 혼자 동작합니다.
 

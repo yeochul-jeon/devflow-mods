@@ -33,9 +33,19 @@ claude plugin install look-back@devflow-mods
 - `[요약]` 버튼을 누르면 그 프로젝트의 요청, 결정, 커밋 제목을 Haiku 에 한 번 보내 3줄 이하로 요약합니다. 요청·커밋의 낱말을 그대로 쓰게 합니다.
 - Esc로 패널을 닫습니다.
 
+<img src="../docs/images/look-back-today-projects.webp" alt="/lookback 오늘 패널 아래쪽: order-svc·web-shop·billing-api 별 커밋, 결정(? 질문), 요청(✓ ■) 목록과 기호 설명" width="560">
+
+이럴 때: 여러 저장소를 오가며 일한 날, 저장소마다 무엇을 요청하고 무엇을 정했고 무엇을 커밋했는지 한 화면에서 봅니다.
+
+<img src="../docs/images/look-back-summary.webp" alt="/lookback 7일에서 order-svc 의 [요약]을 누른 결과: 프로젝트 머리 아래 Haiku 요약 문단" width="560">
+
+이럴 때: 요청·커밋이 많은 프로젝트를 주간 보고에 몇 줄로 옮길 때 `[요약]` 을 누릅니다.
+
 ## 한눈에 (Work Report)
 
-<img src="../docs/images/work-report.webp" alt="한눈에 칸: 타일 세 개, 어디에 썼나, 누가 했나, 최근 7일 차트" width="560">
+<img src="../docs/images/look-back-today.webp" alt="/lookback 오늘 패널 위쪽: 아낀 시간 0.8시간·끝낸 요청 4건·Claude 작업 0.2시간 타일, 어디에 썼나, 누가 했나, 최근 7일 막대" width="560">
+
+이럴 때: 하루를 마치고 오늘 한 일을 숫자로 돌아봅니다.
 
 - 타일: **아낀 시간**(추정) · **끝낸 요청**(답한 요청 수) · **Claude 작업**(턴 시간 합, 실측). 좁은 패널에서는 타일이 3 → 2 → 1칸으로 줄을 바꾸고, 숫자가 칸보다 넓으면 굵은 글자 한 줄로 씁니다.
 - 어디에 썼나: 요청 종류별 막대·건수·추정 시간. 종류는 그 요청에서 메인 Claude가 쓴 도구로 정하고, 앞 것이 이깁니다.
@@ -50,10 +60,18 @@ claude plugin install look-back@devflow-mods
 거부된 도구는 세지 않습니다. Bash 는 이어 붙인 명령이 모두 읽기만 할 때만 조사입니다. 하나라도 다른 명령이나 파일로 쓰는 리다이렉트(`> f`)가 섞이면 실행입니다. 판정은 team-board 의 숨은 실패 감지에 쓰는 규칙과 같습니다.
 
 - 누가 했나: 모델별 막대·건수 (메인 요청의 모델).
+
+<img src="../docs/images/look-back-week.webp" alt="/lookback 7일: 아낀 시간 3.5시간·끝낸 요청 14건·Claude 작업 0.9시간, 코드 수정 6·조사 4·실행 2·대화 2, Opus 8·Sonnet 4·Haiku 2" width="560">
+
+이럴 때: 한 주를 돌아보며 시간을 어디에(코드 수정·조사·실행·대화), 어느 모델로 썼는지 봅니다.
 - 차트: 3줄 막대. 오늘·어제·7일은 최근 7일(요일), 30일은 날짜, 올해는 1~12월. 오늘·이번 달은 노랑. 칸 사이는 흐린 세로줄, 막대 아래는 기준선. 아래 한 줄: 최근 7일 아낀 시간과 연속 일수, 또는 가장 많은 날·달과 일한 날 수.
 - 0.3.0 전 기록은 종류·모델이 없어 "기록 전"으로 보이고, 아낀 시간에 넣지 않습니다. 막대 길이는 "기록 전"을 빼고 잽니다.
 - 아낀 시간은 추정입니다. 요청 하나를 몇 분으로 칠지는 `claude plugin configure look-back@devflow-mods` 에서 종류마다 바꿉니다. 금액은 보여 주지 않습니다.
 - 켜기·끄기: `/lookback report off` / `on`. 기본은 켜짐이고 다음 세션에도 유지합니다. 꺼도 종류·모델 기록은 계속하므로, 다시 켜면 지난 기간도 바로 보입니다.
+
+<img src="../docs/images/look-back-report-off.webp" alt="/lookback report off 뒤: 한눈에 칸이 빠지고 돌아보기 · 2026-10-22 아래 바로 프로젝트 목록" width="560">
+
+이럴 때: 숫자와 차트 없이 프로젝트 목록만 짧게 보고 싶을 때 끕니다.
 - 디자인은 Tristen O'Brien 의 Work Report mod(영상 "5 MORE Claude Code MODS You Need")를 참고했습니다. 코드는 새로 썼습니다.
 
 ## 비용

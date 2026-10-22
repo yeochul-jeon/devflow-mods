@@ -2,7 +2,7 @@
 
 Claude가 여러 단계 작업의 계획과 진행을 `plan_update` 도구로 보고하게 합니다. 화면 표시는 [team-board](../team-board/README.md)가 합니다. team-board의 진행 막대와 지금 단계 줄(`2/5 테스트 실행…`)이 이 보고로 채워집니다.
 
-- Opus 5.5 같은 새 모델에는 할 일 도구(TodoWrite, TaskCreate)가 없습니다. 그래서 team-board만 쓰면 경로선이 비어 있습니다.
+- Opus 5.5 같은 새 모델에는 할 일 도구(TodoWrite, TaskCreate)가 없습니다. 그래서 team-board만 쓰면 진행 막대가 비어 있습니다.
 - 혼자 설치하면 화면에 보이는 것이 없습니다. 오류도 나지 않습니다.
 - team-board와 함께 쓰려고 `dependencies` 로 묶지 않았습니다. 두 mod는 각각 켜고 끌 수 있습니다.
 
@@ -11,6 +11,10 @@ claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install work-plan@devflow-mods
 claude plugin install team-board@devflow-mods     # 화면 표시
 ```
+
+<img src="../docs/images/work-plan-turn.webp" alt="Claude가 plan_update 로 3단계 계획을 보고하고 첫 단계를 끝냄. Spinner 줄은 2/3 파일 3개 읽기, 팀 창 막대는 33%" width="760">
+
+이럴 때: 긴 작업을 맡겨 두고 다른 세션을 볼 때, 이 세션이 몇 단계 중 어디에 있는지 Spinner 줄(`2/3 …`)과 팀 창 막대로 봅니다.
 
 ## 동작
 
@@ -56,6 +60,10 @@ claude plugin disable work-plan@devflow-mods
 ```bash
 claude plugin configure work-plan@devflow-mods      # 또는 /plugin → Installed → work-plan → Configure
 ```
+
+<img src="../docs/images/work-plan-gate.webp" alt="planGate 를 켠 세션: 한 줄 주석 추가 요청에도 Claude가 plan_update 로 계획을 먼저 보고한 뒤 Edit 함" width="760">
+
+이럴 때: 한 줄 수정이라도 무엇을 바꿀지 먼저 밝히고 고치게 하고 싶을 때 켭니다. 그림처럼 Claude가 규칙을 보고 먼저 보고하면 거부는 일어나지 않습니다. 보고 없이 고치려 하면 그 수정이 거부되고 Claude가 보고부터 다시 합니다.
 
 - 한 턴은 사용자가 보낸 요청 하나입니다. 턴마다 새로 보고해야 합니다. 한 줄 수정도 보고가 필요합니다.
 - 같은 응답 안에서는 `plan_update` 가 수정보다 앞에 있어야 합니다. 엔진은 응답이 다 오기 전에 도구를 차례로 실행합니다.

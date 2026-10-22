@@ -1,4 +1,4 @@
-# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|none(지우기만)>
+# 촬영용 가짜 동료 세션 기록을 쓴다. 사용: peers.py <dir> <scenario: hud|eight|five|many|ask|agents|flow|bars|none(지우기만)>
 import json, os, sys, time, glob
 d, sc = sys.argv[1], sys.argv[2]
 for f in glob.glob(os.path.join(d, 'peer-*.json')):
@@ -6,7 +6,8 @@ for f in glob.glob(os.path.join(d, 'peer-*.json')):
 now = int(time.time() * 1000)
 cwd = '/repo/order-svc'
 def t(*st):
-    return [{'id': str(i + 1), 'subject': f'할 일 {i + 1}', 'status': s} for i, s in enumerate(st)]
+    names = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '캐시 무효화', '부하 테스트', '문서 정리', '배포 확인']
+    return [{'id': str(i + 1), 'subject': names[i] if i < len(names) else f'할 일 {i + 1}', 'status': s} for i, s in enumerate(st)]
 def put(id, name, **kw):
     b = {'id': 'peer-' + id, 'name': name, 'cwd': cwd, 'state': 'idle', 'step': '', 'prompt': '', 'last': '', 'question': '',
          'contextPct': 20, 'tasks': [], 'decisions': [], 'timeline': [], 'edits': 0, 'files': [], 'fail': None,
@@ -20,7 +21,8 @@ if False:
 elif sc == 'hud':
     put('2', 'sub-2', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?', tasks=t('completed', 'in_progress', 'pending', 'pending'))
     put('a', 'api-fix', state='working', step='Bash ./gradlew test --tests Order')
-    put('3', 'sub-3', tasks=t('completed', 'completed', 'pending', 'pending'), last='PR38 래퍼 수정 완료')
+    put('3', 'sub-3', tasks=t('completed', 'completed', 'completed', 'completed'), last='PR38 래퍼 수정 완료',
+        timeline=[{'at': now - 260_000, 'kind': 'prompt', 'text': 'PR38 래퍼 수정'}, {'at': now - 20_000, 'kind': 'done', 'text': '끝'}])
     put('4', 'sub-4', cacheAt=now - 52 * 60_000, last='JOIN 감시 규칙 정리')
 elif sc == 'eight':
     put('3', 'sub-3', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?')
@@ -46,10 +48,19 @@ elif sc == 'agents':
         ag('a2', '캐시 설정 위치 찾기', 'done', '', 21_400, 70)])
     put('3', 'sub-3', last='PR38 래퍼 수정 완료')
     put('2', 'sub-2', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?')
+elif sc == 'bars':
+    # 진행 막대 상태 4종: 작업 · 결정 대기 · 멈춤(중단된 계획) · 끝남
+    sub = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '캐시 무효화', '부하 테스트']
+    plan = lambda *st: [{'id': str(i + 1), 'subject': x, 'status': s} for i, (x, s) in enumerate(zip(sub, st))]
+    put('a', 'api-fix', state='working', step='할 일: 조회 결과 캐시 붙이기', tasks=plan('completed', 'in_progress', 'pending', 'pending'))
+    put('2', 'sub-2', state='asking', question='캐시 만료를 5분으로 할까요, 1시간으로 할까요?', tasks=plan('completed', 'completed', 'in_progress', 'pending'))
+    put('3', 'sub-3', last='중단됨', planEnded=True, tasks=plan('completed', 'completed', 'in_progress', 'pending'))
+    put('4', 'sub-4', last='부하 테스트까지 마쳤습니다.', tasks=plan('completed', 'completed', 'completed', 'completed'),
+        timeline=[{'at': now - 200_000, 'kind': 'prompt', 'text': '주문 조회 캐시'}, {'at': now - 8_000, 'kind': 'done', 'text': '끝'}])
 elif sc == 'flow':
     m = lambda s: now - s * 60_000
     sub = ['느린 쿼리 찾기', '조회 결과 캐시 붙이기', '주문 수정 때 캐시 무효화', '부하 테스트']
-    put('3', 'sub-3', tasks=[{'id': str(i + 1), 'subject': x, 'status': st} for i, (x, st) in
+    put('3', 'sub-3', state='working', step='할 일: 주문 수정 때 캐시 무효화', tasks=[{'id': str(i + 1), 'subject': x, 'status': st} for i, (x, st) in
         enumerate(zip(sub, ['completed', 'completed', 'in_progress', 'pending']))], last='주문 조회 테스트 통과', edits=4,
         files=['src/order/OrderService.java', 'src/order/OrderCache.java'],
         decisions=[{'at': m(20), 'question': '캐시 만료를 5분으로 할까요, 1시간으로 할까요?', 'answer': '5분으로 해 주세요'}],

@@ -21,6 +21,8 @@ def seg_lines(spec):
         last = next(i for i, l in enumerate(plain) if '╚' in l and i > first)
     return ls[int(first):int(last) + 1]
 def parse(ln):
+    # OSC 8 링크(파일 경로·세션 URL)는 글자 없이 지운다: 홈 경로가 그림에 새지 않게
+    ln = re.sub(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)', '', ln)
     st = {'fg': None, 'bg': None, 'b': False, 'dim': False, 'rev': False}
     cells, pos = [], 0
     for m in re.finditer(r'\x1b\[([0-9;:]*)m|([^\x1b])', ln):

@@ -15,6 +15,10 @@ rkm2aws
 - `/eli12` 는 설명을 12살 버전으로 바꿉니다. `/draw` 는 설명을 바꾸지 않고 그 안의 흐름만 그립니다.
 - 다른 mod가 없어도 혼자 동작합니다.
 
+<img src="../docs/images/draw-panel.webp" alt="왼쪽에 place_order 실패 지점 표 답변, 오른쪽 패널에 정상 흐름·재고 부족·결제 실패·charge 예외 네 갈래 흐름 그림" width="760">
+
+이럴 때: 표와 문단이 긴 답을 받은 뒤, 답은 그대로 두고 순서와 갈래만 옆에서 한눈에 봅니다.
+
 ```bash
 claude plugin marketplace add yeochul-jeon/devflow-mods
 claude plugin install draw@devflow-mods
@@ -23,6 +27,10 @@ claude plugin install draw@devflow-mods
 ## 동작
 
 - `/draw` 는 직전 답변 전체를, `/draw <낱말>` 은 그 낱말에 관한 흐름만 그립니다.
+
+<img src="../docs/images/draw-word.webp" alt="/draw 결제 실패: 패널에 결제 실패 초점 흐름, charge 예외는 가로 상자, 아래 · 줄에 그림에 못 담은 조건" width="760">
+
+이럴 때: 답 중 한 주제(예: 결제 실패)의 흐름만 따로 보고 싶을 때 낱말을 붙입니다.
 - 직전 답변을 Haiku 에 한 번 보내 흐름을 JSON 으로 받고, 그림은 mod 가 그립니다. 한글 폭(2칸)을 계산해 그리므로 상자가 어긋나지 않습니다.
 - 흐름은 4개, 흐름마다 단계는 6개까지입니다. 이름이 짧아 한 줄에 다 들어가면 상자를 가로로, 아니면 한 단계에 한 줄씩 세로로 그립니다. 긴 이름은 자르지 않고 다음 줄로 이어 씁니다.
 - 그림에 담지 못한 조건이나 되돌아가는 흐름은 그림 아래 `·` 줄에 적습니다.
