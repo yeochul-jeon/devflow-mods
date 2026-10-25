@@ -1,0 +1,12 @@
+{
+  "name": "ste100",
+  "version": "0.1.0",
+  "description": "절차·지시·결정 항목을 오해 없게: ASD-STE100 에서 착안한 80% 문체 자동 규칙(스킬)",
+  "author": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/ste100",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT"
+}

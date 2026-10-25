@@ -521,3 +521,9 @@
 
 ### 0.1.3
 - 어려운 설명에만 비유와 그림을 넣는 스킬(`explain-simply`)과 `/eli12 [주제]` 옆 패널.
+
+## ste100
+
+### 0.1.0 (2026-10-25)
+- 새 플러그인. 절차·지시·결정 항목을 읽는 사람이 잘못 읽지 않게 쓰는 자동 스킬(`write-unambiguous`). Karpathy 의 "80% of the way to ASD-STE100" 팁과 team-board ASD-STE100 탭의 한국어 문장 규칙을 따릅니다. 규격 원문과 대조하지 않아 "ASD-STE100 에서 착안" 으로 표기합니다.
+- 개발: `evals/` 에 `claude plugin eval` 케이스 3개(암시 양성·명시 양성·음성).

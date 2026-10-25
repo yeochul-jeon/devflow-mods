@@ -1,6 +1,6 @@
 # devflow-mods
 
-Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 기간별 돌아보기, 12살 버전 설명, 다음 요청 제안, 초안 다듬기를 제공합니다.
+Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 기간별 돌아보기, 12살 버전 설명, 오해 없는 절차 글, 다음 요청 제안, 초안 다듬기를 제공합니다.
 
 [![Claude Code](https://img.shields.io/badge/Claude_Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
@@ -19,6 +19,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 📐 | [**draw**](#-draw-흐름-그림) | 직전 답변의 흐름을 원문 낱말 그대로 옆 패널에 그림으로 보여 줍니다. | `/draw [낱말]` |
 | 📅 | [**look-back**](#-look-back-돌아보기) | 오늘·어제·7일·30일·올해 동안 한 일을 보여 줍니다. 한눈에 숫자·차트(아낀 시간 추정, 종류·모델별)와 프로젝트별 요청, 결정, 커밋. | `/lookback [기간]` |
 | 🧒 | [**eli12**](#-eli12-12살-버전-설명) | 어려운 설명을 12살 버전으로 풉니다. | `/eli12 [주제]` |
+| 📏 | [**ste100**](#-ste100-오해-없는-절차-글) | 절차·지시·결정 항목을 ASD-STE100 에서 착안한 문체로 씁니다. | 없음 (스킬만) |
 | 💡 | [**next-steps**](#-next-steps-다음-요청-제안) | 답변이 끝나면 다음 요청 2~3개를 제안합니다. | `/next [on\|off]` |
 | 📝 | [**prompt-coach**](#-prompt-coach-초안-다듬기) | 보내기 전에 초안의 빈 곳을 묻고 다듬습니다. | `/coach <초안>\|view\|auto on\|off`, `[다듬기]`·`[되돌리기]` 버튼 |
 
@@ -48,6 +49,7 @@ claude plugin install plain-terms@devflow-mods    # 대화 첫 요청에 규칙 
 claude plugin install draw@devflow-mods           # /draw 할 때만 Haiku를 호출합니다
 claude plugin install look-back@devflow-mods      # 기록은 토큰 0, [요약] 누를 때만 Haiku를 호출합니다
 claude plugin install eli12@devflow-mods
+claude plugin install ste100@devflow-mods          # 별도 모델 호출 없음. 스킬이 발동할 때만 스킬 본문이 대화에 들어갑니다
 claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출합니다
 claude plugin install prompt-coach@devflow-mods   # 다듬을 때 Haiku 2회. 자동 모드(기본 꺼짐)면 보낼 때마다
 ```
@@ -226,6 +228,18 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 
 ---
 
+## 📏 ste100: 오해 없는 절차 글
+
+- 자동 스킬 `write-unambiguous` 는 읽는 사람이 그대로 실행하거나 결정할 글에만 적용합니다. 예: 런북, 인계할 일, 칠 명령, 고를 선택지.
+- 한 문장에 지시 하나, 조건 먼저, 같은 대상은 같은 이름, 세로 목록, 비유 없음.
+- ASD-STE100 규격 원문과 대조하지 않은 규칙이라 "ASD-STE100 에서 착안(80%)" 이라고 부릅니다.
+- eli12 는 비유로 이해시키고, ste100 은 비유 없이 잘못 읽지 않게 합니다.
+- 비용: 별도 모델 호출 없음.
+
+자세한 규칙은 [ste100/README.md](ste100/README.md)를 보세요.
+
+---
+
 ## 💡 next-steps: 다음 요청 제안
 
 - 답변이 끝나면 입력창 위에 `다음: 1 … 2 … 3 …` 을 보여 줍니다. 목록 위의 흐린 가로줄 `── next-steps ──`이 위 대화와 목록을 나눕니다.
@@ -331,6 +345,8 @@ claude plugin test ./work-plan
 claude plugin test ./plain-terms
 claude plugin test ./draw
 claude plugin test ./look-back
+claude plugin validate ./ste100         # ste100 은 스킬만 있어 테스트 대신 eval 을 씁니다
+claude plugin eval ./ste100
 ```
 
 - 각 mod의 화면과 문구는 `hooks/` 의 순수 함수에 있습니다. 예: `board.ts`, `diagram.ts`, `failure.ts`, `prompt.ts`
