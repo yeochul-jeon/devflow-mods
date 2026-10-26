@@ -134,6 +134,8 @@ const self = {
   uncheckedAt: 0,
   /** 수정 없이 연달아 실패한 같은 명령 (T34 A4). 편집하면 다시 센다 */
   failRun: { key: '', count: 0 },
+  /** 이번 요청 뒤 메인 세션의 마지막 도구 작업. 질문 맥락의 직전 줄 (Claude 가 말없이 물을 때) */
+  lastTool: '',
   beat: null as Beat | null,
   lastWrite: 0,
   /** 마지막으로 시작한 scan 번호. 늦게 끝난 이전 scan 이 새 결과를 덮지 않게 한다 */
@@ -661,6 +663,7 @@ export const register: Register = (on, options) => {
       self.htmlKeep = ''
       self.beat.agents = agentClearEnded(self.beat.agents)
       self.failRun = { key: '', count: 0 }
+      self.lastTool = ''
       await save($, { decisions, timeline, question: '', prompt: oneLine(text, 100), promptAt: at, state: 'working', step: '생각 중', stuck: null }, true)
       // 다른 mod 가 보내기를 막았으면(drop) 요청도 답도 아니다. 넘기기 전 상태로 되돌린다
       const r = await next(e)
@@ -799,7 +802,7 @@ export const register: Register = (on, options) => {
       const asked = askUserText(input)
       // 질문은 도구 입력에만 있고, 앞선 안내 글은 직전 대화로 둔다
       self.lastRecent = recentTurns(await $.session.messages(), false)
-      await note($, 'ask', asked.split('\n')[0] ?? '', { state: 'asking', step: '질문 중', question: asked, recent: self.lastRecent }, true, asked)
+      await note($, 'ask', asked.split('\n')[0] ?? '', { state: 'asking', step: '질문 중', question: asked, recent: self.lastRecent, lastTool: self.lastTool }, true, asked)
       const r = await next(e)
       const answers = (r as { result?: { answers?: unknown } }).result?.answers
       const at = await $.clock.now()
@@ -827,6 +830,7 @@ export const register: Register = (on, options) => {
     if (e.tool === PLAN_TOOL) return next(e)
 
     const step = describeTool(e.tool, input)
+    if (main) self.lastTool = step
     if (EDIT_TOOLS.has(e.tool) && main) self.failRun = { key: '', count: 0 }
     if (EDIT_TOOLS.has(e.tool)) {
       const p = touchPath(self.root, String(input.file_path ?? input.notebook_path ?? ''))

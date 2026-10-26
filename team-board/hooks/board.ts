@@ -401,11 +401,12 @@ export function gitText(g: Omit<GitState, 'at'>): string {
 }
 
 /** 결정 질문 대화상자 위 맥락 줄 (T34 A1): 요청, 지금 계획 단계, 질문 직전 Claude 의 글. 줄마다 width 칸으로 자른다. 아는 것이 없으면 [] */
-export function askContext(b: Pick<Beat, 'state' | 'step' | 'prompt' | 'recent'>, tasks: readonly Task[], width = 78): string[] {
+export function askContext(b: Pick<Beat, 'state' | 'step' | 'prompt' | 'recent' | 'lastTool'>, tasks: readonly Task[], width = 78): string[] {
   // 이 세션의 Claude 가 AskUserQuestion 으로 묻는 중일 때만 (tool.call 이 '질문 중' 으로 둔다). 다른 mod 의 $.ui.ask 도 같은 대화상자다
   if (b.state !== 'asking' || b.step !== '질문 중') return []
   const { total, current } = progress(tasks)
-  const said = [...b.recent].reverse().find(l => l.role === 'assistant')?.text ?? ''
+  // 이번 요청 뒤에 Claude 가 한 말. 없으면(말없이 도구만 쓰고 물음) 마지막 도구 작업
+  const said = b.recent.at(-1)?.role === 'assistant' ? b.recent.at(-1)!.text : (b.lastTool ?? '')
   return [
     b.prompt ? `요청 · ${b.prompt}` : '',
     current ? `계획 · ${tasks.indexOf(current) + 1}/${total} ${current.subject}` : '',

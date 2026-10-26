@@ -1789,9 +1789,11 @@ describe('팀 상황판', () => {
     await clock.advance(3_000) // 미뤄진 기록이 다음 틱에 써지는지
     expect(mine().tasks).toEqual([{ id: '7', subject: 'JOIN 감시 규칙', status: 'in_progress' }])
 
-    // 작업 도중 결정 1: AskUserQuestion 의 답
+    // 작업 도중 결정 1: AskUserQuestion 의 답. 질문 맥락에 마지막 도구 작업을 싣는다 (할 일 도구는 계획 줄이 따로 있어 빼고)
+    await $.tool.call({ tool: 'Read', file_path: '/repo/order-svc/README.md', tool_use_id: 'u2r' } as any)
     await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Approval Test 범위는?', header: '범위', options: [{ label: '변경 파일만' }, { label: '전체' }], multiSelect: false }], tool_use_id: 'u3' } as any)
     expect(mine().decisions.at(-1)).toMatchObject({ question: 'Approval Test 범위는?', answer: '변경 파일만' })
+    expect(mine().lastTool).toBe('Read README.md')
 
     // 작업 도중 결정 2: 답변 끝의 질문에 사용자가 다음 프롬프트로 답함
     await clock.advance(2_000)
@@ -1808,6 +1810,9 @@ describe('팀 상황판', () => {
     // 앞에 공백이 있는 / 글은 엔진이 일반 메시지로 보낸다: 사람 요청으로 남긴다 (2026-10-20 시험 F5)
     await $.prompt.submit({ text: ' /lookback 오늘', origin: { kind: 'composer' } } as any)
     expect(mine().timeline.at(-1)).toMatchObject({ kind: 'prompt', text: '/lookback 오늘' })
+    // 새 요청 뒤 도구 없이 물으면 지난 요청의 도구 작업을 싣지 않는다
+    await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: '오늘 범위는?', header: '범위', options: [{ label: '변경 파일만' }, { label: '전체' }], multiSelect: false }], tool_use_id: 'u4' } as any)
+    expect(mine().lastTool).toBe('')
 
     // 바로 답했으니 소리 없음. 결정을 20초 넘게 기다리면 한 번만 알린다.
     await clock.advance(30_000)
@@ -2863,6 +2868,11 @@ describe('결정 대화상자 위 맥락 (T34 A1)', () => {
     expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: [] }, [])).toEqual([])
     // 사용자의 글은 직전 글로 쓰지 않는다
     expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: [{ role: 'user', text: '답' }] }, [])).toEqual([])
+    // 이번 요청 뒤에 한 말이 없으면 마지막 도구 작업. 지난 턴의 답은 직전 글이 아니다 (2026-10-26 실화면: 말없이 읽고 바로 물으면 비었다)
+    const lastTurn = [{ role: 'assistant' as const, text: '지난 턴의 답' }, { role: 'user' as const, text: 'README 읽고 물어봐' }]
+    expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: lastTurn, lastTool: 'Read README.md' }, [])).toEqual(['직전 · Read README.md'])
+    expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: lastTurn }, [])).toEqual([])
+    expect(askContext({ state: 'asking', step: '질문 중', prompt: '', recent: [...lastTurn, { role: 'assistant', text: '읽었습니다' }], lastTool: 'Read README.md' }, [])).toEqual(['직전 · 읽었습니다'])
     // 이 세션의 Claude 가 AskUserQuestion 으로 묻는 중일 때만: 다른 mod 의 $.ui.ask(prompt-coach 질문 등)도 같은 대화상자라 그 위에는 그리지 않는다
     expect(askContext({ state: 'asking', step: '', prompt: '주문 조회 캐시를 정리해 줘', recent: [] }, tasks)).toEqual([])
     expect(askContext({ state: 'working', step: '질문 중', prompt: '주문 조회 캐시를 정리해 줘', recent: [] }, tasks)).toEqual([])
