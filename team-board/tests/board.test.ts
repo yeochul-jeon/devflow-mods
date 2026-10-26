@@ -2901,8 +2901,9 @@ describe('같은 실패 반복 (T34 A4)', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('prompt.submit', ($, e: any) => ({ text: e.text }))
     let pass = false
+    let blocked = ''
     on('tool.call', ($, e: any) => (e.tool === 'Bash'
-      ? (pass ? { result: { stdout: 'ok', stderr: '', interrupted: false }, text: 'ok' } : { result: { stdout: '', stderr: 'FAILED', interrupted: false }, text: 'Exit code 1', isError: true })
+      ? blocked ? { result: `Error: ${blocked}`, text: blocked, isError: true } : (pass ?{ result: { stdout: 'ok', stderr: '', interrupted: false }, text: 'ok' } : { result: { stdout: '', stderr: 'FAILED', interrupted: false }, text: 'Exit code 1', isError: true })
       : { result: 'ok', text: 'ok' }) as any)
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     const bash = (command: string, agentId?: string) => $.tool.call({ tool: 'Bash', command, tool_use_id: 'b', ...(agentId ? { agentId } : {}) } as any) as Promise<any>
@@ -2951,6 +2952,17 @@ describe('같은 실패 반복 (T34 A4)', () => {
     await bash('make a'); await bash('make a')
     expect((await bash('npm test')).context ?? []).toEqual([])
     expect((await bash('make a')).context ?? []).toEqual([])
+
+    // 돌지 않은 명령(분류기 판정 없음·권한 거절)은 실패로 세지도, 연속을 끊지도 않는다. 돈 명령의 오류는 'Exit code N' 으로 시작한다
+    // (2026-10-26: 실사용 막힘 1건이 auto 모드 분류기 오류 3번이었다)
+    blocked = 'The server-side auto mode classifier gave no verdict (error), so auto mode cannot determine the safety of Bash.'
+    for (let i = 0; i < 3; i++) expect((await bash('grep -rn x wiki')).context ?? []).toEqual([])
+    blocked = ''
+    await bash('cargo test'); await bash('cargo test')
+    blocked = 'Permission for this action was denied by the auto mode classifier.'
+    await bash('cargo test')
+    blocked = ''
+    expect((await bash('cargo test')).context?.join('\n')).toContain('수정 없이 3번 연속 실패')
   })
 })
 

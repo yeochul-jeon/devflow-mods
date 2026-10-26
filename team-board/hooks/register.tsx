@@ -751,8 +751,10 @@ export const register: Register = (on, options) => {
       self.unchecked.clear()
       if (self.beat?.unverified) await save($, { unverified: null }, true)
     }
-    // 같은 실패 반복 (T34 A4): 메인이 수정 없이 같은 명령을 3번 연속 실패. 3번째에 Claude 에게 한 줄, 카드에 막힘
-    if (!e.agentId && self.beat && ran.deny === undefined) {
+    // 같은 실패 반복 (T34 A4): 메인이 수정 없이 같은 명령을 3번 연속 실패. 3번째에 Claude 에게 한 줄, 카드에 막힘.
+    // 돈 명령의 오류는 'Exit code N' 으로 시작한다. 돌지 않은 것(auto 모드 분류기 판정 없음, 권한·사용자 거절, 다른 hook 오류)은 세지도 끊지도 않는다
+    const didRun = ran.isError !== true || /^Exit code \d+/.test(ran.text ?? '')
+    if (!e.agentId && self.beat && ran.deny === undefined && didRun) {
       const key = commandKey(e.command) || oneLine(e.command, 60)
       if (ran.isError === true) {
         self.failRun = key === self.failRun.key ? { key, count: self.failRun.count + 1 } : { key, count: 1 }
