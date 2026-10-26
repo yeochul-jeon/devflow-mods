@@ -1,0 +1,91 @@
+{
+  "name": "devflow-mods",
+  "owner": {
+    "name": "yeochul-jeon",
+    "url": "https://github.com/yeochul-jeon"
+  },
+  "description": "Claude Code mods: 쉬운 설명(eli12), 멀티 세션 팀 상황판(team-board: 진행·결정 기록·숨은 실패 감지), 작업 계획 보고(work-plan), 용어 풀이(plain-terms), 흐름 그림(draw), 기간별 돌아보기(look-back), 다음 요청 제안(next-steps), 초안 다듬기(prompt-coach), 오해 없는 절차 글(ste100)",
+  "plugins": [
+    {
+      "name": "eli12",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "eli12",
+        "ref": "eli12--v0.2.0"
+      }
+    },
+    {
+      "name": "team-board",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "team-board",
+        "ref": "team-board--v0.28.10"
+      }
+    },
+    {
+      "name": "work-plan",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "work-plan",
+        "ref": "work-plan--v0.4.2"
+      }
+    },
+    {
+      "name": "plain-terms",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "plain-terms",
+        "ref": "plain-terms--v0.1.1"
+      }
+    },
+    {
+      "name": "draw",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "draw",
+        "ref": "draw--v0.1.0"
+      }
+    },
+    {
+      "name": "look-back",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "look-back",
+        "ref": "look-back--v0.3.5"
+      }
+    },
+    {
+      "name": "next-steps",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "next-steps",
+        "ref": "next-steps--v0.3.1"
+      }
+    },
+    {
+      "name": "prompt-coach",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "prompt-coach",
+        "ref": "prompt-coach--v0.3.2"
+      }
+    },
+    {
+      "name": "ste100",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "ste100",
+        "ref": "ste100--v0.1.1"
+      }
+    }
+  ]
+}
