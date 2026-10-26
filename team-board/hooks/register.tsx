@@ -746,14 +746,14 @@ export const register: Register = (on, options) => {
   // 숨은 실패: exit 0 인데 출력에 실패 흔적. 같은 명령이 깨끗하게 다시 돌면 지운다.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
+    // 돈 명령의 오류는 'Exit code N' 으로 시작한다. 돌지 않은 것(auto 모드 분류기 판정 없음, 권한·사용자 거절, 다른 hook 오류)은 검증도 실패도 아니다
+    const didRun = ran.isError !== true || /^Exit code \d+/.test(ran.text ?? '')
     // 검증 명령을 돌렸으면(통과·실패와 상관없이) 검증 없음을 지운다 (T34 B1)
-    if (ran.deny === undefined && isVerify(e.command)) {
+    if (ran.deny === undefined && didRun && isVerify(e.command)) {
       self.unchecked.clear()
       if (self.beat?.unverified) await save($, { unverified: null }, true)
     }
-    // 같은 실패 반복 (T34 A4): 메인이 수정 없이 같은 명령을 3번 연속 실패. 3번째에 Claude 에게 한 줄, 카드에 막힘.
-    // 돈 명령의 오류는 'Exit code N' 으로 시작한다. 돌지 않은 것(auto 모드 분류기 판정 없음, 권한·사용자 거절, 다른 hook 오류)은 세지도 끊지도 않는다
-    const didRun = ran.isError !== true || /^Exit code \d+/.test(ran.text ?? '')
+    // 같은 실패 반복 (T34 A4): 메인이 수정 없이 같은 명령을 3번 연속 실패. 3번째에 Claude 에게 한 줄, 카드에 막힘. 돌지 않은 것은 세지도 끊지도 않는다
     if (!e.agentId && self.beat && ran.deny === undefined && didRun) {
       const key = commandKey(e.command) || oneLine(e.command, 60)
       if (ran.isError === true) {

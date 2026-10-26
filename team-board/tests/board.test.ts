@@ -1481,7 +1481,10 @@ describe('검증 없음 (T34 B1)', () => {
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('turn.complete', () => ({ text: '' }))
-    on('tool.call', ($, e: any) => (e.tool === 'Bash' ? { result: { stdout: 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' } : { result: 'ok', text: 'ok' }) as any)
+    let bashErr = ''
+    on('tool.call', ($, e: any) => (e.tool === 'Bash'
+      ? bashErr ? { result: `Error: ${bashErr}`, text: bashErr, isError: true } : { result: { stdout: 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' }
+      : { result: 'ok', text: 'ok' }) as any)
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     const done = async () => {
       await $.turn.complete({ reason: 'answer', answer: '고쳤습니다.', durationMs: 1, isAborted: false, turnId: 't' } as any)
@@ -1515,6 +1518,16 @@ describe('검증 없음 (T34 B1)', () => {
     await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/src/a.ts', old_string: 'b', new_string: 'c', tool_use_id: 'e3' } as any)
     await done()
     expect(mine().unverified?.files).toBe(1)
+
+    // 돌지 않은 검증 명령(auto 모드 분류기 판정 없음)은 검증이 아니다. 돌았으면 실패해도 검증이다
+    bashErr = 'The server-side auto mode classifier gave no verdict (error), so auto mode cannot determine the safety of Bash.'
+    await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b2' } as any)
+    await done()
+    expect(mine().unverified?.files).toBe(1)
+    bashErr = 'Exit code 1\nFAIL src/a.test.ts'
+    await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b3' } as any)
+    await done()
+    expect(mine().unverified).toBeNull()
   })
 })
 

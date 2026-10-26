@@ -324,7 +324,7 @@ Claude 가 AskUserQuestion 으로 물으면 엔진 대화상자 바로 위에 �
 코드를 고친 뒤 테스트·빌드를 한 번도 돌리지 않고 턴이 끝나면 `/board` 에 표시합니다(0.28.4). Claude 가 "고쳤습니다"라고 했어도 확인하지 않았을 수 있다는 표시입니다.
 
 - 머리줄 `△ 검증 없음 <세션 수>` 칩, 카드 `검증  △ 마지막 코드 수정 뒤 테스트·빌드 없음 · 파일 2 · 3분 전`.
-- 검증 명령: `./gradlew`, `mvn`, `make`, `pytest`, `jest`, `vitest`, `tsc`, `eslint`, `npm|pnpm|yarn|bun (run) test|build|lint|check`, `bun test`, `npx|bunx tsc|eslint|jest|vitest|playwright`, `cargo test|build|check|clippy`, `go test|build|vet`, `claude plugin test|validate` 등. 통과했는지는 보지 않고 돌렸는지만 봅니다(실패는 숨은 실패·Claude 가 따로 봅니다).
+- 검증 명령: `./gradlew`, `mvn`, `make`, `pytest`, `jest`, `vitest`, `tsc`, `eslint`, `npm|pnpm|yarn|bun (run) test|build|lint|check`, `bun test`, `npx|bunx tsc|eslint|jest|vitest|playwright`, `cargo test|build|check|clippy`, `go test|build|vet`, `claude plugin test|validate` 등. 통과했는지는 보지 않고 돌렸는지만 봅니다(실패는 숨은 실패·Claude 가 따로 봅니다). auto 모드 분류기 판정 없음·권한 거절처럼 돌지 않은 것은 돌린 것으로 치지 않습니다(0.28.12).
 - 검증이 필요한 편집: 저장소 안 파일 중 문서·그림(`.md`, `.txt`, `.png` 등)이 아닌 것. 저장소 밖 파일(계획 파일 등)은 세지 않습니다.
 - 보조 에이전트가 고치거나 돌린 것도 셉니다. 검증 명령이 돌면 바로 지웁니다.
 - Bash 로 고친 파일(`sed -i` 등)은 세지 않습니다.
