@@ -42,7 +42,7 @@ Claude Code v2.1.287 이상이 필요합니다. `claude --version` 으로 확인
 ## 설치
 
 ```bash
-claude plugin marketplace add yeochul-jeon/devflow-mods
+claude plugin marketplace add yeochul-jeon/devflow-mods#stable
 claude plugin install team-board@devflow-mods
 claude plugin install work-plan@devflow-mods      # 요청마다 약 560 토큰 (team-board와 함께 쓰세요)
 claude plugin install plain-terms@devflow-mods    # 대화 첫 요청에 규칙 약 280 토큰, 답변이 조금 길어집니다
@@ -54,6 +54,7 @@ claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출
 claude plugin install prompt-coach@devflow-mods   # 다듬을 때 Haiku 2회. 자동 모드(기본 꺼짐)면 보낼 때마다
 ```
 
+- `#stable` 은 릴리즈된 버전만 받습니다. 버전마다 변경 내역은 [Releases](https://github.com/yeochul-jeon/devflow-mods/releases) 에 있습니다. `#stable` 없이 추가하면 main 의 개발 중 버전을 받습니다.
 - 필요한 mod만 설치하세요.
 - team-board는 사용자 범위(기본)로 설치하세요. 모든 세션과 워크트리에서 보여야 하기 때문입니다.
 - 한 프로젝트에만 쓰려면 그 프로젝트 폴더에서 `--scope local` 을 붙이세요.
@@ -70,6 +71,16 @@ claude plugin uninstall team-board@devflow-mods   # 삭제
 ```
 
 업데이트한 뒤 세션을 다시 열어야 새 버전이 적용됩니다.
+
+`#stable` 없이 추가했다면 아래처럼 옮깁니다. `marketplace remove` 는 그 mod 들도 지우므로 다시 설치합니다.
+
+```bash
+claude plugin marketplace remove devflow-mods
+claude plugin marketplace add yeochul-jeon/devflow-mods#stable
+claude plugin install team-board@devflow-mods     # 쓰던 mod마다 실행합니다
+```
+
+릴리즈하는 쪽은 main 에 커밋·push 하고 실화면을 확인한 뒤 `docs/tools/release.sh <mod>` 를 돌립니다. 태그 `<mod>--v<버전>`, Release(본문은 CHANGELOG), stable 목록의 그 mod 항목을 한 번에 바꿉니다.
 
 </details>
 
