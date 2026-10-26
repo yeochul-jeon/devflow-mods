@@ -45,8 +45,8 @@ const MASKS: { label: string; pattern: RegExp }[] = [
   { label: '파이프는 마지막 명령의 코드만 돌려줌', pattern: /\|\s*(?:tail|head|tee|grep|less|cat|sed|awk|sort|uniq|wc)\b/ },
 ]
 
-/** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. */
-const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed(?![^|;]*\s(?:-i|--in-place)\b)|awk|echo|printf|sort|uniq|cut|tr|column|nl|fold|file|stat)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:-C \S+ )?(?:log|diff|show|blame|grep|status|rev-parse|ls-files|ls-tree|rev-list|describe|cat-file|show-ref)\b|^pwd\b|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
+/** 로그나 코드를 보여 주기만 하는 명령: 출력에 FAILED 가 있어도 실패가 아니다. 도움말·버전(`x --help`, `git help y`)도 넣는다: `-h` 는 `npm test -- -h` 같은 실행이 빠져 넣지 않는다. */
+const READ_ONLY = /^(?:cat|less|more|head|tail|grep|rg|ag|egrep|find|ls|wc|bat|jq|diff|sed(?![^|;]*\s(?:-i|--in-place)\b)|awk|echo|printf|sort|uniq|cut|tr|column|nl|fold|file|stat)\b|^xargs\s+(?:-\S+\s+)*(?:grep|rg|egrep|cat|head|tail|wc)\b|^git (?:-C \S+ )?(?:log|diff|show|blame|grep|status|rev-parse|ls-files|ls-tree|rev-list|describe|cat-file|show-ref)\b|^pwd\b|^\S+(?:\s+[\w-]+)*\s+(?:--help|--version)\s*$|^\S+ help(?:\s+[\w-]+)?\s*$|^(?:man|which|type|command -v)\s|^gh (?:run|pr) view\b|^docker (?:compose )?logs\b|^kubectl logs\b/
 
 /** 읽기 도구가 파일이 없다고 알린 줄: 존재 확인의 답이지 실패가 아니다. 빌드·실행 도구가 낸 없음은 남긴다. */
 const READ_MISSING = /^(?:(?:ls|stat|cat|head|tail|grep|rg|wc|du|file|find|readlink|realpath|diff|bat|eza|jq|sed|awk): .*No such file or directory.*|"[^"\n]*": No such file or directory \(os error 2\))$/gm

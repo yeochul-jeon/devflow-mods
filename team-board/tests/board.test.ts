@@ -900,6 +900,22 @@ describe('숨은 실패', () => {
     expect(masksIn('./gradlew test || true')).toHaveLength(1)
   })
 
+  test('도움말·버전 출력은 판정하지 않는다 (2026-10-26 오탐: `codex exec --help` 의 `Error out when …`)', async () => {
+    const help = '      --strict-config\n          Error out when config.toml contains fields that are not recognized'
+    expect(judge('codex exec --help', help, 1)).toBeNull()
+    expect(judge('sed -n 1,5p a.ts; codex exec --help | head -40', help, 1)).toBeNull()
+    expect(judge('git --help', '   Error handling options:', 1)).toBeNull()
+    expect(judge('git help commit', '   Error handling options:', 1)).toBeNull()
+    expect(judge('node --version', 'Error: x', 1)).toBeNull()
+    expect(isReadOnly('which codex && man git')).toBe(true)
+    // 진짜 오류는 그대로 잡는다. 쌍점 없는 오류 줄도
+    expect(judge('node app.js', 'Error: Cannot find module x', 1)?.signs[0]).toMatch(/^오류 줄/)
+    expect(judge('ffmpeg -i a.mp4 out.jpg', 'Error opening input file a.mp4.', 1)?.signs[0]).toMatch(/^오류 줄/)
+    // -h 는 넣지 않는다: 실행 명령의 인자일 수 있다
+    expect(judge('npm test -- -h', 'FAIL src/a.test.ts', 1)?.level).toBe('high')
+    expect(judge('codex exec --help && npm test', ' 2 fail', 1)?.level).toBe('high')
+  })
+
   test('읽기 전용 단계가 앞에 있어도 모든 단계가 읽기 전용일 때만 제외한다', async () => {
     expect(judge('echo "== build" && ./gradlew test 2>&1 | tail -20', GRADLE, 1)?.level).toBe('high')
     expect(judge('git status; npm test | tail', '  3 passing\n  2 failing', 1)?.level).toBe('high')
@@ -1482,8 +1498,9 @@ describe('검증 없음 (T34 B1)', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('turn.complete', () => ({ text: '' }))
     let bashErr = ''
+    let bashOut: Record<string, unknown> | undefined
     on('tool.call', ($, e: any) => (e.tool === 'Bash'
-      ? bashErr ? { result: `Error: ${bashErr}`, text: bashErr, isError: true } : { result: { stdout: 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' }
+      ? bashErr ? { result: `Error: ${bashErr}`, text: bashErr, isError: true } : { result: bashOut ?? { stdout: 'BUILD SUCCESSFUL in 3s', stderr: '', interrupted: false }, text: 'ok' }
       : { result: 'ok', text: 'ok' }) as any)
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     const done = async () => {
@@ -1526,6 +1543,20 @@ describe('검증 없음 (T34 B1)', () => {
     expect(mine().unverified?.files).toBe(1)
     bashErr = 'Exit code 1\nFAIL src/a.test.ts'
     await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b3' } as any)
+    await done()
+    expect(mine().unverified).toBeNull()
+
+    // 중단했거나 백그라운드로 시작만 한 검증은 끝난 검증이 아니다 (Codex 검토)
+    bashErr = ''
+    await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/src/a.ts', old_string: 'c', new_string: 'd', tool_use_id: 'e4' } as any)
+    bashOut = { stdout: '', stderr: '', interrupted: true }
+    await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b4' } as any)
+    bashOut = { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bg1' }
+    await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b5' } as any)
+    await done()
+    expect(mine().unverified?.files).toBe(1)
+    bashOut = undefined
+    await $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'b6' } as any)
     await done()
     expect(mine().unverified).toBeNull()
   })

@@ -748,8 +748,10 @@ export const register: Register = (on, options) => {
     const ran = await next(e)
     // 돈 명령의 오류는 'Exit code N' 으로 시작한다. 돌지 않은 것(auto 모드 분류기 판정 없음, 권한·사용자 거절, 다른 hook 오류)은 검증도 실패도 아니다
     const didRun = ran.isError !== true || /^Exit code \d+/.test(ran.text ?? '')
-    // 검증 명령을 돌렸으면(통과·실패와 상관없이) 검증 없음을 지운다 (T34 B1)
-    if (ran.deny === undefined && didRun && isVerify(e.command)) {
+    // 중단했거나 백그라운드로 시작만 한 것은 끝난 검증이 아니다
+    const ended = ran.isError === true || !ran.result || !(ran.result.interrupted || ran.result.backgroundTaskId !== undefined)
+    // 검증 명령을 끝까지 돌렸으면(통과·실패와 상관없이) 검증 없음을 지운다 (T34 B1)
+    if (ran.deny === undefined && didRun && ended && isVerify(e.command)) {
       self.unchecked.clear()
       if (self.beat?.unverified) await save($, { unverified: null }, true)
     }
