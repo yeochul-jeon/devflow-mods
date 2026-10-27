@@ -80,7 +80,7 @@ claude plugin marketplace add yeochul-jeon/devflow-mods#stable
 claude plugin install team-board@devflow-mods     # 쓰던 mod마다 실행합니다
 ```
 
-릴리즈하는 쪽은 main 에 커밋·push 하고 실화면을 확인한 뒤 `docs/tools/release.sh <mod>` 를 돌립니다. 태그 `<mod>--v<버전>`, Release(본문은 CHANGELOG), stable 목록의 그 mod 항목을 한 번에 바꿉니다.
+릴리즈하는 쪽은 main 에 커밋·push 하고 실화면을 확인한 뒤 `docs/tools/release.sh <mod>` 를 돌립니다. 태그 `<mod>--v<버전>`, Release(본문은 CHANGELOG), stable 목록의 그 mod 항목을 한 번에 바꿉니다. 중간에 실패하면 다시 돌리면 남은 단계만 합니다. 태그가 다른 커밋을 가리키면 아무것도 하지 않고 멈춥니다.
 
 </details>
 
