@@ -14,8 +14,10 @@ import {
   agentStart,
   agentStrips,
   askContext,
+  crowned,
   fitStrip,
   gitText,
+  leadTarget,
   parseGitStatus,
   parseShortstat,
   wrapCells,
@@ -86,10 +88,12 @@ import {
 import { commandKey, formatAlert, isVerify, judge, masksIn, noteForClaude, redact, signLine } from './failure'
 import { bar, contextTone, mix, paletteOf } from './palette'
 import { cells as widthOf, clip as widthClip, flowArt, parseExplain, parseSte } from './diagram'
-import { hex, ICONS, sprite } from './pixel'
+import { character, characterOf, mixHex, parseLook, snapHex, SPECIES_NAME, type Look, type Pose } from './pixel'
 
 const PANE = 'team-board'
 const TICK_MS = 3_000
+/** 작업 중 캐릭터가 프레임을 바꾸는 간격 (T43) */
+const WALK_MS = 800
 const HEARTBEAT_MS = 60_000
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TodoWrite'])
@@ -110,11 +114,14 @@ const collapsed = atom({ plugin: 'team-board', key: 'collapsed' } as const, [] a
 const bandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
 const bandMode = atom({ plugin: 'team-board', key: 'bandMode' } as const, 'hud' as 'hud' | 'line')
 const bandSoloOff = atom({ plugin: 'team-board', key: 'bandSoloOff' } as const, false)
+/** 카드 타일 캐릭터 (T43): 한 캐릭터 또는 섞기. /board 캐릭터 로 바꾸고 store 에 남긴다 */
+const look = atom({ plugin: 'team-board', key: 'look' } as const, 'blob' as Look)
 // 읽기만 한다. work-plan 이 없으면 값이 없다
 const workPlan = atom({ plugin: 'work-plan', key: 'plan' } as const, null as WorkPlan | null)
 const BAND_KEY = 'band-off'
 const BAND_MODE_KEY = 'band-mode'
 const BAND_SOLO_KEY = 'band-solo-off'
+const LOOK_KEY = 'look'
 /** 세션별로 정한 표시 이름: 다시 켜도(claude --continue) 유지 */
 const nameKey = (sessionId: string) => `name:${sessionId}`
 const SOUND_KEY = 'sound-off'
@@ -123,6 +130,9 @@ const FAIL_KEY = 'fail-off'
 const ALERT_AFTER_MS = 20_000
 
 // 이 세션 자신의 상태와 파일 위치. 세션마다 하나.
+/** 작업 중 캐릭터 걸음 (T43): 패널이 마지막으로 그린 작업 중 타일(Raster key → 그림 재료)만 blit 으로 다시 칠한다 */
+const walk = { frame: 0, busy: false, tiles: new Map<string, Omit<Parameters<typeof character>[0], 'frame'>>() }
+
 const self = {
   dir: '',
   /** 저장소 루트 (없으면 작업 폴더). 편집 경로를 상대 경로로 쓴다 */
@@ -415,6 +425,10 @@ const BOARD_HELP = [
   '  /board band hud | line     창 모양 / 한 줄 모양',
   '  /board band solo off | on  세션이 하나일 때 숨기기 / 보이기',
   '',
+  '카드 캐릭터',
+  '  /board 캐릭터 말랑이|삐삐|둥실|섞기  카드 왼쪽 캐릭터 (섞기 = 세션마다 다르게)',
+  '  /board look blob|bot|ghost|mix     같은 명령 (영문)',
+  '',
   '결정 대기 알림 (소리는 macOS 음성·chime, OS 알림은 preferredNotifChannel)',
   '  /board sound off | on      끄기 / 켜기 (기본 켜짐)',
   '  /board sound test          미리 듣기, OS 알림이 나가는지 확인',
@@ -602,6 +616,25 @@ export const register: Register = (on, options) => {
     await update($, bandMode, (): 'hud' | 'line' => (mode === 'line' ? 'line' : 'hud'))
     const soloOff = (await $.store.get(BAND_SOLO_KEY)) === true
     await update($, bandSoloOff, () => soloOff)
+    const saved = await $.store.get(LOOK_KEY)
+    const savedLook = typeof saved === 'string' ? parseLook(saved) : null
+    if (savedLook) await update($, look, () => savedLook)
+
+    // 작업 중 캐릭터 걸음 (T43). 카드 전체를 다시 그리지 않고 타일만 칠한다. clock.every 는 앞 틱이 안 끝나도 부르므로 겹치면 건너뛴다
+    $.clock.every(WALK_MS, async () => {
+      if (walk.busy || !walk.tiles.size) return
+      walk.busy = true
+      walk.frame ^= 1
+      try {
+        for (const [key, t] of walk.tiles) {
+          const r = await $.ui.blit({ requestId: PANE, key, cells: character({ ...t, frame: walk.frame }).cells })
+          // 패널이 닫혔거나 그 타일이 더는 그려져 있지 않다
+          if (r.deny !== undefined) walk.tiles.delete(key)
+        }
+      } finally {
+        walk.busy = false
+      }
+    })
 
     $.clock.every(TICK_MS, async () => {
       const stale = (await $.clock.now()) - self.lastWrite > HEARTBEAT_MS
@@ -831,6 +864,12 @@ export const register: Register = (on, options) => {
       return r
     }
 
+    // 다른 세션에 일을 맡기면 리더 (T43 왕관). 받는 이름이 보드의 세션일 때만
+    if (e.tool === 'SendMessage' && main && self.beat) {
+      const peer = leadTarget(String(input.to ?? ''), await read($, beats), self.beat.id)
+      if (peer && !(self.beat.leads ?? []).includes(peer)) await save($, { leads: [...(self.beat.leads ?? []), peer].slice(-8) })
+    }
+
     if (e.tool === PLAN_TOOL) return next(e)
 
     const step = describeTool(e.tool, input)
@@ -977,6 +1016,16 @@ export const register: Register = (on, options) => {
       return { text: picked.map(b => formatAlert(b.name, b.fail!)).join('\n\n') + '\n\n같은 명령이 깨끗하게 다시 돌면 저절로 지워져요. 바로 지우려면 그 세션에서 /board fail clear' }
     }
     if (sub === 'help' || sub === '?' || (sub === 'name' && !rest.length)) return { text: BOARD_HELP }
+    if (sub === '캐릭터' || sub === 'look') {
+      const picked = parseLook(rest.join(' '))
+      if (!picked) {
+        const now = await read($, look)
+        return { text: `카드 캐릭터: 지금 ${now === 'mix' ? '섞기' : SPECIES_NAME[now]}\n고를 수 있는 값: 말랑이 | 삐삐 | 둥실 | 섞기 (영문 blob | bot | ghost | mix)   예) /board 캐릭터 둥실` }
+      }
+      await $.store.set(LOOK_KEY, picked)
+      await update($, look, () => picked)
+      return { text: picked === 'mix' ? '세션 이름으로 캐릭터와 색을 섞어요.' : `카드 캐릭터를 ${SPECIES_NAME[picked]}(으)로 바꿨어요.` }
+    }
     if (sub === 'band' || sub === 'sound') return { text: `"/board ${args}" 는 모르는 옵션이에요.\n\n${BOARD_HELP}` }
     if (sub === 'name' && rest.length) {
       await $.store.set(nameKey(self.sessionId), rest.join(' ').slice(0, 24))
@@ -1347,9 +1396,12 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // 픽셀 아이콘은 터미널 + 색이 #rrggbb 인 팔레트 + 넉넉한 폭에서만 (아니면 글자 카드)
+    // 픽셀 캐릭터는 터미널 + 색이 #rrggbb 인 팔레트 + 넉넉한 폭에서만 (아니면 글자 카드)
     const useTile = Raster !== undefined && pal.isRaw && cols >= 56
-    const rightWidth = cols - 6 - (useTile ? 9 : 0)
+    const rightWidth = cols - 6 - (useTile ? 11 : 0)
+    const lookNow = await read($, look)
+    // 이번 그림의 작업 중 타일로 다시 채운다
+    walk.tiles.clear()
     const SEG_COLOR = { done: pal.ok, now: pal.work, left: pal.dim, end: pal.text } as const
 
     const progressRow = (b: Beat) => {
@@ -1371,16 +1423,25 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const tileOf = (b: Beat) => {
+    // headRows: 타일 옆 머리 줄 수. 왕관이 없고 3줄 미만이면 3행 타일로 빈 줄을 줄인다
+    const tileOf = (b: Beat, headRows: number) => {
       if (!useTile || !Raster) return null
       const stale = isStale(b, now)
       const broke = !stale && b.state !== 'asking' && b.fail?.level === 'high'
-      const kind = stale ? 'stale' : b.state === 'asking' || broke ? 'asking' : b.state === 'working' || waitsOnAgents(b) ? 'working' : 'idle'
-      const bg = stale || kind === 'idle' ? pal.frame : broke ? pal.bad : kind === 'asking' ? pal.ask : pal.work
-      const fg = stale ? pal.dim : kind === 'idle' ? pal.ok : pal.onBadge
+      const pose: Pose = stale ? 'stale' : broke ? 'fail' : b.state === 'asking' ? 'ask' : b.state === 'working' || waitsOnAgents(b) ? 'work' : 'idle'
+      // 상태는 바탕색: 결정·실패는 진하게, 작업 중은 카드 바탕에 옅게 (몸 색이 묻히지 않게)
+      const bg = snapHex(pose === 'fail' ? pal.bad : pose === 'ask' ? pal.ask : pose === 'work' ? mixHex(pal.work, pal.card || '#000000', 0.72) : pose === 'idle' ? pal.frame : pal.card || '#000000')
+      const { species, hue } = characterOf(lookNow, b.name)
+      const leader = crowned(b, list, now)
+      const art = { species, pose, hue, leader, rows: leader || headRows >= 3 ? 4 : 3, bg, dark: pal.onBadge, dim: pal.dim } as const
+      const key = `icon-${b.id}`
+      // 메인이 일하는 동안만 걷는다. 보조만 기다리는 세션은 멈춰 있다 (도는 것으로 읽히지 않게)
+      const moving = pose === 'work' && b.state === 'working'
+      if (moving) walk.tiles.set(key, art)
+      // 위에 붙여 4행만: 보조 줄이 늘어도 바탕이 따라 늘지 않는다
       return (
-        <Box width={8} flexShrink={0} backgroundColor={bg} paddingX={1}>
-          <Raster key={`icon-${b.id}`} {...sprite(ICONS[kind], hex(fg), hex(bg))} />
+        <Box width={10} flexShrink={0} alignSelf="flex-start" backgroundColor={bg} paddingX={1}>
+          <Raster key={key} {...character({ ...art, frame: moving ? walk.frame : 0 })} />
         </Box>
       )
     }
@@ -1411,23 +1472,29 @@ export const register: Register = (on, options) => {
         b.state === 'asking' && b.question
           ? row('질문', <Text color={pal.ask} bold wrap="truncate-end">{questionSummary(b.question)}</Text>)
           : b.state === 'working' && b.step
-            ? row('지금', <Text color={pal.work} wrap="truncate-end">{b.step}</Text>)
+            ? row('지금', <Text color={pal.work} bold wrap="truncate-end">{b.step}</Text>)
             : b.last
               ? row('최근', <Text color={pal.dim} wrap="truncate-end">{b.last}</Text>)
               : b.prompt
                 ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>)
                 : null
+      const third = progressRow(b) ?? (b.prompt && !showsPrompt ? row('요청', <Text color={pal.dim} wrap="truncate-end">{b.prompt}</Text>) : null)
+      const strips = agentStrips(b.agents, now).map((r, i) => row(i === 0 ? '보조' : '', stripOf(Text, r, rightWidth - 6), `strip-${b.id}-${i}`))
       return (
         <Box flexDirection="column">
           {stripeOf(b)}
           <Box flexDirection="row" columnGap={1}>
-            {tileOf(b)}
+            {tileOf(b, 1 + (second ? 1 : 0) + (third ? 1 : 0) + strips.length)}
             <Box flexDirection="column" flexGrow={1} flexShrink={1}>
               {titleRow(b)}
               {second}
-              {progressRow(b) ?? (b.prompt && !showsPrompt ? row('요청', <Text color={pal.dim} wrap="truncate-end">{b.prompt}</Text>) : null)}
-              {agentStrips(b.agents, now).map((r, i) => row(i === 0 ? '보조' : '', stripOf(Text, r, rightWidth - 6), `strip-${b.id}-${i}`))}
+              {third}
+              {strips}
             </Box>
+          </Box>
+          {/* 머리와 몸을 나눈다 (T43). 한 줄 높이 Box 가 넘친 줄을 숨긴다 */}
+          <Box height={1} overflow="hidden">
+            <Text color={pal.isRaw ? pal.frame : pal.dim} wrap="wrap">{'─'.repeat(cols)}</Text>
           </Box>
         </Box>
       )

@@ -81,6 +81,8 @@ export type Beat = {
   fail: FailAlert | null
   /** 이 세션의 보조 에이전트. 사람이 다음 프롬프트를 보내면 끝난 것을 지운다 (0.18 전 파일에는 없음) */
   agents: SubAgent[]
+  /** 이 세션이 SendMessage 로 일을 맡긴 팀메이트 세션 id. 왕관 기준 (T43, 0.29 전 파일에는 없음) */
+  leads?: string[]
   /** 마지막 메인 스레드 모델 요청 시각. 프롬프트 캐시 남은 시간의 기준 (compact·/clear 뒤엔 null) */
   cacheAt: number | null
   updatedAt: number
@@ -144,6 +146,8 @@ declare module 'claude-code' {
       bandMode: 'hud' | 'line'
       /** 세션이 하나일 때 팀 창을 숨김 */
       bandSoloOff: boolean
+      /** 카드 타일 캐릭터: blob(말랑이) · bot(삐삐) · ghost(둥실) · mix(세션 이름으로 섞기) */
+      look: 'blob' | 'bot' | 'ghost' | 'mix'
     }
     /** 읽기만 한다. work-plan 이 없으면 값이 없다 */
     'work-plan': { plan: WorkPlan | null }

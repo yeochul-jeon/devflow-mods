@@ -6,7 +6,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
 <p align="center">
-  <img src="docs/images/board.webp" alt="team-board: 결정을 기다리는 세션은 주의 띠와 느낌표 아이콘, 할 일은 진행 막대로 표시" width="560">
+  <img src="docs/images/board.webp" alt="team-board: 결정을 기다리는 세션은 주의 띠와 노란 바탕 캐릭터 실루엣, 다른 세션은 세션마다 다른 색 캐릭터, 할 일은 진행 막대로 표시" width="560">
 </p>
 
 ## mod 목록
@@ -30,6 +30,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 결정 대기 알림 (소리·OS 알림) | team-board | `/board sound on\|off\|test` | 켜짐. 음성은 macOS만, OS 알림은 `preferredNotifChannel` |
 | 숨은 실패 감지 | team-board | `/board fail on\|off\|clear` | 켜짐 |
 | 세션 표시 이름 | team-board | `/board name <이름>` | 세션 이름 → 브랜치 → 폴더 |
+| 카드 캐릭터 | team-board | `/board 캐릭터 말랑이\|삐삐\|둥실\|섞기` | 말랑이 |
 | 다른 mod보다 앞에 두기 | team-board | `~/.claude/settings.json` 의 `prependPlugins` | 없음 |
 | 작업 계획 보고 | work-plan | `claude plugin disable work-plan@devflow-mods` | 켜짐 |
 | 계획 전 수정 막기 `planGate` | work-plan | `claude plugin configure work-plan@devflow-mods` | 꺼짐 |
@@ -97,7 +98,7 @@ claude plugin install team-board@devflow-mods     # 쓰던 mod마다 실행합�
 
 - **팀 창**: 입력창 위에 세션마다 칸을 그립니다. 칸은 상태, 진행 막대, 결정 대기 질문, 숨은 실패를 보여 줍니다. 진행 막대는 채움 선 끝에 지금 단계 이름 칩을 붙이고(`▏━━━━ 테스트 실행 ╌╌│╌╌│╌╌  40%`), 멈춘 세션은 노란 `멈춤: <단계>`, 끝나면 걸린 시간(`✓ 3분 12초`)을 보입니다. 칸이 좁으면 예전 경로선 `●━◉─○─◎` 으로 그립니다.
 - **지금 단계 줄**: 턴이 도는 동안 입력창 바로 위 줄(`✻ Sauteing… (12s)`)을 지금 단계 `2/5 테스트 실행… (12s)` 로 바꿉니다. 엔진이 권한 대기 같은 자기 문구를 띄우면 그대로 둡니다.
-- **보드**: `/board` 는 세션별 요청, 진행, 결정 기록을 보여 줍니다. 결정 대기 항목을 12살 버전·ASD-STE100 기준 탭으로 설명하고, HTML 페이지(Artifact)를 요청할 수 있습니다.
+- **보드**: `/board` 는 세션별 요청, 진행, 결정 기록을 보여 줍니다. 카드 왼쪽 픽셀 캐릭터는 바탕색으로 상태를, 몸 색으로 세션을 보이고, 다른 세션에 일을 맡긴 리더 세션은 왕관을 씁니다. 결정 대기 항목을 12살 버전·ASD-STE100 기준 탭으로 설명하고, HTML 페이지(Artifact)를 요청할 수 있습니다.
 - **숨은 실패**: exit 0으로 끝났지만 출력에 실패 흔적이 있는 빌드·테스트를 찾습니다. Claude와 모든 탭에 알립니다.
 - **결정 대화상자 위 맥락**: Claude 가 AskUserQuestion 으로 물을 때 대화상자 위에 요청·지금 계획 단계·직전 글을 몇 줄로 보입니다.
 - **검증 없음**: 코드를 고친 뒤 테스트·빌드를 돌리지 않고 턴이 끝나면 `/board` 카드에 `검증  △ …` 줄을 보입니다.
@@ -124,7 +125,7 @@ claude plugin install team-board@devflow-mods     # 쓰던 mod마다 실행합�
 
 결정 대기 카드의 탭을 누르면 Haiku가 그 질문을 풀어 설명합니다. `12살` 은 비유와 선택지별 흐름 그림, `ASD-STE100` 은 "X를 고르면 Y가 일어납니다" 꼴의 짧은 문장입니다. 설명을 다시 받으려면 탭 옆 `↻` 를, 페이지로 보려면 `[ HTML ]` 을 누르세요.
 
-<img src="docs/images/explain.webp" alt="12살 탭: 알약 진행 막대와 질문 줄이 있는 결정 카드 아래 왜 지금, 비유, 선택지 두 개의 흐름 상자, 맥락, 먼저 정할 것" width="560">
+<img src="docs/images/explain.webp" alt="12살 탭: 알약 진행 막대와 질문 줄이 있는 결정 카드 아래 왜 지금, 비유, 선택지 두 개의 흐름 상자, 먼저 정할 것" width="560">
 
 <img src="docs/images/ste.webp" alt="ASD-STE100 탭: 정할 것, 선택지마다 고르면 일어나는 일, 세션 제안" width="560">
 

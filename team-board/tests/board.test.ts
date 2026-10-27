@@ -2,6 +2,8 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import {
   agentStrips,
+  crowned,
+  leadTarget,
   fitStrip,
   wrapCells,
   stampTasks,
@@ -64,7 +66,7 @@ import {
 } from '../hooks/board'
 import { bar, contextTone, mix, paletteOf } from '../hooks/palette'
 import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
-import { ICONS, sprite } from '../hooks/pixel'
+import { character, characterOf, HUES, parseLook, snapHex } from '../hooks/pixel'
 import { commandKey, isReadOnly, isVerify, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
 
 // 알약 바탕: 상태색을 카드 바탕 쪽으로 30% (위 줄 배지와 구분, T27 D2)
@@ -174,11 +176,47 @@ describe('경로선과 픽셀', () => {
     const segs = routeLine([t('completed', 1), t('completed', 2)], 20)
     expect(segs.at(-1)).toEqual({ text: '◎', tone: 'done' })
   })
-  test('12×6 픽셀 아이콘 = 6×3 칸, 칸마다 [글자, 앞색, 뒷색]', async () => {
-    const r = sprite(ICONS.asking, 0xffffff, 0x000000)
-    expect([r.columns, r.rows]).toEqual([6, 3])
-    const bytes = Uint8Array.from(atob(r.cells), c => c.charCodeAt(0))
-    expect(bytes.length).toBe(6 * 3 * 3 * 4)
+  const words = (cells: string) => {
+    const bytes = Uint8Array.from(atob(cells), c => c.charCodeAt(0))
+    return Array.from(new Uint32Array(bytes.buffer))
+  }
+  const base = { species: 'blob', frame: 0, hue: '#fb923c', leader: false, rows: 4, bg: '#334155', dark: '#0b1220', dim: '#7c8aa5' } as const
+  test('캐릭터 8×8 픽셀 = 8×4 칸, 칸마다 [▀, 위 픽셀, 아래 픽셀] (T43)', async () => {
+    const r = character({ ...base, pose: 'idle' })
+    expect([r.columns, r.rows]).toEqual([8, 4])
+    const w = words(r.cells)
+    expect(w.length).toBe(8 * 4 * 3)
+    expect(w.filter((_, i) => i % 3 === 0).every(c => c === 0x2580)).toBe(true)
+    // 왕관이 없으면 맨 윗줄 칸은 모두 바탕색
+    expect(w.slice(0, 24).filter((_, i) => i % 3 !== 0).every(c => c === 0x334155)).toBe(true)
+  })
+  test('짧은 머리용 3행: 8×6 픽셀, 몸이 맨 윗줄부터', async () => {
+    const r = character({ ...base, rows: 3, pose: 'idle' })
+    expect([r.columns, r.rows]).toEqual([8, 3])
+    expect(words(r.cells).length).toBe(8 * 3 * 3)
+    expect(words(r.cells).slice(0, 24).filter((_, i) => i % 3 === 1).some(c => c === 0xfb923c)).toBe(true)
+  })
+  test('부리는 세션은 왕관, 작업 중만 두 번째 프레임, 결정 대기는 실루엣', async () => {
+    const top = (o: object) => words(character({ ...base, pose: 'idle', ...o }).cells).slice(0, 24)
+    expect(top({ leader: true }).some(c => c === 0xfde047)).toBe(true)
+    const f = (pose: 'work' | 'idle', frame: number) => character({ ...base, pose, frame }).cells
+    expect(f('work', 0)).not.toBe(f('work', 1))
+    expect(f('idle', 0)).toBe(f('idle', 1))
+    const ask = words(character({ ...base, pose: 'ask', bg: '#fbbf24' }).cells)
+    expect(ask.includes(0xfb923c)).toBe(false)
+    expect(ask.includes(0x0b1220)).toBe(true)
+  })
+  test('타일 바탕은 Raster 가 칠하는 16단계 색으로 맞춘다', () => {
+    expect(snapHex('#0f1730')).toBe('#111133')
+    expect(snapHex('#334155')).toBe('#334455')
+    expect(snapHex('#ffffff')).toBe('#ffffff')
+  })
+  test('캐릭터 고정: 같은 이름은 같은 모양, 섞기는 3종 모두 나온다', async () => {
+    expect(characterOf('blob', 'api')).toEqual(characterOf('blob', 'api'))
+    expect(characterOf('ghost', 'api').species).toBe('ghost')
+    const names = Array.from({ length: 30 }, (_, i) => `sub-${i}`)
+    expect(new Set(names.map(n => characterOf('mix', n).species)).size).toBe(3)
+    expect(HUES).toContain(characterOf('mix', 'api').hue)
   })
 })
 
@@ -3070,5 +3108,163 @@ describe('변경 요약 (T34 B2)', () => {
     expect(await detail.find({ type: 'Text', text: 'feat/cache ↑2 · 커밋 안 함 2파일 +12 −3' })).toBeDefined()
     expect(await detail.find({ type: 'Text', text: /^변경$/ })).toBeDefined()
     await detail.unmount()
+  })
+})
+
+describe('카드 캐릭터 고르기 (T43)', () => {
+  test('parseLook 은 한글·영문 이름을 받고 모르는 값은 null', () => {
+    expect(parseLook('말랑이')).toBe('blob')
+    expect(parseLook('삐삐')).toBe('bot')
+    expect(parseLook('둥실')).toBe('ghost')
+    expect(parseLook('섞기')).toBe('mix')
+    expect(parseLook('blob')).toBe('blob')
+    expect(parseLook(' Ghost ')).toBe('ghost')
+    expect(parseLook('mix')).toBe('mix')
+    expect(parseLook('')).toBeNull()
+    expect(parseLook('cat')).toBeNull()
+  })
+  test('/board 캐릭터 는 store 에 남기고, 모르는 값이면 지금 값과 고를 값을 보인다', async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const store = new Map<string, unknown>()
+    on('store.get', ($, e: any) => ({ value: store.get(e.key) }))
+    on('store.set', ($, e: any) => { store.set(e.key, e.value); return { value: undefined } })
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.cwd', () => ({ value: '/repo/a' }))
+    on('session.repo', () => ({ value: { root: '/repo/a', remote: null, internal: false, name: 'a' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', () => ({ value: undefined }))
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', () => ({ value: '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/a' } as any)
+    const shown = await $.command.run({ command: 'board', args: '캐릭터' } as any)
+    expect(shown.text).toContain('지금 말랑이')
+    expect(shown.text).toContain('말랑이 | 삐삐 | 둥실 | 섞기')
+    expect((await $.command.run({ command: 'board', args: '캐릭터 고양이' } as any)).text).toContain('고를 수 있는 값')
+    expect((await $.command.run({ command: 'board', args: '캐릭터 둥실' } as any)).text).toBe('카드 캐릭터를 둥실(으)로 바꿨어요.')
+    expect(store.get('look')).toBe('ghost')
+    expect((await $.command.run({ command: 'board', args: 'look mix' } as any)).text).toBe('세션 이름으로 캐릭터와 색을 섞어요.')
+    expect(store.get('look')).toBe('mix')
+    expect((await $.command.run({ command: 'board', args: 'look' } as any)).text).toContain('지금 섞기')
+  })
+})
+
+describe('리더 왕관 (T43)', () => {
+  const peer = (id: string, name: string, updatedAt = 1_000_000) => ({ ...emptyBeat(id, name, '/repo/a'), updatedAt })
+  test('SendMessage 받는 이름을 보드의 다른 세션 id 로, ref 는 떼고 보드에 없는 이름은 null', () => {
+    const list = [peer('me', 'devflow1'), peer('s1', 'devflow-sub')]
+    expect(leadTarget('devflow-sub', list, 'me')).toBe('s1')
+    expect(leadTarget('devflow-sub [5cd459]', list, 'me')).toBe('s1')
+    expect(leadTarget('devflow1', list, 'me')).toBeNull()
+    expect(leadTarget('researcher', list, 'me')).toBeNull()
+    expect(leadTarget('main', list, 'me')).toBeNull()
+    // 나에게 일을 맡긴 리더에게 보내는 결과 보고는 리더로 치지 않는다
+    const led = [peer('me', 'devflow-sub'), { ...peer('L', 'devflow1'), leads: ['me'] }]
+    expect(leadTarget('devflow1', led, 'me')).toBeNull()
+  })
+  test('살아 있는 팀메이트에 일을 맡겼으면 왕관, 팀메이트가 없거나 소식없음이면 보조가 도는 동안만', () => {
+    const now = 1_000_000
+    const sub = peer('s1', 'devflow-sub', now)
+    const lead = { ...peer('me', 'devflow1', now), leads: ['s1'] }
+    expect(crowned(lead, [lead, sub], now)).toBe(true)
+    expect(crowned(lead, [lead], now)).toBe(false)
+    expect(crowned(lead, [lead, { ...sub, updatedAt: 0 }], now)).toBe(false)
+    const plain = peer('x', 'solo', now)
+    expect(crowned(plain, [plain], now)).toBe(false)
+    const helping = { ...plain, agents: [{ id: 'a1', desc: '검수', type: 'agent', model: '', status: 'working' as const, tool: '', startedAt: now, endedAt: null, tokens: 0 }] }
+    expect(crowned(helping, [helping], now)).toBe(true)
+  })
+  test('보드의 다른 세션에 SendMessage 하면 leads 에 남고 카드 캐릭터에 왕관', async ($, on) => {
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    const files = new Map<string, string>()
+    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'working' })))
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('tool.call', () => ({ result: 'ok' }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+
+    // 보드에 없는 이름(보조 에이전트)은 리더로 치지 않는다
+    await $.tool.call({ tool: 'SendMessage', to: 'researcher', message: 'x' } as any)
+    await $.tool.call({ tool: 'SendMessage', to: 'sub-2 [5cd459]', message: '조각 맡김' } as any)
+    await clock.advance(3_000)
+    const mine = JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    expect(mine.leads).toEqual(['peer'])
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    const crowns = (await pane.findAll({ type: 'Raster' })).map(r => {
+      const bytes = Uint8Array.from(atob(String(r.props.cells)), c => c.charCodeAt(0))
+      return Array.from(new Uint32Array(bytes.buffer)).includes(0xfde047)
+    })
+    // 내 카드만 왕관, 맡겨진 sub-2 는 맨머리
+    expect(crowns.filter(Boolean).length).toBe(1)
+    expect(crowns.length).toBe(2)
+    // 머리가 한 줄뿐이어도 왕관 카드는 4행, 왕관 없는 짧은 카드는 3행
+    expect((await pane.findAll({ type: 'Raster' })).map(r => r.props.rows).sort()).toEqual([3, 4])
+  })
+  test('작업 중 타일만 0.8초마다 blit 으로 프레임을 바꾸고, 거부되면(패널 닫힘) 멈춘다', async ($, on) => {
+    const DIR = '/home/me/.claude/team-board/repo-order-svc'
+    const files = new Map<string, string>()
+    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'working' })))
+    files.set(`${DIR}/idle.json`, JSON.stringify(beat({ id: 'idle', name: 'sub-3', state: 'idle' })))
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    const blits: { key: string; cells: string }[] = []
+    let mounted = true
+    on('ui.blit', ($, e: any) => {
+      blits.push({ key: e.key, cells: e.cells })
+      return { value: mounted ? {} : { deny: 'not mounted' } }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await clock.advance(3_000)
+
+    await $.command.run({ command: 'board', args: '' } as any)
+    const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
+    const first = (await pane.findAll({ type: 'Raster' })).length
+    expect(first).toBe(3)
+    blits.length = 0
+    await clock.advance(800)
+    // 작업 중인 sub-2 만, 대기 중인 sub-3·이 세션은 칠하지 않는다
+    expect(blits.map(b => b.key)).toEqual(['icon-peer'])
+    await clock.advance(800)
+    expect(blits.length).toBe(2)
+    expect(blits[0]!.cells).not.toBe(blits[1]!.cells)
+    mounted = false
+    await clock.advance(800)
+    await clock.advance(800)
+    expect(blits.length).toBe(3)
   })
 })

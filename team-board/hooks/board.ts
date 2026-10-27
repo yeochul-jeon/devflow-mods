@@ -461,6 +461,22 @@ export function waitsOnAgents(b: Beat): boolean {
   return b.state === 'idle' && b.agents.some(a => a.status === 'working')
 }
 
+/** 왕관 (T43): 보드에 살아 있는 팀메이트 세션에 일을 맡긴 리더. 그런 팀메이트가 없으면 보조 에이전트가 도는 동안만 */
+export function crowned(b: Beat, list: readonly Beat[], now: number): boolean {
+  const led = (b.leads ?? []).some(id => list.some(p => p.id === id && !isStale(p, now)))
+  return led || b.agents.some(a => a.status === 'working')
+}
+
+/**
+ * SendMessage 의 받는 이름을 보드의 다른 세션 id 로. `이름 [ref]` 의 ref 는 뗀다. 보드에 없는 이름(보조 에이전트, main)은 null.
+ * 상대가 이미 나에게 일을 맡겼으면 이것은 답장(결과 보고)이라 null: 먼저 맡긴 쪽만 리더
+ */
+export function leadTarget(to: string, list: readonly Beat[], selfId: string): string | null {
+  const name = to.replace(/\s*\[[^\]]*\]\s*$/, '').trim()
+  const peer = list.find(p => p.id !== selfId && p.name === name)
+  return peer && !(peer.leads ?? []).includes(selfId) ? peer.id : null
+}
+
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
   if (s < 60) return `${s}초 전`
