@@ -280,7 +280,7 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 
 ## 📝 prompt-coach: 초안 다듬기
 
-<img src="docs/images/prompt-coach-question.webp" alt="초안 place_order 재고 해제 고쳐줘 에 대해 prompt-coach 가 객관식 질문 1/2 를 띄운 띠" width="760">
+<img src="docs/images/prompt-coach-question.webp" alt="초안 place_order 재고 해제 고쳐줘 에 대해 prompt-coach 가 객관식 질문 1/3 을 띄운 띠" width="760">
 
 옵션별 그림과 사용 예는 [prompt-coach/README.md](prompt-coach/README.md)를 보세요.
 

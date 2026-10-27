@@ -21,7 +21,7 @@ claude plugin install prompt-coach@devflow-mods
   2. 다시 쓰기: 답을 넣어 목표 → 맥락 → 조건 → 완료 기준 순으로 다시 쓰고 입력창을 바꿉니다.
 - 질문하는 동안 입력창은 비워 둡니다. 초안은 띠의 `초안` 줄에 보입니다. 입력창이 비어 있어서 숫자 키로 답할 수 있습니다.
 
-<img src="../docs/images/prompt-coach-question.webp" alt="띠에 초안과 질문 1/2 어떤 증상으로 재고 해제가 잘못되고 있나요? 와 선택지 1~3, 0 건너뛰기, 9 바로 다듬기" width="760">
+<img src="../docs/images/prompt-coach-question.webp" alt="띠에 초안과 질문 1/3 어떤 증상으로 재고가 잘못 해제되나요? 와 선택지 1~3, 0 건너뛰기, 9 바로 다듬기" width="760">
 
 | 질문 중 입력 | 동작 |
 | --- | --- |
@@ -34,7 +34,7 @@ claude plugin install prompt-coach@devflow-mods
 
 - 다시 쓴 뒤 띠에 `답 n · 제안 n` 과 보탠 것이 보입니다. 초록은 답에서 온 것, 노랑은 Haiku가 스스로 보탠 결과 모양이나 완료 확인입니다. 고치거나 그대로 보내세요.
 
-<img src="../docs/images/prompt-coach-result.webp" alt="입력창에 증상·완료 기준이 붙은 다듬은 글, 띠에 답 2 와 초록색 보탠 것 두 줄, [ 되돌리기 ]" width="760">
+<img src="../docs/images/prompt-coach-result.webp" alt="입력창에 증상·제약·완료 기준이 붙은 다듬은 글, 띠에 답 2 · 제안 1 과 초록색 답 두 개·노랑 제안 하나, [ 되돌리기 ]" width="760">
 
 이럴 때: 다시 쓴 글에서 노란 제안이 원하는 것과 다르면 그 줄만 고쳐 보냅니다.
 
@@ -74,7 +74,7 @@ claude plugin install prompt-coach@devflow-mods
 
 켜면 입력창에서 보낼 때마다 먼저 묻고 다듬습니다. 보낸 글은 바로 Claude에게 가지 않고(`Prompt dropped by a hook` 이 보입니다) 띠에서 질문이 시작됩니다. 그대로 보내려면 맨 앞에 `>` 를 붙이세요. 기본은 꺼짐이고, 모든 세션에 같이 적용됩니다.
 
-<img src="../docs/images/prompt-coach-auto.webp" alt="자동 모드 켜짐 안내, 보낸 초안이 Prompt dropped by a hook 으로 멈추고 띠에 질문 1/2" width="760">
+<img src="../docs/images/prompt-coach-auto.webp" alt="자동 모드 켜짐 안내, 보낸 초안이 Prompt dropped by a hook 으로 멈추고 띠에 질문 1/3" width="760">
 
 이럴 때: 요청을 짧게 쓰는 버릇이 있어 매번 다듬기를 누르기 번거로울 때 켭니다.
 
