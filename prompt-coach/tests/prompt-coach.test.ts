@@ -93,6 +93,13 @@ const PEEK = {
   },
 }
 
+const PEEK_TICK = {
+  name: 'peek-tick',
+  register(on: any) {
+    on('tool.call', { tool: 'PeekTick' }, async ($: any) => ({ result: JSON.stringify(await $.state.get({ plugin: 'prompt-coach', key: 'tick' })) }))
+  },
+}
+
 const TEAM_BOARD = {
   name: 'team-board',
   register(on: any) {
@@ -108,14 +115,16 @@ describe('prompt-coach 흐름', () => {
   const setup = async ($: any, on: any) => {
     mock.store(on)
     const clock = mock.clock(on, { now: 1_800_000_000_000 })
-    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false }
+    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
     on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
     on('model.complete', ($: any, e: any) => {
       s.asked.push(e)
-      if (s.hold) return new Promise(() => {})
       const reply = e.system.includes('<questions>') ? s.qReply : s.rReply
-      return { value: typeof reply === 'string' ? { isAnswered: true, text: reply, usage: USAGE } : reply }
+      const value = typeof reply === 'string' ? { isAnswered: true, text: reply, usage: USAGE } : reply
+      // 붙잡은 답은 s.release() 로 보낸다
+      if (s.hold) return new Promise(r => { s.release = () => r({ value }) })
+      return { value }
     })
     on('prompt.fill', ($: any, e: any) => { s.fills.push(e.text); s.box = e.text; return { isFilled: true } })
     on('prompt.read', () => ({ value: { text: s.box, cursor: s.box.length } }))
@@ -177,12 +186,24 @@ describe('prompt-coach 흐름', () => {
     }
     expect(await gap(10)).toBe(1)
     expect(await gap(2)).toBe(0)
+    // 아래 띠와 나누는 끝줄: 흐린 ─ 줄이 다른 mod 띠 바로 앞에 오고, 그 아래 빈 줄. 띠에 줄이 모자라면 빈 줄만 뺀다
+    const foot = async (maxRows: number) => {
+      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
+      const kids = ((await band.find({ type: 'Box' })) as any).children
+      await band.unmount()
+      const f = kids[kids.length - 2]
+      return { line: f.type === 'Box' && f.children[0].props.dimColor === true && f.children[0].children[0] === '─'.repeat(120), gap: f.props.marginBottom, restLast: JSON.stringify(kids[kids.length - 1]).includes('OTHER-MOD-BAND') }
+    }
+    expect(await foot(10)).toEqual({ line: true, gap: 1, restLast: true })
+    expect(await foot(2)).toEqual({ line: true, gap: 0, restLast: true })
     await press('coach-refine')
     expect(s.box).toBe('') // 숫자 키로 답하도록 비운다
     expect(await text(/OTHER-MOD-BAND/)).toBe(true)
+    expect(await foot(10)).toEqual({ line: true, gap: 1, restLast: true }) // 질문 단계
     await press('coach-now')
     expect(s.asked[1].prompt).toContain('<answers>\n\n</answers>')
     expect(s.box).toBe(REFINED)
+    expect(await foot(10)).toEqual({ line: true, gap: 1, restLast: true }) // 입력창에 넣음 단계
   })
 
   test('숫자 키: 선택지 1~, 건너뛰기 0, 바로 다듬기 9. 좁은 띠에서는 초안 줄과 직접 쓰기 안내를 뺀다', async ($, on) => {
@@ -435,6 +456,75 @@ describe('prompt-coach 흐름', () => {
     expect(await peek()).toBe('prompt-coach: 범위는?')
     await press('coach-skip')
     expect(await peek()).toBeNull()
+  })
+
+  // 띠 머리 줄: 회색 가로줄 안에 노랑 스피너 Text 하나, 그 뒤 ' 단계 N초'
+  const spin = async (band: any) => {
+    const head = (await band.find({ type: 'Text', text: /prompt-coach/ })) as any
+    const kids = head.children as any[]
+    return { frame: kids[1].children[0] as string, color: kids[1].props.color, status: kids[2] as string }
+  }
+
+  test('변환 중: 가로줄 끝에 스피너 + 단계 + 경과 초. 틱이 원자를 올려 그려 둔 띠가 다시 그려진다', async ($, on) => {
+    const { s, clock, settle, coach, mount, press } = await setup($, on)
+    s.hold = true
+    await coach(DRAFT)
+    const band = await mount()
+    const first = await spin(band)
+    expect(first).toEqual({ frame: '⠋', color: 'yellow', status: ' 질문 만드는 중 0초' })
+    await clock.advance(150)
+    await settle()
+    const next = await spin(band)
+    expect(next.frame).toBe('⠙') // 같은 띠: 다시 마운트하지 않아도 바뀐다
+    expect(next.status).toBe(' 질문 만드는 중 0초')
+    await clock.advance(1000)
+    await settle()
+    expect((await spin(band)).status).toBe(' 질문 만드는 중 1초')
+    await band.unmount()
+    // 다듬기 단계는 그 단계 시작부터 센다
+    s.hold = false
+    await $.command.run({ command: 'coach', args: 'cancel', origin: { kind: 'plugin' } } as any)
+    await settle()
+    s.box = ''
+    await coach(DRAFT)
+    s.hold = true
+    await clock.advance(5000)
+    await settle()
+    await press('coach-now')
+    const again = await mount()
+    expect((await spin(again)).status).toBe(' 다듬는 중 0초')
+    await again.unmount()
+  })
+
+  test('변환이 끝나거나(질문으로 넘어감) 취소하면 틱이 멈춰 원자를 더 쓰지 않는다', { plugins: [PEEK_TICK] }, async ($, on) => {
+    const { s, clock, settle, coach, run, text } = await setup($, on)
+    const peek = async () => (JSON.parse((await $.tool.call({ tool: 'PeekTick' } as any) as any).result).value ?? 0) as number
+    // 질문 만드는 중 → 질문 단계
+    s.hold = true
+    await coach(DRAFT)
+    await clock.advance(450)
+    await settle()
+    expect(await peek()).toBe(3) // 도는 중에는 150ms 마다 오른다
+    s.release()
+    await settle()
+    expect(await text(/질문 1\/2$/)).toBe(true)
+    const atQuestions = await peek()
+    await clock.advance(1500)
+    await settle()
+    expect(await peek()).toBe(atQuestions)
+    await run('coach', 'cancel')
+    await settle()
+    // 질문 만드는 중 취소
+    await coach(DRAFT)
+    await clock.advance(450)
+    await settle()
+    expect(await peek()).toBe(atQuestions + 3)
+    await run('coach', 'cancel')
+    await settle()
+    const stopped = await peek()
+    await clock.advance(1500)
+    await settle()
+    expect(await peek()).toBe(stopped)
   })
 
   test('질문 중 > 로 시작한 글은 새 요청: 다듬기를 그만두고 > 를 벗겨 보낸 뒤 초안을 입력창에 돌려놓는다', async ($, on) => {

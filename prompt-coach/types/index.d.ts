@@ -19,7 +19,8 @@ export type CoachEntry = { at: number; draft: string; refined: string; added: Ad
  */
 export type CoachFlow =
   | { stage: 'idle' }
-  | { stage: 'asking' | 'rewriting'; draft: string }
+  /** since: 이 단계를 시작한 시각($.clock.now()). 띠가 경과 초를 보인다. */
+  | { stage: 'asking' | 'rewriting'; draft: string; since: number }
   | { stage: 'questions'; draft: string; questions: Question[]; answers: (string | null)[] }
   | { stage: 'done'; added: Added[] }
 
@@ -43,6 +44,8 @@ declare module 'claude-code' {
       history: CoachEntry[]
       /** 상세 패널에서 고른 기록의 순번(0 이 최신). */
       pick: number
+      /** 변환 중 스피너의 틱 수. 오를 때마다 띠를 다시 그린다. */
+      tick: number
     }
     /** 읽기만 한다. team-board 가 없으면 오지 않는다. team-board/types/index.d.ts 의 Beat 에서 쓰는 필드만 */
     'team-board': { me: { state: string; question: string } | null }

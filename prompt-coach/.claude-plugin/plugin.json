@@ -1,6 +1,6 @@
 {
   "name": "prompt-coach",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "보내기 전 초안의 빈 곳을 객관식으로 묻고 답을 넣어 다시 써서 입력창에 채움 (Haiku 2회): 입력창 위 [다듬기] 또는 /coach <초안>, /coach view 상세 패널, /coach auto on 이면 보낼 때마다 먼저 물음",
   "author": {
     "name": "yeochul-jeon",

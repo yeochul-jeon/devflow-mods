@@ -2,7 +2,7 @@
 // /coach <초안> 또는 입력창 위 [다듬기].
 // 아이디어: yuk7392/prompt-coach 의 Refine (MIT), Tristen O'Brien 의 Prompt Upgrade. 코드는 새로 썼다.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { CoachBand, CoachEntry, CoachFlow, Spent } from '../types'
 import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort } from './refine'
@@ -22,6 +22,14 @@ const pending = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null a
 const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as const, false)
 const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as CoachEntry[])
 const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
+const tick = atom({ plugin: 'prompt-coach', key: 'tick' } as const, 0)
+
+/** 변환 중 띠의 스피너: 프레임(cli-spinners dots), 주기, 색(질문 번호와 같은 노랑). */
+const SPIN_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+const SPIN_MS = 150
+const SPIN_COLOR = 'yellow'
+/** 변환 중에만 돈다. 틱 콜백은 겹쳐 돌 수 있어 원자 하나만 쓴다. */
+let spinner: Timer | null = null
 
 /** 자동 모드 설정. 모든 세션이 같은 값을 쓴다. */
 const AUTO_KEY = 'auto-on'
@@ -338,22 +346,44 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     // 바로 위 대화 기록과 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
     const isOn = await read($, auto)
-    const head = (status = '') => (
-      <Box marginTop={e.props.maxRows >= 3 ? 1 : 0}>
-        <Text color="gray" wrap="truncate-end">{rule(width, status || (isOn ? '자동' : ''))}</Text>
+    // spin 이 있으면 상태 앞에 노랑 스피너를 둔다
+    const head = (status = '', spin = '') => {
+      const tail = spin ? `${spin} ${status}` : status || (isOn ? '자동' : '')
+      const line = rule(width, tail)
+      return (
+        <Box marginTop={e.props.maxRows >= 3 ? 1 : 0}>
+          {spin ? (
+            <Text color="gray" wrap="truncate-end">
+              {line.slice(0, line.length - tail.length)}
+              <Text color={SPIN_COLOR}>{spin}</Text>
+              {` ${status}`}
+            </Text>
+          ) : (
+            <Text color="gray" wrap="truncate-end">{line}</Text>
+          )}
+        </Box>
+      )
+    }
+    // 아래 띠(team-board 상자 등)와 나눈다: 머리줄보다 약한 흐린 줄 + 빈 줄. 줄이 모자라면 빈 줄을 뺀다
+    const foot = () => (
+      <Box key="coach-foot" marginBottom={e.props.maxRows >= 3 ? 1 : 0}>
+        <Text color="gray" dimColor wrap="truncate-end">{'─'.repeat(width)}</Text>
       </Box>
     )
     const cancelButton = <Button key="coach-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
     const undoButton = before !== '' ? <Button key="coach-undo" label="되돌리기" onPress={() => void undoBox($)} /> : null
 
     if (f.stage === 'asking' || f.stage === 'rewriting') {
+      const n = await read($, tick)
+      const secs = Math.floor(((await $.clock.now()) - f.since) / 1000)
       return (
         <Box flexDirection="column">
-          {head(f.stage === 'asking' ? '질문 만드는 중' : '다듬는 중')}
+          {head(`${f.stage === 'asking' ? '질문 만드는 중' : '다듬는 중'} ${secs}초`, SPIN_FRAMES[n % SPIN_FRAMES.length])}
           <Box flexDirection="row" columnGap={2} paddingX={1}>
             <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
             {cancelButton}
           </Box>
+          {foot()}
           {rest}
         </Box>
       )
@@ -379,6 +409,7 @@ export const register: Register = on => {
             {cancelButton}
           </Box>
           {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
+          {foot()}
           {rest}
         </Box>
       )
@@ -398,6 +429,7 @@ export const register: Register = on => {
             {undoButton}
             <Text dimColor wrap="truncate-end">초록 답 · 노랑 제안 · 고치거나 그대로 보내세요</Text>
           </Box>
+          {foot()}
           {rest}
         </Box>
       )
@@ -412,6 +444,7 @@ export const register: Register = on => {
           {undoButton}
           <Text dimColor wrap="truncate-end">빈 곳을 몇 개 묻고 다듬어요 (Haiku)</Text>
         </Box>
+        {foot()}
         {rest}
       </Box>
     )
@@ -426,6 +459,13 @@ function unloaded(err: unknown): void {
 /** 흐름을 바꾸고, 답을 기다리는 질문을 team-board 가 읽는 곳에 맞춘다. 입력창을 채우기 전에 비워야 보낸 글이 그 질문의 답으로 기록되지 않는다. */
 async function setFlow($: EngineInterface, next: CoachFlow): Promise<void> {
   await update($, flow, () => next)
+  // 변환 중에만 스피너를 돌린다. 질문 만들기 → 다듬기는 이어서 돈다
+  const busy = next.stage === 'asking' || next.stage === 'rewriting'
+  if (busy && !spinner) spinner = $.clock.every(SPIN_MS, () => void update($, tick, n => n + 1).catch(unloaded))
+  if (!busy && spinner) {
+    spinner.cancel()
+    spinner = null
+  }
   const q = next.stage === 'questions' ? next.questions[next.answers.length]?.q : undefined
   const waiting = q === undefined ? null : `prompt-coach: ${q}`
   if ((await read($, pending)) !== waiting) await update($, pending, () => waiting)
@@ -507,7 +547,7 @@ async function begin($: EngineInterface, draft: string): Promise<string | null> 
   if (tooShort(draft)) return '초안이 너무 짧아요 (공백 빼고 12자 이상).'
   const stage = (await read($, flow)).stage
   if (stage !== 'idle' && stage !== 'done') return '이미 다듬는 중이에요. 띠에서 끝내거나 /coach cancel 하세요.'
-  await setFlow($, { stage: 'asking', draft })
+  await setFlow($, { stage: 'asking', draft, since: await $.clock.now() })
   await clearBox($)
   // 모듈을 내리면(다시 불러오기·종료) 기다리던 호출이 reject 된다. 다시 불러온 쪽의 session.start 가 초안을 돌려준다
   void ask($, draft).catch(unloaded)
@@ -547,7 +587,7 @@ function given(questions: readonly { q: string }[], answers: readonly (string | 
 }
 
 async function rewrite($: EngineInterface, draft: string, answers: readonly Answer[]): Promise<void> {
-  await setFlow($, { stage: 'rewriting', draft })
+  await setFlow($, { stage: 'rewriting', draft, since: await $.clock.now() })
   const r = await complete($, buildRewrite(draft, answers))
   if (!(await still($, 'rewriting', draft))) return
   if (!r.isDone) return fail($, draft, r.why)
