@@ -87,7 +87,7 @@ import {
   visible,
   withMe,
 } from './board'
-import { commandKey, formatAlert, isVerify, judge, masksIn, noteForClaude, redact, signLine } from './failure'
+import { commandKey, formatAlert, isVerify, judge, masksIn, noteForClaude, redact, reruns, signLine } from './failure'
 import { bar, contextTone, mix, paletteOf } from './palette'
 import { cells as widthOf, clip as widthClip, flowArt, parseExplain, parseSte } from './diagram'
 import { character, characterOf, mixHex, parseLook, snapHex, SPECIES_NAME, type Look, type Pose } from './pixel'
@@ -865,7 +865,7 @@ export const register: Register = (on, options) => {
     const prev = self.beat.fail
     if (!alert) {
       // 실패 코드를 가리는 명령이 출력 없이 끝나면 통과했는지 알 수 없어 지우지 않는다
-      if (prev && prev.key === commandKey(e.command) && (text.trim() || !masksIn(e.command).length)) await save($, { fail: null }, true)
+      if (prev && reruns(prev.key, e.command) && (text.trim() || !masksIn(e.command).length)) await save($, { fail: null }, true)
       return ran
     }
     const timeline = pushCapped(self.beat.timeline, event(at, 'fail', `${alert.key} · ${signLine(alert.signs[0] ?? '')}`), MAX_TIMELINE)

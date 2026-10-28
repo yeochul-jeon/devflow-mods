@@ -69,7 +69,7 @@ import {
 import { bar, contextTone, mix, paletteOf } from '../hooks/palette'
 import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JSON_SPEC } from '../hooks/diagram'
 import { character, characterOf, HUES, parseLook, snapHex } from '../hooks/pixel'
-import { commandKey, isReadOnly, isVerify, judge, masksIn, noteForClaude, redact, scanOutput } from '../hooks/failure'
+import { commandKey, isReadOnly, isVerify, judge, masksIn, noteForClaude, redact, reruns, scanOutput } from '../hooks/failure'
 
 // 알약 바탕: 상태색을 카드 바탕 쪽으로 30% (위 줄 배지와 구분, T27 D2)
 const chip = (tone: 'ask' | 'work') => mix(paletteOf('night')[tone], paletteOf('night').card, 0.3)
@@ -1149,6 +1149,14 @@ describe('숨은 실패', () => {
     expect(judge('f=docs/a.md; grep -n Failures "$f"', '46: Tests run: 538, Failures: 1', 1)).toBeNull()
     expect(judge('c=$(./gradlew test 2>&1); echo "$c"', 'BUILD FAILED in 3s', 1)?.level).toBe('high')
     expect(commandKey('f=x; ./gradlew test')).toBe('./gradlew test')
+  })
+
+  test('다시 돌렸는지는 모든 단계를 경로 없이 비교한다. 읽기 전용 단계와 다른 스크립트는 아니다', async () => {
+    expect(reruns('python3 scripts/check.py', "python3 - <<'EOF'\nx\nEOF\npython3 gen.py && python3 check.py")).toBe(true)
+    expect(reruns('./gradlew test', 'cd api && ../gradlew test -q')).toBe(true)
+    expect(reruns('python3 scripts/check.py', 'python3 scripts/other.py')).toBe(false)
+    expect(reruns('python3 scripts/check.py', 'cat scripts/check.py')).toBe(false)
+    expect(reruns('docker compose', 'docker compose logs app')).toBe(false)
   })
 
   test('team-board 상태 파일을 다시 출력하는 명령은 판정하지 않는다', async () => {
@@ -2304,6 +2312,11 @@ describe('팀 상황판', () => {
     await $.tool.call({ tool: 'Bash', command: 'docker compose logs --no-log-prefix app --tail 30', tool_use_id: 'b9' } as any)
     expect(mine().fail).toMatchObject({ level: 'high', key: 'docker compose' })
     await $.tool.call({ tool: 'Bash', command: 'docker compose run --rm app ./gradlew test', tool_use_id: 'b10' } as any)
+    expect(mine().fail).toBeNull()
+    // 고치는 단계 뒤에, 다른 폴더에서 같은 스크립트를 다시 돌려도 같은 명령이다
+    await $.tool.call({ tool: 'Bash', command: "cd /r/diagrams && cat > scripts/check.py <<'EOF'\nprint(1)\nEOF\npython3 scripts/check.py 2>&1 | tail -3", tool_use_id: 'b11' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: 'python3 scripts/check.py' })
+    await $.tool.call({ tool: 'Bash', command: "cd /r/diagrams/scripts && python3 - <<'EOF'\nopen('check.py','w')\nEOF\nset -o pipefail; python3 gen.py | diff - sizes.txt && python3 check.py", tool_use_id: 'b12' } as any)
     expect(mine().fail).toBeNull()
 
     expect((await $.command.run({ command: 'board', args: 'band solo off' } as any)).text).toContain('숨겨요')

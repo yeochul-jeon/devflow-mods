@@ -122,9 +122,21 @@ export function isVerify(command: string): boolean {
  * 모두 읽기 전용이면 '' 를 돌려준다. 저장된 키는 판정한 명령에서만 나와 비지 않으므로, 읽기 전용 명령은 어떤 저장된 키와도 같지 않다.
  */
 export function commandKey(command: string): string {
-  const all = steps(command)
-  const words = (all.find(s => !READ_ONLY.test(s)) ?? '').split(/\s+/)
+  return stepKey(steps(command).find(s => !READ_ONLY.test(s)) ?? '')
+}
+
+function stepKey(step: string): string {
+  const words = step.split(/\s+/)
   return redact(words.slice(0, ['run', '-m', 'exec'].includes(words[1] ?? '') ? 3 : 2).join(' '))
+}
+
+/**
+ * 저장된 실패 키의 명령을 다시 돌렸는지: 읽기 전용이 아닌 단계 중 하나라도 키가 같으면 true.
+ * 앞에 고치는 단계(`python3 - <<'EOF'`)가 있어도, 다른 폴더에서 돌려도(`python3 scripts/a.py` · `python3 a.py`) 같은 명령이다.
+ */
+export function reruns(key: string, command: string): boolean {
+  const base = (k: string) => k.split(' ').map(w => w.replace(/^.*\//, '')).join(' ')
+  return steps(command).some(s => !READ_ONLY.test(s) && base(stepKey(s)) === base(key))
 }
 
 function fullLine(text: string, index: number): string {

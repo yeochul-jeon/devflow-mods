@@ -307,6 +307,8 @@ team-board가 숨은 실패를 찾으면 아래와 같이 알립니다.
 - 저장하는 명령과 실패 흔적에서 비밀 값을 `***` 로 가립니다. 대상: token·password 변수, `Authorization` 헤더, URL 비밀번호, `sk-`·`ghp_` 같은 토큰
 - 같은 명령이 실패 흔적 없이 다시 실행되면 표시를 지웁니다. 출력이 없어도 지웁니다. `|| true` 처럼 실패 코드를 가리는 명령은 출력이 있을 때만 지웁니다.
 - 같은 명령인지는 앞 두 낱말로 판단합니다. 예: `./gradlew test --tests X` → `./gradlew test`
+- 명령의 어느 단계에서 다시 돌려도 같은 명령입니다(0.29.8). 예: 스크립트를 고치는 `python3 - <<'EOF'` 다음에 `python3 check.py` 를 돌린 경우
+- 경로는 떼고 파일 이름으로 비교합니다(0.29.8). 예: `python3 scripts/check.py` 와 폴더를 옮겨 돌린 `python3 check.py` 는 같은 명령입니다.
 - 둘째 낱말이 `run`, `-m`, `exec` 이면 세 낱말로 판단합니다. 예: `npm run lint`, `python -m pytest`
 - 앞의 `cd`, `echo` 같은 단계는 건너뜁니다.
 - `/clear`·`/resume` 하면 그 세션의 표시를 지웁니다(0.29.2). 지난 대화의 명령이기 때문입니다.
