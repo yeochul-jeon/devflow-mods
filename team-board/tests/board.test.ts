@@ -1255,7 +1255,7 @@ describe('프롬프트 캐시', () => {
     expect(cacheWarn(five(2), NOW)).toBe(true)
     expect(cacheWarn(five(3), NOW)).toBe(false)
     expect(cacheTtl(undefined, undefined, [{ percentUsed: 16 }, { percentUsed: 58 }])).toBe(60 * 60_000)
-    expect(cacheTtl(undefined, undefined, [])).toBe(5 * 60_000)
+    expect(cacheTtl(undefined, undefined, [])).toBe(60 * 60_000) // 한도 창 없음: Team·Enterprise 일 수 있어 모름 → 1시간
     expect(cacheTtl(undefined, undefined, [{ percentUsed: 100 }])).toBe(5 * 60_000) // 한도 밖(추가 사용량)
     expect(cacheTtl('5m', '1h', [{ percentUsed: 1 }])).toBe(5 * 60_000) // 환경 변수가 설정보다 먼저
     expect(cacheTtl('/home/me', '1h', [])).toBe(60 * 60_000) // 모르는 값은 건너뛴다
@@ -1342,14 +1342,18 @@ describe('프롬프트 캐시', () => {
     await answer('t3')
     expect(mine().cacheAt).toBe(NOW + 51 * 60_000)
 
-    // API 키처럼 rateLimits 가 비면 5분, 설정 promptCacheTtl 이 있으면 그 값 (0.29.11)
+    // 한도 창이 없으면 구독인지 모르므로 1시간 (0.29.12), 한도 밖이면 5분, 설정 promptCacheTtl 이 있으면 그 값 (0.29.11)
     limits = []
     await step()
     await answer('t3b')
+    expect(mine().cacheTtl).toBe(60 * 60_000)
+    limits = [{ kind: 'five_hour', percentUsed: 100 }]
+    await step()
+    await answer('t3c')
     expect(mine().cacheTtl).toBe(5 * 60_000)
     ttlSetting = '1h'
     await step()
-    await answer('t3c')
+    await answer('t3d')
     expect(mine().cacheTtl).toBe(60 * 60_000)
 
     // /clear 도 새 대화다

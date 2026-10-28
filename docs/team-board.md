@@ -417,11 +417,12 @@ macOS에서만 동작합니다. 기본은 켜짐입니다.
 - 마지막 메인 스레드 모델 요청부터 그 세션의 캐시 수명을 셉니다(0.29.11). 수명은 Claude Code 와 같은 순서로 정합니다.
   - 환경 변수 `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m`·`1h`)
   - 설정 `promptCacheTtl` (`5m`·`1h`)
-  - 둘 다 없으면 사용 한도 안의 구독 1시간, API 키·Bedrock·Vertex·Foundry 5분. 구독인지는 Claude Code 가 알려 주는 사용 한도 창(5시간·주간)이 있는지로 봅니다. 어느 창이든 100% 면(추가 사용량) 5분입니다.
+  - 둘 다 없으면 Claude Code 는 claude.ai 로그인(개인 구독·Team·Enterprise)이면 1시간, 추가 사용량을 쓰는 중이거나 API 키·Bedrock·Vertex·Foundry 면 5분을 씁니다. mods 는 로그인 종류를 알 수 없어서, team-board 는 사용 한도 창(5시간·주간) 중 어느 창이든 100% 면 5분, 그 밖은 1시간으로 봅니다(0.29.12).
 - 서브에이전트 요청은 세지 않습니다.
 - compact나 `/clear` 뒤에는 다음 요청까지 표시하지 않습니다.
 - 아래 경우에는 남은 시간을 알 수 없습니다.
   - CLAUDE.md, 도구 목록, effort가 바뀌어 캐시가 깨진 경우
+  - API 키·Bedrock·Vertex·Foundry 세션: 1시간으로 셉니다. 실제 5분이면 `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` 이나 설정 `promptCacheTtl: "5m"` 을 주면 맞게 셉니다.
 - 아이디어는 [cache-watch](https://github.com/ishuagrawal/cache-watch)와 [cache-tax](https://github.com/karanb192/cache-tax)에서 얻었습니다. 코드는 새로 썼습니다.
 
 ## 색 바꾸기

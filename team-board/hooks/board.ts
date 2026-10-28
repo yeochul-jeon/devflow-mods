@@ -26,7 +26,9 @@ export const CACHE_WARN_MS = 10 * 60_000
 /**
  * 캐시 수명(ms). Claude Code 설정 promptCacheTtl 의 설명대로: 환경 변수 CLAUDE_CODE_PROMPT_CACHE_TTL → 설정 promptCacheTtl
  * ("5m" | "1h") → 자동 (사용 한도 안의 구독 1시간, API 키·Bedrock·Vertex·Foundry 5분).
- * 구독인지는 session.usage 의 rateLimits 로 본다: 창이 있으면 구독, 어느 창이든 100% 면 한도 밖(추가 사용량)이라 5분.
+ * 엔진(2.1.312)은 claude.ai 로그인이면 Team·Enterprise 도 1시간, 추가 사용량을 쓰는 중이면 5분이다. mods API 는 로그인 종류를 주지 않는다.
+ * 그래서 session.usage 의 rateLimits 어느 창이든 100% 면 한도 밖이라 5분, 그 밖은 1시간으로 본다.
+ * 창이 없으면 API 키일 수도, 한도 창이 없는 회사 계정일 수도 있어 1시간(0.29.11 이전과 같음)으로 둔다.
  * rateLimits 는 첫 모델 요청 뒤에 채워진다 (2026-10-29 실측: session.start 에서 [], 첫 turn.step 뒤 five_hour·seven_day).
  */
 export function cacheTtl(envTtl: unknown, settingTtl: unknown, rateLimits: readonly { percentUsed: number }[]): number {
@@ -34,7 +36,7 @@ export function cacheTtl(envTtl: unknown, settingTtl: unknown, rateLimits: reado
     if (v === '1h') return CACHE_TTL_MS
     if (v === '5m') return 5 * 60_000
   }
-  return rateLimits.length && rateLimits.every(r => r.percentUsed < 100) ? CACHE_TTL_MS : 5 * 60_000
+  return rateLimits.some(r => r.percentUsed >= 100) ? 5 * 60_000 : CACHE_TTL_MS
 }
 
 /** 캐시가 남은 시간(ms). 기록이 없으면 null, 만료됐으면 0 이하. */
