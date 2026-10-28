@@ -156,8 +156,10 @@ export function scanOutput(text: string): Finding[] {
     if (out.some(f => f.label === rule.label)) continue
     const all = new RegExp(rule.pattern.source, rule.pattern.flags.replace('g', '') + 'g')
     for (const m of body.matchAll(all)) {
-      if (REGEX_SOURCE.test(fullLine(body, m.index))) continue
-      out.push({ label: rule.label, severity: rule.severity, line: lineAround(body, m.index) })
+      // `^\s*` 는 앞 빈 줄의 줄바꿈부터 맞을 수 있다: 첫 글자 자리로 옮겨 그 줄을 본다 (빈 흔적 줄이 찍혔다)
+      const at = m.index + m[0].search(/\S/)
+      if (REGEX_SOURCE.test(fullLine(body, at))) continue
+      out.push({ label: rule.label, severity: rule.severity, line: lineAround(body, at) })
       break
     }
   }

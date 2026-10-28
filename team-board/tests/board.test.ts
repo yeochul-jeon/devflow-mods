@@ -917,6 +917,11 @@ describe('숨은 실패', () => {
     expect(scanOutput('***************************\nAPPLICATION FAILED TO START\n***************************')[0]!.label).toBe('Spring 기동 실패')
   })
 
+  test('빈 줄 뒤의 실패 줄도 흔적 줄로 그 줄을 보인다 (빈 흔적 줄이 찍혔다)', async () => {
+    expect(scanOutput('ok\n\nFAIL: broken')).toEqual([{ label: 'FAIL 표시', severity: 'high', line: 'FAIL: broken' }])
+    expect(scanOutput('ok\n\n  Error: bad')).toEqual([{ label: '오류 줄', severity: 'high', line: 'Error: bad' }])
+  })
+
   test('통과 요약과 0 건은 조용하다', async () => {
     expect(scanOutput('Tests run: 42, Failures: 0, Errors: 0, Skipped: 0\nBUILD SUCCESSFUL in 9s')).toEqual([])
     expect(scanOutput('12 tests completed, 0 failed')).toEqual([])
@@ -2258,12 +2263,14 @@ describe('팀 상황판', () => {
     for (const w of ['/board band hud | line', '/board sound test', '/board fail clear', '/board name <이름>']) expect(help).toContain(w)
     expect((await $.command.run({ command: 'board', args: 'band blue' } as any)).text).toContain('모르는 옵션')
 
-    // /clear: 숨지 않고 대기로. 결정 기록은 남고 대기 질문·할 일은 비운다
+    // /clear: 숨지 않고 대기로. 결정 기록은 남고 대기 질문·할 일·숨은 실패는 비운다
+    await $.tool.call({ tool: 'Bash', command: './gradlew test 2>&1 | tail -5', tool_use_id: 'b11' } as any)
+    expect(mine().fail).toMatchObject({ level: 'high', key: './gradlew test' })
     await $.turn.complete({ reason: 'answer', answer: '배포를 오늘 할까요?', durationMs: 1, isAborted: false, turnId: 't9' } as any)
     expect(mine().state).toBe('asking')
     const kept = mine().decisions.length
     await $.session.end({ reason: 'clear', sessionId: 'me', resume: {} } as any)
-    expect(mine()).toMatchObject({ state: 'idle', question: '', tasks: [] })
+    expect(mine()).toMatchObject({ state: 'idle', question: '', tasks: [], fail: null })
     expect(mine().decisions.length).toBe(kept)
     expect(mine().timeline.at(-1).kind).toBe('clear')
     await clock.advance(3_000)
