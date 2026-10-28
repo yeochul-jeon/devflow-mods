@@ -696,6 +696,7 @@ export const register: Register = (on, options) => {
 
   // /clear 와 같은 탭의 /resume 은 대화만 바뀌고 탭은 그대로다 (session.start 도 다시 오지 않음).
   // 그때는 숨기지 않고 대기로 두며, 결정 기록은 남기고 대기 질문과 할 일, 숨은 실패(지난 대화의 명령)는 비운다.
+  // ctx 는 턴이 끝날 때만 재므로 여기서 맞춘다: /clear 는 빈 대화라 0, /resume 은 옮긴 대화를 아직 몰라 null.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
       self.switchReason = e.reason
@@ -704,7 +705,7 @@ export const register: Register = (on, options) => {
         ? pushCapped(self.beat.timeline, event(at, 'clear', e.reason === 'clear' ? '/clear' : '/resume'), MAX_TIMELINE)
         : []
       self.askingSince = 0
-      await save($, { state: 'idle', step: '', question: '', last: '', prompt: '', tasks: [], timeline, cacheAt: null, fail: null }, true)
+      await save($, { state: 'idle', step: '', question: '', last: '', prompt: '', tasks: [], timeline, cacheAt: null, fail: null, contextPct: e.reason === 'clear' ? 0 : null }, true)
     } else {
       await save($, { state: 'ended' }, true)
     }

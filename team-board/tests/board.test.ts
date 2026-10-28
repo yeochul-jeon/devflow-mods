@@ -2269,8 +2269,10 @@ describe('팀 상황판', () => {
     await $.turn.complete({ reason: 'answer', answer: '배포를 오늘 할까요?', durationMs: 1, isAborted: false, turnId: 't9' } as any)
     expect(mine().state).toBe('asking')
     const kept = mine().decisions.length
+    expect(mine().contextPct).toBe(12)
     await $.session.end({ reason: 'clear', sessionId: 'me', resume: {} } as any)
-    expect(mine()).toMatchObject({ state: 'idle', question: '', tasks: [], fail: null })
+    // ctx 는 다음 턴이 끝나야 다시 재므로, /clear 가 비운 대화는 0 으로 둔다 (옛 12% 가 남던 것)
+    expect(mine()).toMatchObject({ state: 'idle', question: '', tasks: [], fail: null, contextPct: 0 })
     expect(mine().decisions.length).toBe(kept)
     expect(mine().timeline.at(-1).kind).toBe('clear')
     await clock.advance(3_000)
@@ -2284,6 +2286,8 @@ describe('팀 상황판', () => {
     // /resume 으로 다른 대화로 옮기면 그 대화의 이름을 쓴다. 이 이름을 그 대화에 옮겨 적지 않는다
     // (2026-10-20 F2: claude -c 가 옆 세션의 대화를 연 뒤 제 대화로 옮겼더니 옆 세션 이름이 남았다)
     await $.session.end({ reason: 'resume', sessionId: 'me-c', resume: {} } as any)
+    // 옮긴 대화의 ctx 는 다음 턴 전까지 모른다
+    expect(mine().contextPct).toBeNull()
     sid = 'other'
     titleLine = '"customTitle":"devflow1"\n'
     await clock.advance(3_000)
