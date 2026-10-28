@@ -1397,7 +1397,7 @@ describe('복귀 요약·세션 나이 (T34 D2·D4)', () => {
     expect(sinceLastPrompt(beat({ timeline: [{ at: T0, kind: 'prompt', text: 'x' }, { at: T0 + 1, kind: 'done', text: '끝' }] }))).toBeNull()
   })
 
-  test('보드 카드에 그새 줄(요청 5분 뒤부터), 자세히에 시작 시각', async ($, on) => {
+  test('보드 카드에 경과 줄(요청 5분 뒤부터), 자세히에 시작 시각', async ($, on) => {
     const DIR = '/home/me/.claude/team-board/repo-order-svc'
     const files = new Map<string, string>()
     files.set(`${DIR}/peer.json`, JSON.stringify(peer))
@@ -1426,8 +1426,8 @@ describe('복귀 요약·세션 나이 (T34 D2·D4)', () => {
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 100 } } as any)
     expect(await pane.find({ type: 'Text', text: '30분 전 요청 뒤 · ✓ 단계 2 · 파일 2 · ⚑ 질문 1 · ⚠ 실패 1' })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /^그새$/ })).toBeDefined()
-    // 요청한 지 5분이 안 된 세션은 그새 줄이 없다
+    expect(await pane.find({ type: 'Text', text: /^경과$/ })).toBeDefined()
+    // 요청한 지 5분이 안 된 세션은 경과 줄이 없다
     expect((await pane.findAll({ type: 'Text', text: /요청 뒤 · / })).length).toBe(1)
     await pane.unmount()
 
@@ -1951,6 +1951,8 @@ describe('팀 상황판', () => {
     expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined()
     // 기본은 HUD 창: 머리줄 + 세션 칸
     expect(await band.find({ type: 'Text', text: /◆ TEAM 2/ })).toBeDefined()
+    // 머리줄 칩 줄은 좁으면 다음 줄로 넘긴다 (55칸에서 칩이 글자마다 쪼개졌다)
+    expect((await band.findAll({ type: 'Box' })).find(x => x.key === 'band-chips')?.props.flexWrap).toBe('wrap')
     expect(await band.find({ type: 'Text', text: /^ 결정 1 $/ })).toBeDefined()
     // 머리줄에 세션 단계 합계 막대는 없다 (T25: 서로 다른 작업의 단계를 더한 수라 뜻이 없었다)
     expect(await band.find({ type: 'Text', text: /^[▰▱]{8}$/ })).toBeUndefined()
@@ -2578,7 +2580,9 @@ describe('보조 에이전트 (hook)', () => {
     expect(await pane.find({ type: 'Text', text: /● 보조 1/ })).toBeDefined()
     // 메인 턴은 끝났어도 보조가 돌면 대기가 아니라 보조 기다림
     expect(await pane.find({ type: 'Text', text: /^◐ 보조 기다림 1$/ })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /^○ 대기 0$/ })).toBeDefined()
+    // 0 인 칩은 그리지 않는다 (띠와 같이)
+    expect(await pane.find({ type: 'Text', text: /^○ 대기/ })).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: /^● 작업/ })).toBeUndefined()
     expect(await pane.find({ type: 'Text', text: /^ 보조 기다림 $/ })).toBeDefined()
     await pane.unmount()
     const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)

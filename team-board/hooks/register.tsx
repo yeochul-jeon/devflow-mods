@@ -1230,7 +1230,8 @@ export const register: Register = (on, options) => {
     const hud = (
       <Box flexDirection="column" borderStyle="double" borderColor={asking ? pal.ask : fails ? pal.bad : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
         <Box flexDirection="row" justifyContent="space-between">
-          <Box flexDirection="row" columnGap={2} flexShrink={1}>
+          {/* 좁은 폭(55칸)에서 칩이 줄어 글자마다 줄이 바뀌던 것을 막는다: 칩은 그대로 두고 남는 칩은 다음 줄로 */}
+          <Box key="band-chips" flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={1}>
             <Text color={pal.accent} bold>{`◆ TEAM ${list.length}`}</Text>
             {asking ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 ${asking} `}</Text> : null}
             {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
@@ -1558,7 +1559,7 @@ export const register: Register = (on, options) => {
     const sinceRow = (b: Beat) => {
       const s = sinceLastPrompt(b)
       if (!s || now - s.at < 5 * 60_000) return null
-      return row('그새', <Text color={pal.text} wrap="truncate-end">{sinceText(s, now)}</Text>, `since-${b.id}`)
+      return row('경과', <Text color={pal.text} wrap="truncate-end">{sinceText(s, now)}</Text>, `since-${b.id}`)
     }
 
     // 설명 상자 안쪽 폭: 패널 폭에서 패널·카드·상자의 테두리와 여백, 들여쓰기를 뺀다.
@@ -1921,9 +1922,9 @@ export const register: Register = (on, options) => {
           {list.some(b => b.fail?.level === 'high' && !isStale(b, now)) ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 숨은 실패 ${list.filter(b => b.fail?.level === 'high' && !isStale(b, now)).length} `}</Text> : null}
           {list.some(b => b.unverified && !isStale(b, now)) ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` △ 검증 없음 ${list.filter(b => b.unverified && !isStale(b, now)).length} `}</Text> : null}
           {overlapped ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` ⚠ 겹침 ${overlapped} `}</Text> : null}
-          <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text>
+          {count('working') ? <Text color={pal.work}>{`● 작업 ${count('working')}`}</Text> : null}
           {waiting ? <Text color={pal.work}>{`◐ 보조 기다림 ${waiting}`}</Text> : null}
-          <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text>
+          {count('idle') ? <Text color={pal.dim}>{`○ 대기 ${count('idle')}`}</Text> : null}
           {helpers ? <Text color={pal.work}>{`● 보조 ${helpers}`}</Text> : null}
         </Box>
 
