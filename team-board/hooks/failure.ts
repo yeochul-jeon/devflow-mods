@@ -91,6 +91,8 @@ function steps(command: string): string[] {
     // { } · ( ) 묶음은 벗긴다: `{ ls; find …; }`, `( cd x && grep … )`. 짝 없는 닫는 괄호만 지워 `$(date)` 는 그대로
     .map(s => s.trim().replace(/^[{(]\s*/, '').replace(/\s*}$/, ''))
     .map(s => (s.split(')').length > s.split('(').length ? s.replace(/\s*\)$/, '') : s))
+    // `env -u X -i` 앞붙이는 변수 앞붙이와 같이 벗긴다: `env -u TMUX tmux …` → `tmux …`
+    .map(s => s.replace(/^env(?:\s+(?:-u\s+\S+|-i|-))*\s+(?=\S)/, ''))
     .map(s => s.replace(/^(?:[A-Za-z_]\w*=(?!\S*(?:\$\(|`))\S*(?:\s+|$))+/, ''))
     // 셸 구문은 건너뛰고 안쪽 명령만 본다: `for f in …; do grep …; done`, `if [ -f x ]; then cat x; fi`
     .map(s => s.replace(/^(?:do|then|else|elif|if|until)\s+/, '').replace(/^(?:\/usr)?\/bin\//, ''))

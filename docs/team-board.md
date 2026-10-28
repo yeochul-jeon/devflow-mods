@@ -311,6 +311,7 @@ team-board가 숨은 실패를 찾으면 아래와 같이 알립니다.
 - 경로는 떼고 파일 이름으로 비교합니다(0.29.8). 예: `python3 scripts/check.py` 와 폴더를 옮겨 돌린 `python3 check.py` 는 같은 명령입니다.
 - 둘째 낱말이 `run`, `-m`, `exec` 이면 세 낱말로 판단합니다. 예: `npm run lint`, `python -m pytest`
 - 앞의 `cd`, `echo` 같은 단계는 건너뜁니다.
+- 명령 앞의 `env -u X`·`env -i`·`LANG=C` 같은 환경 앞붙이는 떼고 봅니다(0.29.10). 예: `env -u TMUX tmux send-keys …` → `tmux send-keys`
 - `/clear`·`/resume` 하면 그 세션의 표시를 지웁니다(0.29.2). 지난 대화의 명령이기 때문입니다.
 - 영어 출력만 판정합니다. Bash 도구만 봅니다.
 

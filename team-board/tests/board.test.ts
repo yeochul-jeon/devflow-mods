@@ -942,6 +942,12 @@ describe('숨은 실패', () => {
     expect(isReadOnly('LANG=C ./gradlew test')).toBe(false)
     expect(judge('tail -50 build.log', GRADLE, 1)).toBeNull()
     expect(commandKey('cd a && LANG=C ./gradlew test --info')).toBe('./gradlew test')
+    // env 앞붙이도 벗긴다 (2026-10-29 실화면: `env -u TMUX tmux …` 의 키가 `-u TMUX`)
+    expect(commandKey('env -u TMUX tmux send-keys -t x Enter')).toBe('tmux send-keys')
+    expect(commandKey('env -u TMUX -u TMUX_PANE TERM=xterm ./gradlew test')).toBe('./gradlew test')
+    expect(commandKey('env -i PATH=/bin ./gradlew test')).toBe('./gradlew test')
+    expect(isReadOnly('env LANG=C grep -n FAILED build.log')).toBe(true)
+    expect(reruns('tmux send-keys', 'env -u TMUX tmux send-keys -t y Up')).toBe(true)
     expect(masksIn('./gradlew test || true')).toHaveLength(1)
   })
 
