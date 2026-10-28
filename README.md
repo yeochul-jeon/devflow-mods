@@ -57,6 +57,7 @@ claude plugin install prompt-coach@devflow-mods   # 다듬을 때 Haiku 2회. �
 
 - `#stable` 은 릴리즈된 버전만 받습니다. 버전마다 변경 내역은 [Releases](https://github.com/yeochul-jeon/devflow-mods/releases) 에 있습니다. `#stable` 없이 추가하면 main 의 개발 중 버전을 받습니다.
 - 필요한 mod만 설치하세요.
+- 회사가 관리하는 Claude Code(Team·Enterprise)에서 쓰면 [점검 5단계](docs/enterprise-check.md)로 team-board 와 work-plan 이 도는지 확인해 주세요. 아직 그 환경에서 확인하지 못했습니다.
 - team-board는 사용자 범위(기본)로 설치하세요. 모든 세션과 워크트리에서 보여야 하기 때문입니다.
 - 한 프로젝트에만 쓰려면 그 프로젝트 폴더에서 `--scope local` 을 붙이세요.
 - 설치 중 `1 userConfig option not yet set` 이 보이면 `palette` 를 고르지 않은 상태입니다. 그대로 두면 `night` 로 동작합니다.
