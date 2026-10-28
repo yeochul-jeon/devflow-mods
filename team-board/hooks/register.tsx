@@ -447,7 +447,8 @@ const TITLE_EVERY_MS = 15_000
 /**
  * /clear·/resume 뒤에는 세션 id 와 대화 기록 파일이 바뀐다. 바뀌었으면 따라간다.
  * /clear 는 같은 대화가 이어지므로 직접 정한 이름(/board name, /rename)을 새 id 로 옮긴다.
- * /resume 은 다른 대화로 옮긴 것이라 그 대화의 이름을 쓴다.
+ * /resume 은 다른 대화로 옮긴 것이라 그 대화의 이름과 ctx 를 쓴다. ctx 는 id 가 바뀐 뒤에야 옮긴 대화의 값이 온다
+ * (session.end 때는 떠나는 대화의 값). /clear 한 빈 대화는 percent 가 없어서 session.end 에서 넣은 0 을 둔다.
  */
 async function followSessionId($: EngineInterface): Promise<void> {
   if (!self.sessionId) return
@@ -462,6 +463,9 @@ async function followSessionId($: EngineInterface): Promise<void> {
   self.titleCheckedAt = 0
   self.titleDone = false
   if (resumed && self.beat) {
+    const usage = await $.session.usage().catch(() => null)
+    const contextPct = usage?.context?.percent ?? null
+    if (contextPct !== null) await save($, { contextPct }, true)
     const repo = await $.session.repo()
     const name = await defaultName($, self.beat.cwd, repo?.root ?? null)
     if (name !== self.beat.name) {
@@ -696,7 +700,7 @@ export const register: Register = (on, options) => {
 
   // /clear 와 같은 탭의 /resume 은 대화만 바뀌고 탭은 그대로다 (session.start 도 다시 오지 않음).
   // 그때는 숨기지 않고 대기로 두며, 결정 기록은 남기고 대기 질문과 할 일, 숨은 실패(지난 대화의 명령)는 비운다.
-  // ctx 는 턴이 끝날 때만 재므로 여기서 맞춘다: /clear 는 빈 대화라 0, /resume 은 옮긴 대화를 아직 몰라 null.
+  // ctx 는 턴이 끝날 때만 재므로 여기서 맞춘다: /clear 는 빈 대화라 0, /resume 은 id 가 바뀐 뒤 followSessionId 가 채울 때까지 null.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
       self.switchReason = e.reason

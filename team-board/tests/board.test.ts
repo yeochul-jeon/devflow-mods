@@ -1759,7 +1759,10 @@ describe('팀 상황판', () => {
     mock.store(on)
     let asked = ''
     on('session.start', ($, e) => ({ cwd: e.cwd }))
-    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    // 엔진처럼 대화마다 값이 다르다: /clear 한 빈 대화(me-c)는 percent 가 없고, /resume 으로 연 대화(other)는 30%
+    on('session.usage', () => ({
+      value: { startedAt: 0, rateLimits: [], context: sid === 'me-c' ? { window: 200_000 } : { tokens: 24_000, window: 200_000, percent: sid === 'other' ? 30 : 12 } },
+    }))
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     let sid = 'me'
@@ -2283,15 +2286,17 @@ describe('팀 상황판', () => {
     sid = 'me-c'
     await clock.advance(3_000)
     expect(mine().name).toBe('api-fix')
+    expect(mine().contextPct).toBe(0)
     // /resume 으로 다른 대화로 옮기면 그 대화의 이름을 쓴다. 이 이름을 그 대화에 옮겨 적지 않는다
     // (2026-10-20 F2: claude -c 가 옆 세션의 대화를 연 뒤 제 대화로 옮겼더니 옆 세션 이름이 남았다)
     await $.session.end({ reason: 'resume', sessionId: 'me-c', resume: {} } as any)
-    // 옮긴 대화의 ctx 는 다음 턴 전까지 모른다
+    // session.end 때 usage 는 아직 떠나는 대화의 값이라 비워 두고, id 가 바뀐 뒤 옮긴 대화의 값을 읽는다
     expect(mine().contextPct).toBeNull()
     sid = 'other'
     titleLine = '"customTitle":"devflow1"\n'
     await clock.advance(3_000)
     expect(mine().name).toBe('devflow1')
+    expect(mine().contextPct).toBe(30)
     await clock.advance(15_000)
     expect(mine().name).toBe('devflow1')
     // 진짜 종료는 숨김
