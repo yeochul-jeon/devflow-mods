@@ -895,6 +895,20 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as Record<string, unknown>
     const main = !e.agentId
+    // 다른 mod 의 $.ui.ask 도 AskUserQuestion tool.call 로 온다 (next.origin.plugin 이 그 mod).
+    // 떠 있는 동안만 결정 필요로 보이고, 끝나면 앞 상태로 돌린다. 결정 기록은 Claude 의 질문만 (prompt-coach 질문과 같은 방식)
+    if (e.tool === 'AskUserQuestion' && next.origin.plugin !== 'engine') {
+      const b = self.beat
+      if (!b) return next(e)
+      const kept = { state: b.state, step: b.step, question: b.question }
+      const question = `${next.origin.plugin}: ${askUserText(input).split('\n')[0]?.replace(/^1\. /, '') ?? ''}`
+      await save($, { state: 'asking', step: '', question }, true)
+      try {
+        return await next(e)
+      } finally {
+        if (self.beat?.state === 'asking' && self.beat.question === question) await save($, kept, true)
+      }
+    }
     // 도구를 썼으면 답을 받아 일하는 중이다. 이제 중단해도 결정은 되돌리지 않는다
     self.undo = null
 

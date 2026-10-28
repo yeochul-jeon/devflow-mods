@@ -2976,6 +2976,60 @@ describe('prompt-coach 연동', () => {
   })
 })
 
+const ASKER = {
+  name: 'asker',
+  register(on: any) {
+    on('tool.call', { tool: 'AskProbe' }, async ($: any) => ({ result: await $.ui.ask('범위는?', ['변경 파일만', '전체']) }))
+  },
+}
+
+describe('다른 mod 의 $.ui.ask', () => {
+  test('떠 있는 동안만 결정 필요로 보이고 끝나면 앞 상태로. 결정 기록에는 넣지 않는다 (2026-10-29 실화면: 답한 뒤 "답변 반영 중" 에 멈춤)', { plugins: [ASKER] }, async ($, on) => {
+    const files = new Map<string, string>()
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', ($, e: any) => {
+      if (!files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
+      return { value: files.get(e.path)! }
+    })
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    on('turn.complete', () => ({ text: '' }))
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
+    let during: any = null
+    on('tool.call', { tool: 'AskUserQuestion' }, (_$, e: any) => {
+      during = mine()
+      return { result: { questions: e.questions, answers: { [e.questions[0].question]: '전체' } } } as any
+    })
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.prompt.submit({ text: '첫 요청', origin: { kind: 'composer' } } as any)
+    await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    expect(mine().state).toBe('idle')
+
+    const r: any = await $.tool.call({ tool: 'AskProbe' } as any)
+    expect(r.result).toBe('전체')
+    expect(during).toMatchObject({ state: 'asking', step: '', question: 'asker: 범위는?' })
+    expect(mine()).toMatchObject({ state: 'idle', question: '' })
+    expect(mine().decisions).toEqual([])
+
+    // Claude 의 질문은 그대로 결정으로 남는다
+    await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: '배포할까요?', header: '배포', options: [{ label: '예' }, { label: '아니오' }], multiSelect: false }], tool_use_id: 'q1' } as any)
+    expect(mine().decisions.map((d: any) => d.question)).toEqual(['배포할까요?'])
+  })
+})
+
 describe('자기 세션 표시', () => {
   test('띠와 보드는 자기 세션의 상태를 다음 파일 읽기(3초)를 기다리지 않고 바로 보인다. 이름(·2)은 그대로', { plugins: [PROMPT_COACH, WORK_PLAN] }, async ($, on) => {
     const files = new Map<string, string>()
