@@ -162,6 +162,9 @@ const self = {
   /** 세션 이름을 마지막으로 확인한 시각, 대화 기록 파일에서 이름을 찾았는지 */
   titleCheckedAt: 0,
   titleDone: false,
+  /** 엔진 세션 목록에서 이 프로세스의 파일 (~/.claude/sessions/<pid>.json, 주소 이름을 읽는 곳)과 마지막으로 읽은 시각 */
+  addrFile: '',
+  addrCheckedAt: 0,
   /** 세션 id 가 바뀌기 직전 session.end 의 이유 ('clear' | 'resume'). 바뀐 id 를 따라갈 때 쓰고 지운다 */
   switchReason: '',
   /** 숨은 실패 감지를 끔 (/board fail off) */
@@ -490,6 +493,41 @@ async function followTitle($: EngineInterface): Promise<void> {
 }
 
 /**
+ * 엔진이 이 세션을 부르는 이름(SendMessage 주소)을 beat.addr 에 둔다 (T46). 플러그인 API 에 없어서 엔진의 세션 목록 파일을 읽는다.
+ * 파일 이름은 프로세스 번호라 한 번 찾으면 그대로 쓰고, 이름은 /rename 으로 바뀔 수 있어 가끔 다시 읽는다.
+ */
+async function followAddr($: EngineInterface): Promise<void> {
+  if (!self.beat) return
+  const now = await $.clock.now()
+  if (now - self.addrCheckedAt < TITLE_EVERY_MS) return
+  self.addrCheckedAt = now
+  const sessionOf = async (path: string) => JSON.parse(await $.fs.read(path)) as { sessionId?: unknown; name?: unknown }
+  if (!self.addrFile) {
+    const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+    // 목록이 없는 실행(claude -p 등)도 있다. 그때는 보드 이름으로 비교한다
+    const entries = home ? await $.fs.list(`${home}/.claude/sessions`).catch(() => []) : []
+    for (const f of entries) {
+      if (f.kind !== 'file' || !f.name.endsWith('.json')) continue
+      const path = `${home}/.claude/sessions/${f.name}`
+      // 다른 프로세스가 쓰는 중이거나 막 지운 파일은 건너뛴다
+      const s = await sessionOf(path).catch(() => null)
+      if (s?.sessionId === self.sessionId) {
+        self.addrFile = path
+        break
+      }
+    }
+    if (!self.addrFile) return
+  }
+  const s = await sessionOf(self.addrFile).catch(() => null)
+  // 프로세스가 끝나 파일이 지워졌거나 번호가 다른 세션에 다시 쓰였으면 다음에 다시 찾는다
+  if (s?.sessionId !== self.sessionId) {
+    self.addrFile = ''
+    return
+  }
+  if (typeof s.name === 'string' && s.name && s.name !== self.beat.addr) await save($, { addr: s.name }, true)
+}
+
+/**
  * 기본 표시 이름: 직접 정한 이름(/board name) > 세션 이름(claude --name, /rename) > 워크트리 브랜치 > 폴더 이름.
  */
 async function defaultName($: EngineInterface, cwd: string, repoRoot: string | null): Promise<string> {
@@ -645,6 +683,7 @@ export const register: Register = (on, options) => {
       await maybeAlert($)
       await followSessionId($)
       await followTitle($)
+      await followAddr($)
     })
 
     await $.command.register({
@@ -829,6 +868,21 @@ export const register: Register = (on, options) => {
     return memo ? { ...ran, context: [...(ran.context ?? []), memo] } : ran
   })
 
+  // 다른 세션에 일을 맡기면 리더 (T43 왕관). 받는 이름이 보드의 세션이고 실제로 전해졌을 때만 (T46: 거절된 보내기는 치지 않는다)
+  on('session.send', async ($, e, next) => {
+    const r = await next(e)
+    if (r.isDelivered && e.origin.kind === 'model' && !e.agentId && self.beat) {
+      const peer = leadTarget(e.to, await read($, beats), self.beat.id)
+      const leads = self.beat.leads ?? []
+      // 한 응답에서 여러 세션에 동시에 보내면 이 훅이 겹친다. await 없이 바로 고쳐야 서로 덮지 않는다
+      if (peer && !leads.includes(peer)) {
+        self.beat.leads = [...leads, peer].slice(-8)
+        await save($, {})
+      }
+    }
+    return r
+  })
+
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as Record<string, unknown>
     const main = !e.agentId
@@ -862,12 +916,6 @@ export const register: Register = (on, options) => {
         await save($, { tasks, planEnded: false, planStartAt: undefined, step: cur ? `할 일: ${cur.subject}` : describeTool(e.tool, input) })
       }
       return r
-    }
-
-    // 다른 세션에 일을 맡기면 리더 (T43 왕관). 받는 이름이 보드의 세션일 때만
-    if (e.tool === 'SendMessage' && main && self.beat) {
-      const peer = leadTarget(String(input.to ?? ''), await read($, beats), self.beat.id)
-      if (peer && !(self.beat.leads ?? []).includes(peer)) await save($, { leads: [...(self.beat.leads ?? []), peer].slice(-8) })
     }
 
     if (e.tool === PLAN_TOOL) return next(e)

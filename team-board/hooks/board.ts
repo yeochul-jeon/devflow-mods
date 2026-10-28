@@ -469,11 +469,15 @@ export function crowned(b: Beat, list: readonly Beat[], now: number): boolean {
 
 /**
  * SendMessage 의 받는 이름을 보드의 다른 세션 id 로. `이름 [ref]` 의 ref 는 뗀다. 보드에 없는 이름(보조 에이전트, main)은 null.
+ * 받는 이름은 엔진 주소(addr)와 비교한다. 이름을 안 정한 세션은 엔진이 `폴더-2자리` 로 불러 보드 이름과 다르다 (T46). addr 없는 옛 파일은 보드 이름으로.
+ * 같은 주소의 살아 있는 세션이 둘이면 null.
  * 상대가 이미 나에게 일을 맡겼으면 이것은 답장(결과 보고)이라 null: 먼저 맡긴 쪽만 리더
  */
 export function leadTarget(to: string, list: readonly Beat[], selfId: string): string | null {
   const name = to.replace(/\s*\[[^\]]*\]\s*$/, '').trim()
-  const peer = list.find(p => p.id !== selfId && p.name === name)
+  const same = list.filter(p => p.id !== selfId && p.state !== 'ended' && (p.addr ?? p.name) === name)
+  // 같은 주소가 둘이면 떼어 낸 ref 없이는 어느 쪽인지 모른다
+  const peer = same.length === 1 ? same[0] : undefined
   return peer && !(peer.leads ?? []).includes(selfId) ? peer.id : null
 }
 

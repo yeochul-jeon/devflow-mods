@@ -83,6 +83,8 @@ export type Beat = {
   agents: SubAgent[]
   /** 이 세션이 SendMessage 로 일을 맡긴 팀메이트 세션 id. 왕관 기준 (T43, 0.29 전 파일에는 없음) */
   leads?: string[]
+  /** 엔진이 이 세션을 부르는 이름 (ListAgents·SendMessage 의 주소, `[ref]` 없이). 리더 판정에서 받는 이름과 비교 (T46, 0.29.3 전 파일에는 없음) */
+  addr?: string
   /** 마지막 메인 스레드 모델 요청 시각. 프롬프트 캐시 남은 시간의 기준 (compact·/clear 뒤엔 null) */
   cacheAt: number | null
   updatedAt: number

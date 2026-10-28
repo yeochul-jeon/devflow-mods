@@ -3176,6 +3176,15 @@ describe('리더 왕관 (T43)', () => {
     const led = [peer('me', 'devflow-sub'), { ...peer('L', 'devflow1'), leads: ['me'] }]
     expect(leadTarget('devflow1', led, 'me')).toBeNull()
   })
+  test('이름을 안 정한 세션은 엔진 주소(addr)로 찾고, 끝난 세션은 치지 않는다 (T46)', () => {
+    const list = [peer('me', 'devflow1'), { ...peer('s1', 'mate-b'), addr: 'mate-b-62' }, { ...peer('old', 'mate-b-9a'), state: 'ended' as const }]
+    expect(leadTarget('mate-b-62 [ce3473]', list, 'me')).toBe('s1')
+    // 보드 이름은 엔진 주소가 아니다
+    expect(leadTarget('mate-b', list, 'me')).toBeNull()
+    expect(leadTarget('mate-b-9a', list, 'me')).toBeNull()
+    // 같은 주소가 둘이면 어느 쪽인지 모른다
+    expect(leadTarget('mate-b-62', [...list, { ...peer('s2', 'other'), addr: 'mate-b-62' }], 'me')).toBeNull()
+  })
   test('살아 있는 팀메이트에 일을 맡겼으면 왕관, 팀메이트가 없거나 소식없음이면 보조가 도는 동안만', () => {
     const now = 1_000_000
     const sub = peer('s1', 'devflow-sub', now)
@@ -3188,10 +3197,14 @@ describe('리더 왕관 (T43)', () => {
     const helping = { ...plain, agents: [{ id: 'a1', desc: '검수', type: 'agent', model: '', status: 'working' as const, tool: '', startedAt: now, endedAt: null, tokens: 0 }] }
     expect(crowned(helping, [helping], now)).toBe(true)
   })
-  test('보드의 다른 세션에 SendMessage 하면 leads 에 남고 카드 캐릭터에 왕관', async ($, on) => {
+  test('보드의 다른 세션에 SendMessage 가 전해지면 leads 에 남고 카드 캐릭터에 왕관', async ($, on) => {
     const DIR = '/home/me/.claude/team-board/repo-order-svc'
     const files = new Map<string, string>()
-    files.set(`${DIR}/peer.json`, JSON.stringify(beat({ id: 'peer', name: 'sub-2', state: 'working' })))
+    files.set(`${DIR}/peer.json`, JSON.stringify({ ...beat({ id: 'peer', name: 'sub-2', state: 'working' }), addr: 'order-svc-62' }))
+    files.set(`${DIR}/peer2.json`, JSON.stringify({ ...beat({ id: 'peer2', name: 'sub-3', state: 'idle' }), addr: 'order-svc-7a' }))
+    // 엔진 세션 목록: 이 세션의 주소 이름은 여기서 읽는다
+    files.set('/home/me/.claude/sessions/111.json', JSON.stringify({ sessionId: 'other', name: 'order-svc-62' }))
+    files.set('/home/me/.claude/sessions/222.json', JSON.stringify({ sessionId: 'me', name: 'order-svc-1f', nameSource: 'derived' }))
     const clock = mock.clock(on, { now: NOW })
     mock.store(on)
     on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -3210,14 +3223,34 @@ describe('리더 왕관 (T43)', () => {
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('tool.call', () => ({ result: 'ok' }))
+    // 엔진: 정확한 주소만 전한다 (보드 이름 sub-2 는 주소가 아니라 거절). refuse 면 받는 쪽이 거부
+    let refuse = false
+    on('session.send', ($, e: any) => (!refuse && /^(order-svc-62|order-svc-7a|researcher)( \[|$)/.test(e.to) ? { isDelivered: true } : { isDelivered: false, reason: `No agent is named '${e.to}' exactly.` }))
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
-
-    // 보드에 없는 이름(보조 에이전트)은 리더로 치지 않는다
-    await $.tool.call({ tool: 'SendMessage', to: 'researcher', message: 'x' } as any)
-    await $.tool.call({ tool: 'SendMessage', to: 'sub-2 [5cd459]', message: '조각 맡김' } as any)
+    const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     await clock.advance(3_000)
-    const mine = JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
-    expect(mine.leads).toEqual(['peer'])
+    expect(mine().addr).toBe('order-svc-1f')
+
+    const send = (to: string) => $.session.send({ to, text: '조각 맡김', origin: { kind: 'model' } } as any)
+    // 보드에 없는 이름(보조 에이전트)과 거절된 보내기는 리더로 치지 않는다
+    await send('researcher')
+    expect(await send('sub-2')).toMatchObject({ isDelivered: false })
+    refuse = true
+    expect(await send('order-svc-62 [5cd459]')).toMatchObject({ isDelivered: false })
+    refuse = false
+    await clock.advance(3_000)
+    expect(mine().leads).toBeUndefined()
+    // 한 응답에서 두 세션에 동시에 보내도 둘 다 남는다
+    await Promise.all([send('order-svc-62 [5cd459]'), send('order-svc-7a')])
+    await clock.advance(3_000)
+    expect([...mine().leads].sort()).toEqual(['peer', 'peer2'])
+
+    // 엔진 목록 파일이 다른 세션 것이 되면(프로세스 끝, 번호 재사용) 다시 찾는다
+    files.set('/home/me/.claude/sessions/222.json', JSON.stringify({ sessionId: 'someone', name: 'x-00' }))
+    files.set('/home/me/.claude/sessions/333.json', JSON.stringify({ sessionId: 'me', name: 'order-svc-c4' }))
+    await clock.advance(16_000)
+    await clock.advance(16_000)
+    expect(mine().addr).toBe('order-svc-c4')
 
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
@@ -3225,11 +3258,11 @@ describe('리더 왕관 (T43)', () => {
       const bytes = Uint8Array.from(atob(String(r.props.cells)), c => c.charCodeAt(0))
       return Array.from(new Uint32Array(bytes.buffer)).includes(0xfde047)
     })
-    // 내 카드만 왕관, 맡겨진 sub-2 는 맨머리
+    // 내 카드만 왕관, 맡겨진 sub-2·sub-3 은 맨머리
     expect(crowns.filter(Boolean).length).toBe(1)
-    expect(crowns.length).toBe(2)
+    expect(crowns.length).toBe(3)
     // 머리가 한 줄뿐이어도 왕관 카드는 4행, 왕관 없는 짧은 카드는 3행
-    expect((await pane.findAll({ type: 'Raster' })).map(r => r.props.rows).sort()).toEqual([3, 4])
+    expect((await pane.findAll({ type: 'Raster' })).map(r => r.props.rows).sort()).toEqual([3, 3, 4])
   })
   test('작업 중 타일만 0.8초마다 blit 으로 프레임을 바꾸고, 거부되면(패널 닫힘) 멈춘다', async ($, on) => {
     const DIR = '/home/me/.claude/team-board/repo-order-svc'
