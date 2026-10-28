@@ -28,6 +28,7 @@ import {
   applyTaskTool,
   askUserText,
   bandLayout,
+  headLines,
   bandOrder,
   basename,
   cacheLeft,
@@ -638,9 +639,11 @@ export const register: Register = (on, options) => {
     self.failOff = (await $.store.get(FAIL_KEY)) === true
     self.transcript = `${home}/.claude/projects/${projectDirName(cwd)}/${self.sessionId}.jsonl`
     const prev = await read($, me)
+    // 처음 뜬 세션의 ctx: 새 대화는 usage 에 percent 가 없고(상태줄 0%), --resume·--continue 는 시작 때부터 그 대화의 값이 있다
+    const ctx = prev ? null : (await $.session.usage().catch(() => null))?.context
     self.beat = prev
       ? { ...prev, state: prev.state === 'ended' ? 'idle' : prev.state }
-      : { ...emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd), startedAt: await $.clock.now() }
+      : { ...emptyBeat(`${self.sessionId}-${crypto.randomUUID().slice(0, 8)}`, await defaultName($, cwd, repo?.root ?? null), cwd), startedAt: await $.clock.now(), contextPct: ctx ? ctx.percent ?? 0 : null }
     // 앞서 남긴 원문을 이어 쓴다 (없으면 처음부터)
     self.flow = prev ? await readFlow($, self.dir, self.beat.id) : {}
     // 다시 시작했으면 앞 프로세스의 보조 에이전트는 끝났다. 모듈만 다시 로드됐으면 엔진 목록에 남아 있다
@@ -1155,9 +1158,26 @@ export const register: Register = (on, options) => {
     // 숨은 실패: 결정 대기가 아니고 아직 풀리지 않은 실패(high)
     const failed = (b: Beat) => !isStale(b, now) && b.fail?.level === 'high'
     const fails = list.filter(failed).length
+    // 대기는 보조 기다림을 빼고 센다
+    const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now) && !(st === 'idle' && waitsOnAgents(b))).length
+    // 팀 전체에서 지금 도는 보조 에이전트 수
+    const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
+    // 창 모양 머리줄 칩. 그리는 것과 머리줄 줄 수 세기(headLines)가 같은 목록을 쓴다
+    const headChips = [
+      { text: `◆ TEAM ${list.length}`, color: pal.accent },
+      asking ? { text: ` 결정 ${asking} `, bg: pal.ask } : null,
+      fails ? { text: ` ⚠ 실패 ${fails} `, bg: pal.bad } : null,
+      count('working') ? { text: ` 작업 ${count('working')} `, bg: pal.work } : null,
+      count('idle') ? { text: ` 대기 ${count('idle')} `, bg: pal.dim } : null,
+      helpers ? { text: `보조 ${helpers}`, color: pal.work } : null,
+    ].filter(c => c !== null)
+    const columns = e.props.bodyColumns ?? 100
+    const maxRows = e.props.maxRows ?? 10
+    // 오른쪽 버튼 "[ 보드 /board ]"
+    const head = headLines(headChips.map(c => c.text), columns, widthOf('보드 /board') + 4)
 
-    // 한 줄 모양 (예전 띠): /board band line
-    if ((await read($, bandMode)) === 'line') {
+    // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양
+    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head)) {
       const chip = (b: Beat) => {
         const stale = isStale(b, now)
         const { done, total } = progress(b.tasks)
@@ -1189,15 +1209,11 @@ export const register: Register = (on, options) => {
 
     // 창(HUD) 모양: 위에 팀 요약, 아래에 세션 칸을 나란히 (세이브 슬롯처럼)
     // 세션 수·화면 크기에 맞춰 배치: 혼자면 한 줄, 많으면 칸을 한 줄로 줄이고 넘치면 +k
-    const layout = bandLayout(list.length, e.props.bodyColumns ?? 100, e.props.maxRows ?? 10)
+    const layout = bandLayout(list.length, columns, maxRows, head)
     const slotW = layout.slotW
     const ordered = bandOrder(list, now, self.beat?.id)
     const shown = ordered.slice(0, layout.shown)
     const hidden = ordered.length - shown.length
-    // 대기는 보조 기다림을 빼고 센다
-    const count = (st: Beat['state']) => list.filter(b => b.state === st && !isStale(b, now) && !(st === 'idle' && waitsOnAgents(b))).length
-    // 팀 전체에서 지금 도는 보조 에이전트 수
-    const helpers = list.filter(b => !isStale(b, now)).reduce((n, b) => n + agentCounts(b.agents).working, 0)
     const SEG = { done: pal.ok, now: pal.work, left: pal.dim, end: pal.text } as const
 
     const stateOf = (b: Beat) => {
@@ -1285,12 +1301,9 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" justifyContent="space-between">
           {/* 좁은 폭(55칸)에서 칩이 줄어 글자마다 줄이 바뀌던 것을 막는다: 칩은 그대로 두고 남는 칩은 다음 줄로 */}
           <Box key="band-chips" flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={1}>
-            <Text color={pal.accent} bold>{`◆ TEAM ${list.length}`}</Text>
-            {asking ? <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` 결정 ${asking} `}</Text> : null}
-            {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
-            {count('working') ? <Text backgroundColor={pal.work} color={pal.onBadge} bold>{` 작업 ${count('working')} `}</Text> : null}
-            {count('idle') ? <Text backgroundColor={pal.dim} color={pal.onBadge} bold>{` 대기 ${count('idle')} `}</Text> : null}
-            {helpers ? <Text color={pal.work} bold>{`보조 ${helpers}`}</Text> : null}
+            {headChips.map(c => ('bg' in c
+              ? <Text backgroundColor={c.bg} color={pal.onBadge} bold>{c.text}</Text>
+              : <Text color={c.color} bold>{c.text}</Text>))}
           </Box>
           <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
         </Box>

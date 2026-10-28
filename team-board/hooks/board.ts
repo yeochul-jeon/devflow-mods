@@ -795,13 +795,13 @@ export function projectDirName(cwd: string): string {
  */
 export type BandLayout = { mode: 'solo' | 'full' | 'compact'; slotW: number; shown: number }
 
-export function bandLayout(n: number, columns: number, maxRows: number): BandLayout {
+export function bandLayout(n: number, columns: number, maxRows: number, headLines = 1): BandLayout {
   const inner = Math.max(30, columns - 4)
   if (n <= 1) return { mode: 'solo', slotW: inner, shown: n }
   const fit = (min: number, max: number) => Math.max(min, Math.min(max, Math.floor((inner - (n - 1)) / n)))
   const perRow = (w: number) => Math.max(1, Math.floor((inner + 1) / (w + 1)))
-  // 테두리 2줄 + 머리줄 1줄을 뺀 높이
-  const room = Math.max(1, maxRows - 3)
+  // 테두리 2줄 + 머리줄(칩이 넘치면 2줄 이상)을 뺀 높이
+  const room = Math.max(1, maxRows - 2 - headLines)
 
   const fullW = fit(22, 34)
   const fullRows = Math.ceil(n / perRow(fullW))
@@ -814,6 +814,26 @@ export function bandLayout(n: number, columns: number, maxRows: number): BandLay
   const compactW = n <= capacityOf(w20) || capacityOf(w18) <= capacityOf(w20) ? w20 : w18
   const capacity = capacityOf(compactW)
   return { mode: 'compact', slotW: compactW, shown: n <= capacity ? n : Math.max(1, capacity - 1) }
+}
+
+/**
+ * 팀 창 머리줄이 차지하는 줄 수. 칩 상자는 오른쪽 버튼(buttonW 칸)을 뺀 폭에서 칩 단위로 다음 줄로 넘어간다 (칩 사이 2칸).
+ * 낮은 터미널에서 머리줄이 2줄이 되면 bandLayout 이 1줄로 세어 띠 아래가 잘렸다.
+ */
+export function headLines(chips: readonly string[], columns: number, buttonW: number): number {
+  const room = Math.max(1, Math.max(30, columns - 4) - buttonW)
+  let lines = 1
+  let used = 0
+  for (const chip of chips) {
+    const w = cells(chip)
+    if (used && used + 2 + w > room) {
+      lines += 1
+      used = w
+    } else {
+      used += (used ? 2 : 0) + w
+    }
+  }
+  return lines
 }
 
 /** 팀 창에 먼저 보일 순서: 결정 대기 > 숨은 실패 > 이 세션 > 작업중 > 보조 기다림 > 대기 > 소식 없음. */

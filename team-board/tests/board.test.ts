@@ -24,6 +24,7 @@ import {
   applyTaskTool,
   askUserText,
   bandLayout,
+  headLines,
   bandOrder,
   cacheLeft,
   cacheMinutes,
@@ -1155,6 +1156,15 @@ describe('숨은 실패', () => {
 })
 
 describe('팀 창 배치 (세션 수에 따라)', () => {
+  test('머리줄 줄 수: 버튼을 뺀 폭에서 칩 단위로 넘어간다 (칩 사이 2칸, 한글 2칸)', async () => {
+    const chips = ['◆ TEAM 8', ' 결정 1 ', ' ⚠ 실패 1 ', ' 작업 1 ', ' 대기 5 ']
+    // 60칸 터미널(띠 55칸): 칩 자리 55 - 4 - 15 = 36칸 → "◆ TEAM 8 · 결정 1 · ⚠ 실패 1" 30칸 뒤 작업 1 은 다음 줄
+    expect(headLines(chips, 55, 15)).toBe(2)
+    expect(headLines(chips, 160, 15)).toBe(1)
+    expect(headLines(['◆ TEAM 2'], 30, 15)).toBe(1)
+    // 칩 하나가 자리보다 넓어도 빈 줄을 세지 않는다
+    expect(headLines(['◆ TEAM 2', ' 결정 12345678901234567890 '], 40, 15)).toBe(2)
+  })
   test('혼자면 한 줄, 몇 개면 두 줄 칸, 많으면 한 줄 칸, 넘치면 +k', async () => {
     expect(bandLayout(1, 150, 10).mode).toBe('solo')
     const five = bandLayout(5, 150, 10)
@@ -1162,6 +1172,9 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
     expect(five.slotW).toBeGreaterThanOrEqual(22)
     expect(bandLayout(9, 150, 10)).toMatchObject({ mode: 'full', shown: 9 }) // 두 줄로 줄바꿈
     expect(bandLayout(9, 150, 6)).toMatchObject({ mode: 'compact', shown: 9 }) // 높이가 모자라면 한 줄 칸
+    // 머리줄이 2줄이면 그만큼 칸 높이가 줄어든다 (낮은 터미널에서 띠 아래가 잘리던 것)
+    expect(bandLayout(9, 150, 7)).toMatchObject({ mode: 'full', shown: 9 })
+    expect(bandLayout(9, 150, 7, 2)).toMatchObject({ mode: 'compact', shown: 9 })
     const many = bandLayout(30, 150, 10)
     expect(many.mode).toBe('compact')
     expect(many.shown).toBeLessThan(30)
@@ -1722,6 +1735,21 @@ describe('팀 창 배지', () => {
     const slots = (await low.findAll({ type: 'Box' })).filter(x => x.key?.startsWith('slot-'))
     expect(slots.map(x => x.props.width)).toEqual([18, 18, 18, 18, 18])
     await low.unmount()
+
+    // 더 좁으면 머리줄 칩(TEAM 5 · 작업 1 · 대기 3)이 2줄이 되어 칸 자리가 1줄 줄어든다: 높이 6줄에 칸 2줄 → 1줄
+    const tight = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 40 } } as any)
+    expect((await tight.findAll({ type: 'Box' })).filter(x => x.key?.startsWith('slot-'))).toHaveLength(1)
+    expect(await tight.find({ type: 'Text', text: /\+4 더 · \/board/ })).toBeDefined()
+    await tight.unmount()
+
+    // 테두리 2 + 머리줄 2 + 칸 1 = 5줄도 안 들어가면 한 줄 모양으로 그린다 (설정은 그대로 hud)
+    const lowest = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 40 } } as any)
+    expect(await lowest.find({ type: 'Text', text: /^ TEAM 5 $/ })).toBeDefined()
+    expect((await lowest.findAll({ type: 'Box' })).filter(x => x.key?.startsWith('slot-'))).toHaveLength(0)
+    await lowest.unmount()
+    const back = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns: 40 } } as any)
+    expect((await back.findAll({ type: 'Box' })).filter(x => x.key?.startsWith('slot-'))).toHaveLength(1)
+    await back.unmount()
   })
 })
 
@@ -1868,6 +1896,8 @@ describe('팀 상황판', () => {
     const myPath = [...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!
     const mine = () => JSON.parse(files.get(myPath)!)
     expect(mine().name).toBe('order-svc')
+    // --resume·--continue 로 연 대화처럼 시작 때 usage 에 percent 가 있으면 첫 턴 전에도 그 값
+    expect(mine().contextPct).toBe(12)
     expect(reads).toContain(`${DIR}/peer.json`)
     expect(reads).not.toContain(`${DIR}/old.json`)
 
@@ -2302,6 +2332,30 @@ describe('팀 상황판', () => {
     // 진짜 종료는 숨김
     await $.session.end({ reason: 'prompt_input_exit', sessionId: 'me', resume: {} } as any)
     expect(mine().state).toBe('ended')
+  })
+
+  test('새 세션은 첫 턴 전에도 ctx 0% (usage 에 percent 가 없음), 모듈만 다시 로드되면 저장된 값을 둔다', async ($, on) => {
+    const files = new Map<string, string>()
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    let context: { tokens?: number; window: number; percent?: number } = { window: 200_000 }
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context } }))
+    on('session.cwd', () => ({ value: '/repo/a' }))
+    on('session.repo', () => ({ value: { root: '/repo/a', remote: null, internal: false, name: 'a' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', () => ({ value: [] }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/a' } as any)
+    const mine = () => JSON.parse([...files.entries()].find(([k]) => /\/me-[0-9a-f]{8}\.json$/.test(k))![1])
+    expect(mine().contextPct).toBe(0)
+    context = { tokens: 80_000, window: 200_000, percent: 40 }
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/a' } as any)
+    expect(mine().contextPct).toBe(0)
   })
 })
 
