@@ -42,12 +42,13 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 
 | 항목 | 필요 여부 | 내용 |
 | --- | --- | --- |
-| Claude Code | 필수 | v2.1.311 이상을 권장합니다(실제로 돌려 확인한 버전). v2.1.290 부터 설치는 되지만 설치 검사만 통과한 버전이라 일부 기능이 조용히 빠질 수 있습니다. `claude --version` 으로 확인하세요. |
+| Claude Code | 필수 | v2.1.311 이상을 권장합니다(실제로 돌려 확인한 버전). v2.1.295 미만에서는 상황판·패널이 그려지지 않으니 그 이상을 쓰세요. `claude --version` 으로 확인하세요. |
 | git | 선택 (team-board) | 카드의 `변경` 줄과 워크트리 브랜치 이름을 읽습니다. 없거나 git 저장소가 아니면 그 줄만 빠집니다. |
 | 알림 소리 명령 | 선택 (team-board) | macOS 는 따로 설치할 것이 없습니다. Linux 는 `paplay`(PulseAudio) 또는 `aplay`(ALSA), Windows 는 PowerShell 로 소리를 냅니다. 없으면 소리만 나지 않습니다. |
 | `date` 명령 | 선택 (look-back) | 시스템 시간대를 읽어 날짜를 나눕니다. 없으면(Windows 기본 셸 등) UTC 기준으로 나눕니다. |
 
 - 설치되는 최소 버전(2.1.290)은 버전마다 `claude plugin validate` 로 모든 mod 를 검사해 정했습니다(2.1.286 ~ 2.1.312, 2026-10-28). 2.1.289 이하는 next-steps 를 거부하고, 나머지 mod 는 2.1.286 부터 통과합니다. 이 검사는 Claude Code 가 mod 를 받아 주는지만 보며, 결과 값이 비거나 동작이 다른 것은 잡지 못합니다.
+- 그래서 버전마다 각 mod 의 테스트(`claude plugin test`)도 돌렸습니다(2026-10-29). 2.1.300 이상은 모두 통과합니다. 2.1.295 ~ 2.1.299 는 team-board 의 보조 에이전트 대화 보기([보기])만 안 되고 나머지는 통과합니다. 2.1.294 이하는 글자를 품은 버튼이 있는 화면 전체를 Claude Code 가 그리지 않아 team-board·look-back·next-steps·prompt-coach 화면이 비고, 2.1.290 은 결정 대기 알림(`ui.notify`)도 없습니다. 데스크톱 앱에 들어 있는 Claude Code 는 2.1.308 이었습니다(이 기계, 2026-10-29).
 - 실제 화면 확인은 macOS 터미널, Claude Code 2.1.311 ~ 2.1.312 에서 했습니다. 데스크톱 앱 Code 탭에서도 mod 가 뜨는 것을 확인했습니다(2026-10-22). Linux·Windows 는 아직 실제로 확인하지 못했습니다.
 - mod 가 쓰는 Claude Code 기능은 아직 미리 보기 단계(EARLY ACCESS)라 새 버전에서 바뀔 수 있습니다. 새 버전에서 이상하면 [이슈](https://github.com/yeochul-jeon/devflow-mods/issues)로 알려 주세요.
 - tmux 는 필요 없습니다. tmux·python3 은 개발용 도구(`docs/tools`, 실화면 확인·스크린샷)만 씁니다.
