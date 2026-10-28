@@ -821,7 +821,24 @@ export function bandLayout(n: number, columns: number, maxRows: number, headLine
  * 낮은 터미널에서 머리줄이 2줄이 되면 bandLayout 이 1줄로 세어 띠 아래가 잘렸다.
  */
 export function headLines(chips: readonly string[], columns: number, buttonW: number): number {
-  const room = Math.max(1, Math.max(30, columns - 4) - buttonW)
+  return chipRows(chips, Math.max(1, Math.max(30, columns - 4) - buttonW))
+}
+
+/**
+ * 한 줄 모양 띠에 보일 세션 칩 수. 앞 칩(TEAM·실패), 세션 칩, 끝의 "/board"(가린 칩이 있으면 "+k 더 · /board")가
+ * rows 줄 안에 들어가는 만큼. 아주 낮은 창에서는 한 줄 모양도 줄이 바뀌어 엔진이 "↓ n more" 로 접었다.
+ */
+export function lineShown(lead: readonly string[], chips: readonly string[], columns: number, rows: number): number {
+  const room = Math.max(1, columns - 2)
+  for (let k = chips.length; k > 0; k--) {
+    const tail = k === chips.length ? '/board' : `+${chips.length - k} 더 · /board`
+    if (chipRows([...lead, ...chips.slice(0, k), tail], room) <= rows) return k
+  }
+  return 0
+}
+
+/** 칩들을 room 칸 폭에서 칩 단위로 줄을 바꾸면 몇 줄인지 (칩 사이 2칸). */
+function chipRows(chips: readonly string[], room: number): number {
   let lines = 1
   let used = 0
   for (const chip of chips) {

@@ -29,6 +29,7 @@ import {
   askUserText,
   bandLayout,
   headLines,
+  lineShown,
   bandOrder,
   basename,
   cacheLeft,
@@ -1178,30 +1179,46 @@ export const register: Register = (on, options) => {
 
     // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양
     if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head)) {
-      const chip = (b: Beat) => {
+      // 칩 글자. 그리는 것과 줄 수 세기(lineShown)가 같은 글자를 쓴다
+      const partsOf = (b: Beat) => {
         const stale = isStale(b, now)
         const { done, total } = progress(b.tasks)
-        const prog = total ? ` ${bar(done, total, 4)} ${done}/${total}` : ''
-        return b.state === 'asking' && !stale ? (
-          <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{` ${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${prog} `}</Text>
+        const base = `${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${total ? ` ${bar(done, total, 4)} ${done}/${total}` : ''}`
+        if (b.state === 'asking' && !stale) return { stale, ask: ` ${base} `, base: '', fail: '', cache: '' }
+        return { stale, ask: '', base, fail: failed(b) ? ' ⚠' : '', cache: !stale && cacheWarn(b, now) ? ` ${cacheText(cacheLeft(b.cacheAt, now))}` : '' }
+      }
+      const chip = (b: Beat) => {
+        const p = partsOf(b)
+        return p.ask ? (
+          <Text backgroundColor={pal.ask} color={pal.onBadge} bold>{p.ask}</Text>
         ) : (
-          <Text dimColor={stale}>
-            <Text color={tone(b)}>{`${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${prog}`}</Text>
-            {failed(b) ? <Text color={pal.bad} bold>{' ⚠'}</Text> : null}
-            {!stale && cacheWarn(b, now) ? <Text color={pal.ask}>{` ${cacheText(cacheLeft(b.cacheAt, now))}`}</Text> : null}
+          <Text dimColor={p.stale}>
+            <Text color={tone(b)}>{p.base}</Text>
+            {p.fail ? <Text color={pal.bad} bold>{p.fail}</Text> : null}
+            {p.cache ? <Text color={pal.ask}>{p.cache}</Text> : null}
           </Text>
         )
       }
+      const textOf = (b: Beat) => {
+        const p = partsOf(b)
+        return p.ask + p.base + p.fail + p.cache
+      }
+      const team = asking ? ` TEAM ${list.length} · 결정 ${asking} ` : ` TEAM ${list.length} `
+      const failChip = ` ⚠ 실패 ${fails} `
+      const lead = fails ? [team, failChip] : [team]
+      // 높이에 다 안 들어가면 중요한 세션부터 보이고 나머지는 +k (창 모양과 같은 순서)
+      const fitsAll = lineShown(lead, list.map(textOf), columns, maxRows) === list.length
+      const pick = fitsAll ? list : bandOrder(list, now, self.beat?.id)
+      const lineShownN = fitsAll ? list.length : lineShown(lead, pick.map(textOf), columns, maxRows)
+      const lineHidden = pick.length - lineShownN
       return (
         <Box flexDirection="column">
           {below}
           <Box flexDirection="row" columnGap={2} paddingX={1} flexWrap="wrap">
-            <Text backgroundColor={asking ? pal.ask : pal.accent} color={pal.onBadge} bold>
-              {asking ? ` TEAM ${list.length} · 결정 ${asking} ` : ` TEAM ${list.length} `}
-            </Text>
-            {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{` ⚠ 실패 ${fails} `}</Text> : null}
-            {list.map(chip)}
-            <Text color={pal.dim}>/board</Text>
+            <Text backgroundColor={asking ? pal.ask : pal.accent} color={pal.onBadge} bold>{team}</Text>
+            {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{failChip}</Text> : null}
+            {pick.slice(0, lineShownN).map(chip)}
+            <Text color={pal.dim}>{lineHidden ? `+${lineHidden} 더 · /board` : '/board'}</Text>
           </Box>
         </Box>
       )

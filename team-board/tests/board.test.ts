@@ -25,6 +25,7 @@ import {
   askUserText,
   bandLayout,
   headLines,
+  lineShown,
   bandOrder,
   cacheLeft,
   cacheMinutes,
@@ -1165,6 +1166,15 @@ describe('팀 창 배치 (세션 수에 따라)', () => {
     // 칩 하나가 자리보다 넓어도 빈 줄을 세지 않는다
     expect(headLines(['◆ TEAM 2', ' 결정 12345678901234567890 '], 40, 15)).toBe(2)
   })
+  test('한 줄 모양 칩 수: 줄 수 안에 들어가는 만큼, 가린 칩이 있으면 끝이 "+k 더 · /board"', async () => {
+    const chips = ['● a', '● b', '● c']
+    expect(lineShown([' TEAM 3 '], chips, 100, 1)).toBe(3)
+    // 폭 18칸: 한 줄에는 TEAM 과 "+k 더 · /board"(14칸)도 같이 못 들어간다 → 0, 두 줄이면 모두
+    expect(lineShown([' TEAM 3 '], chips, 20, 1)).toBe(0)
+    expect(lineShown([' TEAM 3 '], chips, 20, 2)).toBe(3)
+    // 폭 38칸 한 줄: TEAM(8) + ● a + "+2 더 · /board" 는 들어가고 ● b 까지는 안 들어간다
+    expect(lineShown([' TEAM 3 '], ['● a', '● bbbbbbbbbbbb', '● c'], 40, 1)).toBe(1)
+  })
   test('혼자면 한 줄, 몇 개면 두 줄 칸, 많으면 한 줄 칸, 넘치면 +k', async () => {
     expect(bandLayout(1, 150, 10).mode).toBe('solo')
     const five = bandLayout(5, 150, 10)
@@ -1750,6 +1760,17 @@ describe('팀 창 배지', () => {
     const back = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns: 40 } } as any)
     expect((await back.findAll({ type: 'Box' })).filter(x => x.key?.startsWith('slot-'))).toHaveLength(1)
     await back.unmount()
+    // 한 줄 모양도 줄이 넘치면 중요한 세션부터 (이 세션 → 작업중 → 대기), 나머지는 +k. 높이 1줄 · 폭 38칸에는 이 세션 하나
+    const oneRow = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 1, bodyColumns: 40 } } as any)
+    expect(await oneRow.find({ type: 'Text', text: /^○ order-svc\*$/ })).toBeDefined()
+    expect(await oneRow.find({ type: 'Text', text: /sub-w/ })).toBeUndefined()
+    expect(await oneRow.find({ type: 'Text', text: /^\+4 더 · \/board$/ })).toBeDefined()
+    await oneRow.unmount()
+    // 높이가 넉넉하면 전과 같이 모두, 끝은 /board
+    const roomy = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 40 } } as any)
+    for (const name of [/order-svc\*/, /sub-w/, /sub-c/, /sub-i/, /sub-z/]) expect(await roomy.find({ type: 'Text', text: name })).toBeDefined()
+    expect(await roomy.find({ type: 'Text', text: /^\/board$/ })).toBeDefined()
+    await roomy.unmount()
   })
 })
 
