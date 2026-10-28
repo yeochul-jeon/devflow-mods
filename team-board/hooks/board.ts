@@ -17,15 +17,29 @@ export function emptyBeat(id: string, name: string, cwd: string): Beat {
   }
 }
 
-// 프롬프트 캐시는 쓸 때마다 수명이 다시 시작된다. Claude Code 메인 세션은 1시간 캐시를 쓴다
+// 프롬프트 캐시는 쓸 때마다 수명이 다시 시작된다. Claude Code 메인 세션은 구독이면 1시간 캐시를 쓴다
 // (2026-10-12 대화 기록 실측: 캐시 쓰기 1h 678건, 5m 6건). mods API 는 캐시 수명을 알려 주지 않는다.
 export const CACHE_TTL_MS = 60 * 60_000
-/** 남은 시간이 이 이하면 띠에서 알린다. */
+/** 남은 시간이 이 이하면 띠에서 알린다. 5분 캐시는 수명의 절반 */
 export const CACHE_WARN_MS = 10 * 60_000
 
+/**
+ * 캐시 수명(ms). Claude Code 설정 promptCacheTtl 의 설명대로: 환경 변수 CLAUDE_CODE_PROMPT_CACHE_TTL → 설정 promptCacheTtl
+ * ("5m" | "1h") → 자동 (사용 한도 안의 구독 1시간, API 키·Bedrock·Vertex·Foundry 5분).
+ * 구독인지는 session.usage 의 rateLimits 로 본다: 창이 있으면 구독, 어느 창이든 100% 면 한도 밖(추가 사용량)이라 5분.
+ * rateLimits 는 첫 모델 요청 뒤에 채워진다 (2026-10-29 실측: session.start 에서 [], 첫 turn.step 뒤 five_hour·seven_day).
+ */
+export function cacheTtl(envTtl: unknown, settingTtl: unknown, rateLimits: readonly { percentUsed: number }[]): number {
+  for (const v of [envTtl, settingTtl]) {
+    if (v === '1h') return CACHE_TTL_MS
+    if (v === '5m') return 5 * 60_000
+  }
+  return rateLimits.length && rateLimits.every(r => r.percentUsed < 100) ? CACHE_TTL_MS : 5 * 60_000
+}
+
 /** 캐시가 남은 시간(ms). 기록이 없으면 null, 만료됐으면 0 이하. */
-export function cacheLeft(cacheAt: number | null, now: number): number | null {
-  return cacheAt === null ? null : CACHE_TTL_MS - (now - cacheAt)
+export function cacheLeft(cacheAt: number | null, now: number, ttl = CACHE_TTL_MS): number | null {
+  return cacheAt === null ? null : ttl - (now - cacheAt)
 }
 
 /** 보드에 쓰는 글: 분은 올림 (1분 미만도 1분). */
@@ -41,8 +55,9 @@ export function cacheMinutes(left: number): string {
 
 /** 띠에서 알릴지: 쉬는 세션의 캐시가 곧 만료될 때만. 일하는 중이면 곧 갱신되고, 이미 만료된 건 보드에만 둔다. */
 export function cacheWarn(b: Beat, now: number): boolean {
-  const left = cacheLeft(b.cacheAt, now)
-  return b.state !== 'working' && left !== null && left > 0 && left <= CACHE_WARN_MS
+  const ttl = b.cacheTtl ?? CACHE_TTL_MS
+  const left = cacheLeft(b.cacheAt, now, ttl)
+  return b.state !== 'working' && left !== null && left > 0 && left <= Math.min(CACHE_WARN_MS, ttl / 2)
 }
 
 /** 예전 버전이 쓴 파일도 읽을 수 있게 빈 칸을 채운다. */

@@ -33,6 +33,7 @@ import {
   bandOrder,
   basename,
   cacheLeft,
+  cacheTtl,
   cacheMinutes,
   cacheText,
   cacheWarn,
@@ -802,7 +803,18 @@ export const register: Register = (on, options) => {
   // 도구 호출 기록처럼 1.5초에 한 번까지만 쓰고, 미룬 것은 다음 틱에 쓴다.
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId) await save($, { cacheAt: await $.clock.now() })
-    return yield* next(e)
+    const r = yield* next(e)
+    // 캐시 수명은 계정·설정마다 다르다. 구독인지 알려 주는 rateLimits 는 첫 요청 뒤에 채워지므로 요청이 끝난 뒤에 잰다
+    // 답은 이미 나갔으므로 못 읽으면 앞 값을 두고 이유만 debug 로그에 남긴다
+    if (!e.agentId) {
+      try {
+        const ttl = cacheTtl(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'), await $.settings.read({ key: 'promptCacheTtl' }), (await $.session.usage()).rateLimits)
+        if (self.beat && self.beat.cacheTtl !== ttl) await save($, { cacheTtl: ttl })
+      } catch (err) {
+        $.ui.log(`team-board: 캐시 수명을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
+      }
+    }
+    return r
   })
 
   // 보조 에이전트(서브에이전트·워크플로·팀원)의 시작. 관찰만 하므로 실패해도 띄우기를 막지 않는다
@@ -1199,7 +1211,7 @@ export const register: Register = (on, options) => {
         const { done, total } = progress(b.tasks)
         const base = `${markOf(b)} ${b.name}${isMe(b) ? '*' : ''}${total ? ` ${bar(done, total, 4)} ${done}/${total}` : ''}`
         if (b.state === 'asking' && !stale) return { stale, ask: ` ${base} `, base: '', fail: '', cache: '' }
-        return { stale, ask: '', base, fail: failed(b) ? ' ⚠' : '', cache: !stale && cacheWarn(b, now) ? ` ${cacheText(cacheLeft(b.cacheAt, now))}` : '' }
+        return { stale, ask: '', base, fail: failed(b) ? ' ⚠' : '', cache: !stale && cacheWarn(b, now) ? ` ${cacheText(cacheLeft(b.cacheAt, now, b.cacheTtl))}` : '' }
       }
       const chip = (b: Beat) => {
         const p = partsOf(b)
@@ -1266,7 +1278,7 @@ export const register: Register = (on, options) => {
                 : [' 대기 ', pal.dim, pal.onBadge]
       return <Text backgroundColor={bg} color={fg} bold>{text}</Text>
     }
-    const minutesOf = (b: Beat) => <Text color={pal.ask}>{cacheMinutes(cacheLeft(b.cacheAt, now)!)}</Text>
+    const minutesOf = (b: Beat) => <Text color={pal.ask}>{cacheMinutes(cacheLeft(b.cacheAt, now, b.cacheTtl)!)}</Text>
 
     // 띠 칸의 알약 막대. 결정·실패는 secondOf 가 먼저 글로 보이므로 여기는 작업·멈춤·끝남만. 좁으면 null (경로선으로)
     const pillBarOf = (b: Beat, width: number) => {
@@ -1466,7 +1478,7 @@ export const register: Register = (on, options) => {
     const titleRow = (b: Beat) => {
       const tone = stateTone(b)
       const badge = isStale(b, now) ? '소식없음' : b.state !== 'asking' && b.fail?.level === 'high' ? '숨은 실패' : label(b, now)
-      const cache = b.cacheAt != null ? cacheText(cacheLeft(b.cacheAt, now)) : null
+      const cache = b.cacheAt != null ? cacheText(cacheLeft(b.cacheAt, now, b.cacheTtl)) : null
       const hot = cacheWarn(b, now)
       // 좁으면 배지가 두 줄로 깨지지 않게 오른쪽부터 덜어 낸다 (N2)
       const fit = headParts(rightWidth, { badge, name: b.name, me: b.id === self.beat?.id, pct: b.contextPct, cache, cacheHot: hot, ago: ago(now - b.updatedAt) })

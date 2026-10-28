@@ -87,6 +87,8 @@ export type Beat = {
   addr?: string
   /** 마지막 메인 스레드 모델 요청 시각. 프롬프트 캐시 남은 시간의 기준 (compact·/clear 뒤엔 null) */
   cacheAt: number | null
+  /** 이 세션의 프롬프트 캐시 수명(ms): 구독 1시간, API 키 등 5분 (0.29.11 전 파일에는 없음 → 1시간) */
+  cacheTtl?: number
   updatedAt: number
 }
 

@@ -28,6 +28,7 @@ import {
   lineShown,
   bandOrder,
   cacheLeft,
+  cacheTtl,
   cacheMinutes,
   cacheText,
   cacheWarn,
@@ -1249,6 +1250,15 @@ describe('프롬프트 캐시', () => {
     expect(cacheWarn(at(0), NOW)).toBe(false) // 만료는 띠에 남기지 않는다 (보드에만)
     expect(cacheWarn(at(8, { state: 'working' }), NOW)).toBe(false) // 일하는 중이면 곧 갱신된다
     expect(cacheWarn(beat({}), NOW)).toBe(false) // 예전 파일: cacheAt 없음
+    // 5분 캐시: 수명의 절반(2.5분) 이하에서 알린다. 계정에 따른 수명 (0.29.11)
+    const five = (min: number) => beat({ cacheAt: NOW - (5 - min) * 60_000, cacheTtl: 5 * 60_000 })
+    expect(cacheWarn(five(2), NOW)).toBe(true)
+    expect(cacheWarn(five(3), NOW)).toBe(false)
+    expect(cacheTtl(undefined, undefined, [{ percentUsed: 16 }, { percentUsed: 58 }])).toBe(60 * 60_000)
+    expect(cacheTtl(undefined, undefined, [])).toBe(5 * 60_000)
+    expect(cacheTtl(undefined, undefined, [{ percentUsed: 100 }])).toBe(5 * 60_000) // 한도 밖(추가 사용량)
+    expect(cacheTtl('5m', '1h', [{ percentUsed: 1 }])).toBe(5 * 60_000) // 환경 변수가 설정보다 먼저
+    expect(cacheTtl('/home/me', '1h', [])).toBe(60 * 60_000) // 모르는 값은 건너뛴다
   })
 
   test('메인 요청 시각을 기록하고, 서브에이전트는 빼고, /clear·compact 에서 비운다', async ($, on) => {
@@ -1256,7 +1266,8 @@ describe('프롬프트 캐시', () => {
     const clock = mock.clock(on, { now: NOW })
     mock.store(on)
     on('session.start', ($, e) => ({ cwd: e.cwd }))
-    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    let limits: { kind: string, percentUsed: number }[] = [{ kind: 'five_hour', percentUsed: 16 }]
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: limits, context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
     on('session.cwd', () => ({ value: '/repo/order-svc' }))
     on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
     on('session.id', () => ({ value: 'me' }))
@@ -1273,6 +1284,8 @@ describe('프롬프트 캐시', () => {
     on('session.end', () => ({ sessionId: 'me' }))
     on('session.compact', ($, e: any) => ({ messages: e.messages }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
+    let ttlSetting: string | undefined
+    on('settings.read', () => ({ value: ttlSetting ? { promptCacheTtl: ttlSetting } : {} }))
     on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     on('turn.step', async function* ($, e: any) {
       return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...USAGE, model: 'm' } }
@@ -1294,6 +1307,8 @@ describe('프롬프트 캐시', () => {
     await step()
     await answer('t1')
     expect(mine().cacheAt).toBe(NOW)
+    // 구독(rateLimits 에 창이 있음)은 1시간 캐시 (0.29.11)
+    expect(mine().cacheTtl).toBe(60 * 60_000)
 
     // 서브에이전트 요청은 메인 캐시를 갱신하지 않는다
     await clock.advance(5 * 60_000)
@@ -1326,6 +1341,16 @@ describe('프롬프트 캐시', () => {
     await step()
     await answer('t3')
     expect(mine().cacheAt).toBe(NOW + 51 * 60_000)
+
+    // API 키처럼 rateLimits 가 비면 5분, 설정 promptCacheTtl 이 있으면 그 값 (0.29.11)
+    limits = []
+    await step()
+    await answer('t3b')
+    expect(mine().cacheTtl).toBe(5 * 60_000)
+    ttlSetting = '1h'
+    await step()
+    await answer('t3c')
+    expect(mine().cacheTtl).toBe(60 * 60_000)
 
     // /clear 도 새 대화다
     await $.session.end({ reason: 'clear' } as any)
