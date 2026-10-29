@@ -2186,6 +2186,18 @@ describe('팀 상황판', () => {
     expect(sep?.text).toMatch(/^─+$/)
     expect(JSON.stringify(sep)).toContain(paletteOf('night').dim)
 
+    // 도움말 상자 (T52): 머리줄 아래 조작 안내와 버튼. 맨 아래 안내 줄은 없다. 누르면 명령 목록이 펼쳐지고 다시 누르면 접힌다
+    expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▾')
+    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤 · Home 처음 · \[자세히 →\] 세션 보기/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /명령 목록 \/board help/ })).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
+    await pane.press({ key: 'help' })
+    expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('닫기 ▴')
+    expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^팀 상황판 명령$/ })).toBeUndefined() // 명령 목록 제목줄은 뺀다
+    await pane.press({ key: 'help' })
+    expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
+
     // 12살 탭: 지난 결정까지 맥락으로 넘긴다
     expect(await pane.find({ key: 'regen-kid-peer' })).toBeUndefined() // 만들기 전에는 재생성 없음
     await pane.press({ key: 'tab-kid-peer' })

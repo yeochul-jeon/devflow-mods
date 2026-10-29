@@ -148,6 +148,8 @@ declare module 'claude-code' {
       html: { id: string; question: string } | null
       /** 자세히 보는 세션 id, null 이면 전체 보기 */
       focus: string | null
+      /** 전체 보기 도움말 상자에서 명령 목록을 펼침 (T52) */
+      helpOpen: boolean
       /** 이 세션 자신의 기록. 모듈이 다시 로드돼도 같은 세션으로 이어진다. */
       me: Beat | null
       /** 접어 둔 설명 (세션 id) */

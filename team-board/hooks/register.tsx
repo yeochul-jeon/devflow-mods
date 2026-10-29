@@ -114,6 +114,8 @@ const tab = atom({ plugin: 'team-board', key: 'tab' } as const, 'kid' as Explain
 const queue = atom({ plugin: 'team-board', key: 'queue' } as const, [] as string[])
 const html = atom({ plugin: 'team-board', key: 'html' } as const, null as { id: string; question: string } | null)
 const focus = atom({ plugin: 'team-board', key: 'focus' } as const, null as string | null)
+/** 전체 보기 도움말 상자에서 명령 목록을 펼쳤는지 (T52) */
+const helpOpen = atom({ plugin: 'team-board', key: 'helpOpen' } as const, false)
 const me = atom({ plugin: 'team-board', key: 'me' } as const, null as Beat | null)
 const collapsed = atom({ plugin: 'team-board', key: 'collapsed' } as const, [] as string[])
 const bandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
@@ -1183,6 +1185,7 @@ export const register: Register = (on, options) => {
     else if (key.startsWith('html-')) await pressHtml($, key.slice('html-'.length))
     else if (key.startsWith('detail-')) await update($, focus, () => key.slice('detail-'.length))
     else if (key === 'back') await update($, focus, () => null)
+    else if (key === 'help') await update($, helpOpen, v => !v)
     else if (flowPress) await copyFlow($, flowPress[1]!, Number(flowPress[2]), flowPress[3]!, e.surface)
     else if (key === 'band-board') await $.command.run({ command: 'board', args: '' })
     else if (key.startsWith('view-')) {
@@ -1466,6 +1469,7 @@ export const register: Register = (on, options) => {
     const htmlSent = await read($, html)
     const focusId = await read($, focus)
     const folded = await read($, collapsed)
+    const help = await read($, helpOpen)
     const focused = focusId ? list.find(b => b.id === focusId) : undefined
     const cols = Math.max(30, e.props.bodyColumns ?? 60)
     const noop = () => {}
@@ -2065,6 +2069,21 @@ export const register: Register = (on, options) => {
           {helpers ? <Text color={pal.work}>{`● 보조 ${helpers}`}</Text> : null}
         </Box>
 
+        {/* 도움말 상자 (T52): 카드 목록 끝에 있으면 스크롤해야 보여서 머리줄 아래로. 버튼으로 명령 목록(/board help)을 펼친다 */}
+        <Box borderStyle="round" borderColor={pal.frame} flexDirection="column" paddingX={1} marginBottom={1}>
+          <Box flexDirection="row">
+            <Box flexGrow={1} flexShrink={1}>
+              <Text color={pal.dim} wrap="truncate-end">PgUp/PgDn 스크롤 · Home 처음 · [자세히 →] 세션 보기</Text>
+            </Box>
+            <Box flexShrink={0} marginLeft={1}>
+              <Button key="help" label={help ? '닫기 ▴' : '도움말 ▾'} onPress={noop} />
+            </Box>
+          </Box>
+          {help
+            ? BOARD_HELP.split('\n').slice(2).map((l, i) => <Text key={`help-${i}`} color={pal.text} wrap="truncate-end">{l || ' '}</Text>)
+            : null}
+        </Box>
+
         {list.map(b => {
           const lastDecision = b.decisions[b.decisions.length - 1]
           return (
@@ -2094,7 +2113,6 @@ export const register: Register = (on, options) => {
             </Box>
           )
         })}
-        <Text color={pal.dim}>PgUp/PgDn 스크롤 · Home 처음 · /board 세션이름 → 자세히 · 명령 목록 /board help</Text>
       </Box>
     )
   })
