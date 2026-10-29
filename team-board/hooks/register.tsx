@@ -34,6 +34,7 @@ import {
   basename,
   cacheLeft,
   cacheTtl,
+  observeTtl,
   cacheMinutes,
   cacheText,
   cacheWarn,
@@ -802,14 +803,37 @@ export const register: Register = (on, options) => {
   // 메인 스레드의 모델 요청마다 프롬프트 캐시 수명이 다시 시작된다. 서브에이전트 요청은 다른 prefix 다.
   // 도구 호출 기록처럼 1.5초에 한 번까지만 쓰고, 미룬 것은 다음 틱에 쓴다.
   on('turn.step', async function* ($, e, next) {
-    if (!e.agentId) await save($, { cacheAt: await $.clock.now() })
+    // 앞 요청 시각·길이는 이번 요청 기록 전에 잡는다 (관찰용)
+    const prevAt = self.beat?.cacheAt ?? null
+    const prevPrefix = self.beat?.cachePrefix ?? 0
+    const at = await $.clock.now()
+    if (!e.agentId) await save($, { cacheAt: at })
     const r = yield* next(e)
     // 캐시 수명은 계정·설정마다 다르다. 구독인지 알려 주는 rateLimits 는 첫 요청 뒤에 채워지므로 요청이 끝난 뒤에 잰다
     // 답은 이미 나갔으므로 못 읽으면 앞 값을 두고 이유만 debug 로그에 남긴다
     if (!e.agentId) {
       try {
-        const ttl = cacheTtl(await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'), await $.settings.read({ key: 'promptCacheTtl' }), (await $.session.usage()).rateLimits)
-        if (self.beat && self.beat.cacheTtl !== ttl) await save($, { cacheTtl: ttl })
+        const rateLimits = (await $.session.usage()).rateLimits
+        const u = r.usage
+        let observed = self.beat?.cacheObserved ?? null
+        if (u && prevAt !== null) {
+          const seen = observeTtl(at - prevAt, u.cache_read_input_tokens, prevPrefix, rateLimits.length > 0)
+          if (seen) {
+            $.ui.log(`team-board: 캐시 관찰 gap=${Math.round((at - prevAt) / 60_000)}분 read=${u.cache_read_input_tokens} prefix=${prevPrefix} → ${seen}`, { to: 'debug' })
+            observed = seen
+          }
+        }
+        const ttl = cacheTtl({
+          force5m: await $.env.get('FORCE_PROMPT_CACHING_5M'),
+          env: await $.env.get('CLAUDE_CODE_PROMPT_CACHE_TTL'),
+          setting: await $.settings.read({ key: 'promptCacheTtl' }),
+          enable1h: await $.env.get('ENABLE_PROMPT_CACHING_1H'),
+          observed,
+        }, rateLimits)
+        const prefix = u ? u.cache_read_input_tokens + u.cache_creation_input_tokens : prevPrefix
+        if (self.beat && (self.beat.cacheTtl !== ttl || (self.beat.cacheObserved ?? null) !== observed || self.beat.cachePrefix !== prefix)) {
+          await save($, { cacheTtl: ttl, cachePrefix: prefix, ...(observed ? { cacheObserved: observed } : {}) })
+        }
       } catch (err) {
         $.ui.log(`team-board: 캐시 수명을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
       }

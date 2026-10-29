@@ -89,6 +89,10 @@ export type Beat = {
   cacheAt: number | null
   /** 이 세션의 프롬프트 캐시 수명(ms): 구독 1시간, API 키 등 5분 (0.29.11 전 파일에는 없음 → 1시간) */
   cacheTtl?: number
+  /** 5분 넘게 쉰 뒤 실제 적중으로 본 수명. 다음 관찰이 나오면 바뀐다 (0.29.13) */
+  cacheObserved?: '1h' | '5m'
+  /** 앞 메인 요청의 cache_read + cache_creation. 다음 요청이 얼마나 읽었는지 비교하는 기준 (0.29.13) */
+  cachePrefix?: number
   updatedAt: number
 }
 

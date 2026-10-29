@@ -29,6 +29,7 @@ import {
   bandOrder,
   cacheLeft,
   cacheTtl,
+  observeTtl,
   cacheMinutes,
   cacheText,
   cacheWarn,
@@ -1254,11 +1255,30 @@ describe('프롬프트 캐시', () => {
     const five = (min: number) => beat({ cacheAt: NOW - (5 - min) * 60_000, cacheTtl: 5 * 60_000 })
     expect(cacheWarn(five(2), NOW)).toBe(true)
     expect(cacheWarn(five(3), NOW)).toBe(false)
-    expect(cacheTtl(undefined, undefined, [{ percentUsed: 16 }, { percentUsed: 58 }])).toBe(60 * 60_000)
-    expect(cacheTtl(undefined, undefined, [])).toBe(60 * 60_000) // 한도 창 없음: Team·Enterprise 일 수 있어 모름 → 1시간
-    expect(cacheTtl(undefined, undefined, [{ percentUsed: 100 }])).toBe(5 * 60_000) // 한도 밖(추가 사용량)
-    expect(cacheTtl('5m', '1h', [{ percentUsed: 1 }])).toBe(5 * 60_000) // 환경 변수가 설정보다 먼저
-    expect(cacheTtl('/home/me', '1h', [])).toBe(60 * 60_000) // 모르는 값은 건너뛴다
+    expect(cacheTtl({}, [{ percentUsed: 16 }, { percentUsed: 58 }])).toBe(60 * 60_000)
+    expect(cacheTtl({}, [])).toBe(60 * 60_000) // 한도 창 없음: Team·Enterprise 일 수 있어 모름 → 1시간
+    expect(cacheTtl({}, [{ percentUsed: 100 }])).toBe(5 * 60_000) // 한도 밖(추가 사용량)
+    expect(cacheTtl({ env: '5m', setting: '1h' }, [{ percentUsed: 1 }])).toBe(5 * 60_000) // 환경 변수가 설정보다 먼저
+    expect(cacheTtl({ env: '/home/me', setting: '1h' }, [])).toBe(60 * 60_000) // 모르는 값은 건너뛴다
+    // 엔진 순서: FORCE_PROMPT_CACHING_5M → 환경 변수 → 설정 → ENABLE_PROMPT_CACHING_1H → (관찰) → 한도 창 (0.29.13)
+    expect(cacheTtl({ force5m: '1', env: '1h' }, [])).toBe(5 * 60_000)
+    expect(cacheTtl({ force5m: '/home/me' }, [])).toBe(60 * 60_000) // 1·true·yes·on 만 켜짐
+    expect(cacheTtl({ enable1h: 'true', observed: '5m' }, [])).toBe(60 * 60_000)
+    expect(cacheTtl({ setting: '5m', enable1h: 'true' }, [])).toBe(5 * 60_000)
+    expect(cacheTtl({ observed: '5m' }, [])).toBe(5 * 60_000)
+    expect(cacheTtl({ observed: '1h' }, [{ percentUsed: 100 }])).toBe(60 * 60_000)
+  })
+
+  test('5분 넘게 쉰 뒤 캐시를 읽었는지로 수명을 본다 (0.29.13)', () => {
+    const MIN = 60_000
+    expect(observeTtl(6 * MIN, 140_000, 150_000, false)).toBe('1h') // 90% 넘게 읽음
+    expect(observeTtl(6 * MIN, 140_000, 150_000, true)).toBe('1h')
+    expect(observeTtl(6 * MIN, 30_000, 150_000, false)).toBe('5m') // 다른 세션과 같이 쓰는 앞부분만 읽음
+    expect(observeTtl(6 * MIN, 30_000, 150_000, true)).toBeNull() // 구독: 1시간이 맞으니 캐시가 깨진 것
+    expect(observeTtl(4 * MIN, 30_000, 150_000, false)).toBeNull() // 5분 안: 수명과 상관없음
+    expect(observeTtl(61 * MIN, 30_000, 150_000, false)).toBeNull() // 1시간 넘음: 둘 다 끝남
+    expect(observeTtl(6 * MIN, 100_000, 150_000, false)).toBeNull() // 그 사이는 판단 안 함
+    expect(observeTtl(6 * MIN, 30_000, 35_000, false)).toBeNull() // 짧은 대화: 앞부분만 읽어도 적중처럼 보임
   })
 
   test('메인 요청 시각을 기록하고, 서브에이전트는 빼고, /clear·compact 에서 비운다', async ($, on) => {
@@ -1287,8 +1307,9 @@ describe('프롬프트 캐시', () => {
     let ttlSetting: string | undefined
     on('settings.read', () => ({ value: ttlSetting ? { promptCacheTtl: ttlSetting } : {} }))
     on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    let usage = { ...USAGE }
     on('turn.step', async function* ($, e: any) {
-      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...USAGE, model: 'm' } }
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...usage, model: 'm' } }
     })
     const step = async (agentId?: string) => {
       const s = $.turn.step({ turnId: 't', index: 0, model: 'm', messageCount: 3, ...(agentId ? { agentId } : {}) } as any)
@@ -1356,9 +1377,38 @@ describe('프롬프트 캐시', () => {
     await answer('t3d')
     expect(mine().cacheTtl).toBe(60 * 60_000)
 
+    // 한도 창이 없는 세션: 6분 쉰 뒤 앞부분만 읽었으면 5분 캐시, 다시 6분 뒤 다 읽었으면 1시간 (0.29.13)
+    ttlSetting = undefined
+    limits = []
+    usage = { ...USAGE, cache_creation_input_tokens: 150_000 }
+    await step()
+    await answer('t5a')
+    await clock.advance(6 * 60_000)
+    usage = { ...USAGE, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 125_000 }
+    await step()
+    await answer('t5b')
+    expect(mine().cacheTtl).toBe(5 * 60_000)
+    await clock.advance(6 * 60_000)
+    usage = { ...USAGE, cache_read_input_tokens: 150_000, cache_creation_input_tokens: 5_000 }
+    await step()
+    await answer('t5c')
+    expect(mine().cacheTtl).toBe(60 * 60_000)
+    // 서브에이전트 요청은 관찰하지 않는다
+    await clock.advance(6 * 60_000)
+    usage = { ...USAGE, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 150_000 }
+    await step('sub-2')
+    await answer('t5d')
+    expect(mine().cacheTtl).toBe(60 * 60_000)
+
     // /clear 도 새 대화다
     await $.session.end({ reason: 'clear' } as any)
     expect(mine().cacheAt).toBeNull()
+    // /clear 뒤 첫 요청은 앞 요청이 없어 관찰하지 않는다
+    await clock.advance(6 * 60_000)
+    usage = { ...USAGE, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 2_000 }
+    await step()
+    await answer('t5e')
+    expect(mine().cacheTtl).toBe(60 * 60_000)
 
     // 세션 하나(solo)로 결정 대기: 띠 바탕이 노랗지 않으므로 질문 요약은 노란 글자
     await $.turn.complete({ reason: 'answer', answer: '1. 캐시 만료 시간\n2. 배포 시점\n어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't4' } as any)

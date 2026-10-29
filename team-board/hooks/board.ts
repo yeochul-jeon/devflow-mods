@@ -30,13 +30,38 @@ export const CACHE_WARN_MS = 10 * 60_000
  * 그래서 session.usage 의 rateLimits 어느 창이든 100% 면 한도 밖이라 5분, 그 밖은 1시간으로 본다.
  * 창이 없으면 API 키일 수도, 한도 창이 없는 회사 계정일 수도 있어 1시간(0.29.11 이전과 같음)으로 둔다.
  * rateLimits 는 첫 모델 요청 뒤에 채워진다 (2026-10-29 실측: session.start 에서 [], 첫 turn.step 뒤 five_hour·seven_day).
+ * 엔진 순서대로 FORCE_PROMPT_CACHING_5M, ENABLE_PROMPT_CACHING_1H 도 본다 (엔진처럼 1·true·yes·on 만 켜짐).
+ * observed 는 실제 적중으로 본 수명(observeTtl). 계정 추정(한도 창)보다 먼저 쓴다.
  */
-export function cacheTtl(envTtl: unknown, settingTtl: unknown, rateLimits: readonly { percentUsed: number }[]): number {
-  for (const v of [envTtl, settingTtl]) {
+export function cacheTtl(
+  o: { force5m?: unknown, env?: unknown, setting?: unknown, enable1h?: unknown, observed?: '1h' | '5m' | null },
+  rateLimits: readonly { percentUsed: number }[],
+): number {
+  const on = (v: unknown) => typeof v === 'string' && ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase())
+  if (on(o.force5m)) return 5 * 60_000
+  for (const v of [o.env, o.setting]) {
     if (v === '1h') return CACHE_TTL_MS
     if (v === '5m') return 5 * 60_000
   }
+  if (on(o.enable1h)) return CACHE_TTL_MS
+  if (o.observed) return o.observed === '1h' ? CACHE_TTL_MS : 5 * 60_000
   return rateLimits.some(r => r.percentUsed >= 100) ? 5 * 60_000 : CACHE_TTL_MS
+}
+
+/** 이보다 짧은 대화는 판정하지 않는다. 다른 세션과 같이 쓰는 시스템 프롬프트·도구(이 기계 약 3만 토큰)는 캐시가 깨져도 읽힌다 */
+const OBSERVE_MIN_TOKENS = 60_000
+
+/**
+ * 앞 메인 요청에서 5분 10초~1시간 사이에 온 요청이 캐시를 얼마나 읽었는지로 수명을 본다.
+ * prevPrefix 는 앞 요청의 cache_read + cache_creation. 90% 이상 읽음 → 1시간. 절반 미만 → 5분 캐시가 끝났거나 캐시가 깨짐:
+ * 한도 창이 있는 구독은 1시간이 맞으므로 깨진 것으로 보고 판단하지 않는다.
+ * 2026-10-29 이 기계 대화 기록: 1시간 캐시에서 5분 넘게 쉰 1244건 중 1220건이 90% 이상, 깨진 경우 약 3만 토큰만 읽음.
+ */
+export function observeTtl(gapMs: number, read: number, prevPrefix: number, hasWindows: boolean): '1h' | '5m' | null {
+  if (prevPrefix < OBSERVE_MIN_TOKENS || gapMs <= 5 * 60_000 + 10_000 || gapMs >= CACHE_TTL_MS) return null
+  if (read >= prevPrefix * 0.9) return '1h'
+  if (read < prevPrefix * 0.5 && !hasWindows) return '5m'
+  return null
 }
 
 /** 캐시가 남은 시간(ms). 기록이 없으면 null, 만료됐으면 0 이하. */

@@ -415,14 +415,18 @@ macOS에서만 동작합니다. 기본은 켜짐입니다.
 - `/board band line` 의 한 줄 띠는 `캐시 n분` 으로 보여 줍니다.
 - 이 시간 안에 다시 요청하면 대화 앞부분을 캐시에서 싸게 읽습니다.
 - 마지막 메인 스레드 모델 요청부터 그 세션의 캐시 수명을 셉니다(0.29.11). 수명은 Claude Code 와 같은 순서로 정합니다.
+  - 환경 변수 `FORCE_PROMPT_CACHING_5M` (`1`·`true`·`yes`·`on`) 이면 5분
   - 환경 변수 `CLAUDE_CODE_PROMPT_CACHE_TTL` (`5m`·`1h`)
   - 설정 `promptCacheTtl` (`5m`·`1h`)
-  - 둘 다 없으면 Claude Code 는 claude.ai 로그인(개인 구독·Team·Enterprise)이면 1시간, 추가 사용량을 쓰는 중이거나 API 키·Bedrock·Vertex·Foundry 면 5분을 씁니다. mods 는 로그인 종류를 알 수 없어서, team-board 는 사용 한도 창(5시간·주간) 중 어느 창이든 100% 면 5분, 그 밖은 1시간으로 봅니다(0.29.12).
+  - 환경 변수 `ENABLE_PROMPT_CACHING_1H` 이면 1시간
+  - 그 밖에는 Claude Code 가 claude.ai 로그인(개인 구독·Team·Enterprise)이면 1시간, 추가 사용량을 쓰는 중이거나 API 키·Bedrock·Vertex·Foundry 면 5분을 씁니다. mods 는 로그인 종류를 알 수 없어서 team-board 는 아래 순서로 봅니다.
+    1. 실제로 본 것(0.29.13): 앞 요청에서 5분 넘게(1시간 안) 쉬었다가 요청했을 때, 앞 요청 길이의 90% 이상을 캐시에서 읽었으면 1시간입니다. 절반도 못 읽었고 사용 한도 창(5시간·주간)이 없는 세션이면 5분입니다. 한도 창이 있는 구독은 1시간이 맞으므로, 못 읽은 것은 캐시가 깨진 것으로 보고 바꾸지 않습니다. 6만 토큰보다 짧은 대화는 보지 않습니다(다른 세션과 같이 쓰는 시스템 프롬프트·도구는 캐시가 깨져도 읽히기 때문).
+    2. 본 것이 없으면: 한도 창 중 어느 창이든 100% 면 5분, 그 밖은 1시간(0.29.12).
 - 서브에이전트 요청은 세지 않습니다.
 - compact나 `/clear` 뒤에는 다음 요청까지 표시하지 않습니다.
 - 아래 경우에는 남은 시간을 알 수 없습니다.
   - CLAUDE.md, 도구 목록, effort가 바뀌어 캐시가 깨진 경우
-  - API 키·Bedrock·Vertex·Foundry 세션: 1시간으로 셉니다. 실제 5분이면 `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` 이나 설정 `promptCacheTtl: "5m"` 을 주면 맞게 셉니다.
+  - API 키·Bedrock·Vertex·Foundry 세션이 아직 5분 넘게 쉰 적이 없을 때: 1시간으로 셉니다. 처음부터 맞게 보려면 `CLAUDE_CODE_PROMPT_CACHE_TTL=5m` 이나 설정 `promptCacheTtl: "5m"` 을 주세요.
 - 아이디어는 [cache-watch](https://github.com/ishuagrawal/cache-watch)와 [cache-tax](https://github.com/karanb192/cache-tax)에서 얻었습니다. 코드는 새로 썼습니다.
 
 ## 색 바꾸기
