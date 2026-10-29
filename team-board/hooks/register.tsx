@@ -35,6 +35,8 @@ import {
   cacheLeft,
   cacheTtl,
   observeTtl,
+  hudRows,
+  lineRows,
   nextObserved,
   cacheMinutes,
   cacheText,
@@ -1204,9 +1206,11 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey || (await read($, bandOff))) return next(e)
     const now = await $.clock.now()
     const list = visible(withMe(await read($, beats), await read($, me)), now)
-    const below = await next(e)
     // 세션 하나: /board band solo off 면 숨김 (기본은 보임)
-    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return below
+    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return next(e)
+    // 아래 mod(next-steps·prompt-coach 등)에는 이 띠가 쓰고 남은 줄만 넘기고, 이 띠는 그들보다 위에 그린다 (N5).
+    // 넘치면 엔진이 위부터 보여 주므로, 줄 수를 줄이지 않는 띠(prompt-coach, 엔진 Heads up)가 있어도 결정·실패가 가려지지 않는다
+    const nextWith = (h: number) => next({ ...e, props: { ...e.props, maxRows: Math.max(0, (e.props.maxRows ?? 10) - h) } })
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const asking = list.filter(b => b.state === 'asking' && !isStale(b, now)).length
@@ -1234,8 +1238,8 @@ export const register: Register = (on, options) => {
     // 오른쪽 버튼 "[ 보드 /board ]"
     const head = headLines(headChips.map(c => c.text), columns, widthOf('보드 /board') + 4)
 
-    // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양
-    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head)) {
+    // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양 (혼자 창 3줄도 안 들어가면 이 모양, N5)
+    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3) {
       // 칩 글자. 그리는 것과 줄 수 세기(lineShown)가 같은 글자를 쓴다
       const partsOf = (b: Beat) => {
         const stale = isStale(b, now)
@@ -1268,15 +1272,16 @@ export const register: Register = (on, options) => {
       const pick = fitsAll ? list : bandOrder(list, now, self.beat?.id)
       const lineShownN = fitsAll ? list.length : lineShown(lead, pick.map(textOf), columns, maxRows)
       const lineHidden = pick.length - lineShownN
+      const below = await nextWith(lineRows(lead, pick.map(textOf), lineShownN, columns))
       return (
         <Box flexDirection="column">
-          {below}
           <Box flexDirection="row" columnGap={2} paddingX={1} flexWrap="wrap">
             <Text backgroundColor={asking ? pal.ask : pal.accent} color={pal.onBadge} bold>{team}</Text>
             {fails ? <Text backgroundColor={pal.bad} color={pal.onBadge} bold>{failChip}</Text> : null}
             {pick.slice(0, lineShownN).map(chip)}
             <Text color={pal.dim}>{lineHidden ? `+${lineHidden} 더 · /board` : '/board'}</Text>
           </Box>
+          {below}
         </Box>
       )
     }
@@ -1391,10 +1396,10 @@ export const register: Register = (on, options) => {
     // 혼자: 머리줄 한 줄에 내 상태를 바로 (창 높이 3줄)
     if (layout.mode === 'solo') {
       const b = list[0]!
+      const below = await nextWith(3)
       const { hot, bad, cool } = stateOf(b)
       return (
         <Box flexDirection="column">
-          {below}
           <Box flexDirection="row" justifyContent="space-between" columnGap={2} borderStyle="double" borderColor={hot ? pal.ask : bad ? pal.bad : pal.accent} paddingX={1} {...(pal.card ? { backgroundColor: pal.card } : {})}>
             <Box flexDirection="row" columnGap={2} flexShrink={1}>
               {/* 이름과 배지는 줄이지 않는다. 설명이 길어도 설명만 잘린다 (태그 "캐시 n분" 이 길어 줄이 쪼개지던 문제) */}
@@ -1409,13 +1414,15 @@ export const register: Register = (on, options) => {
             </Box>
             <Button key="band-board" label="보드 /board" hotkey="b" onPress={() => {}} />
           </Box>
+          {below}
         </Box>
       )
     }
+    const below = await nextWith(hudRows(layout, hidden, columns, head))
     return (
       <Box flexDirection="column">
-        {below}
         {hud}
+        {below}
       </Box>
     )
   })

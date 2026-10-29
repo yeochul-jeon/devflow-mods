@@ -30,6 +30,8 @@ import {
   cacheLeft,
   cacheTtl,
   observeTtl,
+  hudRows,
+  lineRows,
   nextObserved,
   cacheMinutes,
   cacheText,
@@ -1270,6 +1272,24 @@ describe('프롬프트 캐시', () => {
     expect(cacheTtl({ observed: '1h' }, [{ percentUsed: 100 }])).toBe(60 * 60_000)
   })
 
+  test('띠 높이: 아래 mod 에 남은 줄을 넘기려고 자기 줄 수를 센다 (N5)', () => {
+    // 혼자: 테두리 2 + 1
+    expect(hudRows(bandLayout(1, 155, 7, 1), 0, 155, 1)).toBe(3)
+    // 세션 3개, 넓은 창: 칸 한 줄에 2줄씩 → 2 + 머리줄 1 + 2
+    const full = bandLayout(3, 155, 12, 1)
+    expect(full.mode).toBe('full')
+    expect(hudRows(full, 0, 155, 1)).toBe(5)
+    // 낮은 창: 칸을 한 줄로 줄이고, 넘친 세션은 +k 를 칸 하나로 센다
+    const compact = bandLayout(12, 80, 6, 1)
+    expect(compact.mode).toBe('compact')
+    const hidden = 12 - compact.shown
+    expect(hudRows(compact, hidden, 80, 1)).toBeLessThanOrEqual(6)
+    expect(hudRows(compact, hidden, 80, 1)).toBeGreaterThanOrEqual(4)
+    // 한 줄 모양: 보인 칩이 넘으면 줄이 는다
+    expect(lineRows([' TEAM 2 '], ['○ a', '○ b'], 2, 155)).toBe(1)
+    expect(lineRows([' TEAM 9 '], Array(9).fill('○ session-name-long'), 9, 40)).toBeGreaterThan(1)
+  })
+
   test('5분 넘게 쉰 뒤 캐시를 읽었는지로 수명을 본다 (0.29.13, 0.29.14)', () => {
     const MIN = 60_000
     // 공통 앞부분(첫 요청에서 읽은 양) 30k, 앞 요청 150k → 이 세션 몫 120k 로 비율을 잰다
@@ -1315,7 +1335,9 @@ describe('프롬프트 캐시', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     let ttlSetting: string | undefined
     on('settings.read', () => ({ value: ttlSetting ? { promptCacheTtl: ttlSetting } : {} }))
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    // 아래 mod 가 받은 줄 수 (N5): team-board 가 자기 높이를 빼고 넘긴다
+    let belowRows = -1
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     let usage = { ...USAGE }
     on('turn.step', async function* ($, e: any) {
       return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...usage, model: 'm' } }
@@ -1352,10 +1374,20 @@ describe('프롬프트 캐시', () => {
     // 세션 하나(solo): 캐시 배지 + 남은 분
     expect((await band.find({ type: 'Text', text: /^ 캐시 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
     expect(await band.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
+    expect(belowRows).toBe(10 - 3) // 혼자 창은 3줄
+    // 이 띠를 다른 mod 띠보다 위에 그린다: 넘치면 엔진이 위부터 보여 주므로 결정·실패가 잘리지 않는다 (N5)
+    const tree = JSON.stringify(await band.find({ type: 'Box' }))
+    expect(tree.indexOf('OTHER-MOD-BAND')).toBeGreaterThan(tree.indexOf('보드 /board'))
     await band.unmount()
+    // 자리가 3줄보다 작으면 혼자여도 한 줄 모양 (창 3줄이 들어가지 않아 아래가 잘렸다)
+    const low = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 2, bodyColumns: 160 } } as any)
+    expect(await low.find({ type: 'Text', text: /^ TEAM 1 $/ })).toBeDefined()
+    expect(belowRows).toBe(2 - 1)
+    await low.unmount()
     await $.command.run({ command: 'board', args: 'band line' } as any)
     const line = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
     expect(await line.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
+    expect(belowRows).toBe(10 - 1) // 한 줄 모양
     await line.unmount()
     await $.command.run({ command: 'board', args: 'band hud' } as any)
     await $.command.run({ command: 'board', args: '' } as any)

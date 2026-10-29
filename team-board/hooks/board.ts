@@ -896,6 +896,24 @@ export function lineShown(lead: readonly string[], chips: readonly string[], col
   return 0
 }
 
+/** 한 줄 모양 띠가 차지하는 줄 수: 앞 칩, 보인 칩 k 개, 끝의 "/board"(가린 칩이 있으면 "+n 더 · /board"). 아래 mod 에 남은 줄을 넘길 때 쓴다 (N5) */
+export function lineRows(lead: readonly string[], chips: readonly string[], k: number, columns: number): number {
+  const tail = k === chips.length ? '/board' : `+${chips.length - k} 더 · /board`
+  return chipRows([...lead, ...chips.slice(0, k), tail], Math.max(1, columns - 2))
+}
+
+/**
+ * 창 모양 띠가 차지하는 줄 수: 혼자면 3, 아니면 테두리 2 + 머리줄 + 칸 줄 (full 은 칸마다 2줄).
+ * "+k 더" 는 칸 하나로 센다. 실제보다 많게 셀 수는 있어도 적게 세지는 않는다 (N5)
+ */
+export function hudRows(layout: BandLayout, hidden: number, columns: number, headLines: number): number {
+  if (layout.mode === 'solo') return 3
+  const inner = Math.max(30, columns - 4)
+  const perRow = Math.max(1, Math.floor((inner + 1) / (layout.slotW + 1)))
+  const rows = Math.ceil((layout.shown + (hidden ? 1 : 0)) / perRow)
+  return 2 + headLines + rows * (layout.mode === 'full' ? 2 : 1)
+}
+
 /** 칩들을 room 칸 폭에서 칩 단위로 줄을 바꾸면 몇 줄인지 (칩 사이 2칸). */
 function chipRows(chips: readonly string[], room: number): number {
   let lines = 1
