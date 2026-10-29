@@ -127,6 +127,8 @@ const bandSoloOff = atom({ plugin: 'team-board', key: 'bandSoloOff' } as const, 
 const look = atom({ plugin: 'team-board', key: 'look' } as const, 'blob' as Look)
 // 읽기만 한다. work-plan 이 없으면 값이 없다
 const workPlan = atom({ plugin: 'work-plan', key: 'plan' } as const, null as WorkPlan | null)
+// 읽기만 한다. prompt-coach 가 답을 기다리는 질문 글. prompt-coach 가 없으면 값이 없다
+const coachQuestion = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
 const BAND_KEY = 'band-off'
 const BAND_MODE_KEY = 'band-mode'
 const BAND_SOLO_KEY = 'band-solo-off'
@@ -1239,7 +1241,9 @@ export const register: Register = (on, options) => {
     const head = headLines(headChips.map(c => c.text), columns, widthOf('보드 /board') + 4)
 
     // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양 (혼자 창 3줄도 안 들어가면 이 모양, N5)
-    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3) {
+    // prompt-coach 가 질문 중이어도 이 모양: 아래 질문·선택지에 줄을 양보한다. 안 보이는 선택지를 숫자로 고르게 된다 (T53)
+    const coachAsking = !!(await read($, coachQuestion))
+    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachAsking) {
       // 칩 글자. 그리는 것과 줄 수 세기(lineShown)가 같은 글자를 쓴다
       const partsOf = (b: Beat) => {
         const stale = isStale(b, now)

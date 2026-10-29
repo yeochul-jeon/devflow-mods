@@ -3090,7 +3090,9 @@ describe('prompt-coach 연동', () => {
     on('session.messages', () => ({ value: [] }))
     on('env.get', () => ({ value: '/home/me' }))
     on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
-    on('fs.list', () => ({ value: [] }))
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
     on('fs.read', ($, e: any) => {
       if (!files.has(e.path)) throw new Error(`ENOENT: ${e.path}`)
       return { value: files.get(e.path)! }
@@ -3102,18 +3104,30 @@ describe('prompt-coach 연동', () => {
     on('turn.complete', () => ({ text: '' }))
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
+    let belowRows = -1
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    const band = async () => {
+      const m = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+      const line = (await m.find({ type: 'Text', text: /^ TEAM 1/ })) !== undefined
+      await m.unmount()
+      return { line, belowRows }
+    }
 
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
     await $.prompt.submit({ text: '첫 요청', origin: { kind: 'composer' } } as any)
     await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
     expect(mine().state).toBe('idle')
 
+    expect(await band()).toEqual({ line: false, belowRows: 10 - 3 })
     await pending('prompt-coach: 범위는?')
     expect(mine()).toMatchObject({ state: 'asking', question: 'prompt-coach: 범위는?' })
+    // 질문 중에는 팀 창이 한 줄로 줄어 아래 질문·선택지에 줄을 양보한다 (T53)
+    expect(await band()).toEqual({ line: true, belowRows: 10 - 1 })
     await pending('prompt-coach: 완료 기준은?')
     expect(mine()).toMatchObject({ state: 'asking', question: 'prompt-coach: 완료 기준은?' })
     await pending(null)
     expect(mine()).toMatchObject({ state: 'idle', question: '' })
+    expect(await band()).toEqual({ line: false, belowRows: 10 - 3 })
 
     // Claude 의 질문을 기다리던 중이면 끝난 뒤 그 질문으로 돌아간다
     await $.prompt.submit({ text: '다음 요청', origin: { kind: 'composer' } } as any)
@@ -3223,7 +3237,8 @@ describe('자기 세션 표시', () => {
 
     // 시계를 돌리지 않는다: 다음 파일 읽기 전
     await pending('prompt-coach: 범위는?')
-    expect(await bandHas(/prompt-coach: 범위는/)).toBe(true)
+    // 질문 중 띠는 한 줄 모양이라 질문 글 대신 결정 칩으로 바로 보인다 (T53). 질문 글은 보드에
+    expect(await bandHas(/결정 1/)).toBe(true)
     const mineId = JSON.parse(files.get(mineKey)!).id as string
     expect(mineId > 'a-other').toBe(true)
     expect(await bandHas(/·2/)).toBe(true)
@@ -3232,7 +3247,7 @@ describe('자기 세션 표시', () => {
     expect(await pane.find({ type: 'Text', text: /prompt-coach: 범위는/ })).toBeDefined()
     await pane.unmount()
     await pending(null)
-    expect(await bandHas(/prompt-coach: 범위는/)).toBe(false)
+    expect(await bandHas(/결정 1/)).toBe(false)
 
     // 계획 보고도 바로: 다음 파일 읽기 전에도 칸이 단계 글이 아니라 막대(지금 단계 알약)로 보인다
     await $.prompt.submit({ text: '두 번째 요청', origin: { kind: 'composer' } } as any)
