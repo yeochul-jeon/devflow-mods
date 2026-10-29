@@ -30,6 +30,7 @@ import {
   cacheLeft,
   cacheTtl,
   observeTtl,
+  nextObserved,
   cacheMinutes,
   cacheText,
   cacheWarn,
@@ -1269,16 +1270,24 @@ describe('프롬프트 캐시', () => {
     expect(cacheTtl({ observed: '1h' }, [{ percentUsed: 100 }])).toBe(60 * 60_000)
   })
 
-  test('5분 넘게 쉰 뒤 캐시를 읽었는지로 수명을 본다 (0.29.13)', () => {
+  test('5분 넘게 쉰 뒤 캐시를 읽었는지로 수명을 본다 (0.29.13, 0.29.14)', () => {
     const MIN = 60_000
-    expect(observeTtl(6 * MIN, 140_000, 150_000, false)).toBe('1h') // 90% 넘게 읽음
-    expect(observeTtl(6 * MIN, 140_000, 150_000, true)).toBe('1h')
-    expect(observeTtl(6 * MIN, 30_000, 150_000, false)).toBe('5m') // 다른 세션과 같이 쓰는 앞부분만 읽음
-    expect(observeTtl(6 * MIN, 30_000, 150_000, true)).toBeNull() // 구독: 1시간이 맞으니 캐시가 깨진 것
-    expect(observeTtl(4 * MIN, 30_000, 150_000, false)).toBeNull() // 5분 안: 수명과 상관없음
-    expect(observeTtl(61 * MIN, 30_000, 150_000, false)).toBeNull() // 1시간 넘음: 둘 다 끝남
-    expect(observeTtl(6 * MIN, 100_000, 150_000, false)).toBeNull() // 그 사이는 판단 안 함
-    expect(observeTtl(6 * MIN, 30_000, 35_000, false)).toBeNull() // 짧은 대화: 앞부분만 읽어도 적중처럼 보임
+    // 공통 앞부분(첫 요청에서 읽은 양) 30k, 앞 요청 150k → 이 세션 몫 120k 로 비율을 잰다
+    expect(observeTtl(6 * MIN, 140_000, 150_000, 30_000)).toBe('hit') // 몫의 90% 넘게 읽음
+    expect(observeTtl(6 * MIN, 30_000, 150_000, 30_000)).toBe('miss') // 공통 앞부분만 읽음
+    expect(observeTtl(6 * MIN, 0, 150_000, 30_000)).toBe('miss')
+    expect(observeTtl(4 * MIN, 30_000, 150_000, 30_000)).toBeNull() // 5분 안: 수명과 상관없음
+    expect(observeTtl(61 * MIN, 30_000, 150_000, 30_000)).toBeNull() // 1시간 넘음: 둘 다 끝남
+    expect(observeTtl(6 * MIN, 100_000, 150_000, 30_000)).toBeNull() // 그 사이는 판단 안 함
+    // 실화면(2026-10-29): 공통 앞부분 59k, 대화 69k 에서 캐시가 깨져 59k 만 읽어도 적중처럼 보였을 것 → 몫이 작으면 보지 않음
+    expect(observeTtl(6 * MIN, 59_000, 69_000, 59_000)).toBeNull()
+    expect(observeTtl(6 * MIN, 59_000, 120_000, 59_000)).toBe('miss')
+    // 두 번 연속 못 읽어야 5분. 적중하면 1시간, 구독(한도 창 있음)은 못 읽어도 바꾸지 않음
+    expect(nextObserved({ observed: null, misses: 0 }, 'miss', false)).toEqual({ observed: null, misses: 1 })
+    expect(nextObserved({ observed: null, misses: 1 }, 'miss', false)).toEqual({ observed: '5m', misses: 2 })
+    expect(nextObserved({ observed: '5m', misses: 2 }, 'hit', false)).toEqual({ observed: '1h', misses: 0 })
+    expect(nextObserved({ observed: '1h', misses: 1 }, 'miss', true)).toEqual({ observed: '1h', misses: 0 })
+    expect(nextObserved({ observed: null, misses: 1 }, null, false)).toEqual({ observed: null, misses: 1 })
   })
 
   test('메인 요청 시각을 기록하고, 서브에이전트는 빼고, /clear·compact 에서 비운다', async ($, on) => {
@@ -1377,7 +1386,7 @@ describe('프롬프트 캐시', () => {
     await answer('t3d')
     expect(mine().cacheTtl).toBe(60 * 60_000)
 
-    // 한도 창이 없는 세션: 6분 쉰 뒤 앞부분만 읽었으면 5분 캐시, 다시 6분 뒤 다 읽었으면 1시간 (0.29.13)
+    // 한도 창이 없는 세션: 6분 쉰 뒤 앞부분만 읽은 것이 두 번 이어지면 5분 캐시, 다시 6분 뒤 다 읽었으면 1시간 (0.29.13, 0.29.14)
     ttlSetting = undefined
     limits = []
     usage = { ...USAGE, cache_creation_input_tokens: 150_000 }
@@ -1387,6 +1396,10 @@ describe('프롬프트 캐시', () => {
     usage = { ...USAGE, cache_read_input_tokens: 30_000, cache_creation_input_tokens: 125_000 }
     await step()
     await answer('t5b')
+    expect(mine().cacheTtl).toBe(60 * 60_000) // 한 번은 캐시가 깨진 것일 수 있다
+    await clock.advance(6 * 60_000)
+    await step()
+    await answer('t5b2')
     expect(mine().cacheTtl).toBe(5 * 60_000)
     await clock.advance(6 * 60_000)
     usage = { ...USAGE, cache_read_input_tokens: 150_000, cache_creation_input_tokens: 5_000 }
@@ -1409,6 +1422,13 @@ describe('프롬프트 캐시', () => {
     await step()
     await answer('t5e')
     expect(mine().cacheTtl).toBe(60 * 60_000)
+    // /clear 뒤 첫 요청에서 읽은 30k 는 공통 앞부분: 대화가 짧으면(몫 2k) 6분 뒤 다 읽어도 보지 않는다
+    expect(mine().cacheShared).toBe(30_000)
+    await clock.advance(6 * 60_000)
+    usage = { ...USAGE, cache_read_input_tokens: 32_000, cache_creation_input_tokens: 0 }
+    await step()
+    await answer('t5f')
+    expect(mine().cacheMisses ?? 0).toBe(0)
 
     // 세션 하나(solo)로 결정 대기: 띠 바탕이 노랗지 않으므로 질문 요약은 노란 글자
     await $.turn.complete({ reason: 'answer', answer: '1. 캐시 만료 시간\n2. 배포 시점\n어느 쪽으로 할까요?', durationMs: 1, isAborted: false, turnId: 't4' } as any)

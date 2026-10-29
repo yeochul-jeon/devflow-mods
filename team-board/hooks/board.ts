@@ -48,20 +48,37 @@ export function cacheTtl(
   return rateLimits.some(r => r.percentUsed >= 100) ? 5 * 60_000 : CACHE_TTL_MS
 }
 
-/** 이보다 짧은 대화는 판정하지 않는다. 다른 세션과 같이 쓰는 시스템 프롬프트·도구(이 기계 약 3만 토큰)는 캐시가 깨져도 읽힌다 */
-const OBSERVE_MIN_TOKENS = 60_000
+/** 이 세션 몫(앞 요청 길이 - 공통 앞부분)이 이보다 작으면 판정하지 않는다. 공통 앞부분은 캐시가 깨져도 읽혀 비율을 흐린다 */
+const OBSERVE_MIN_OWN = 30_000
 
 /**
- * 앞 메인 요청에서 5분 10초~1시간 사이에 온 요청이 캐시를 얼마나 읽었는지로 수명을 본다.
- * prevPrefix 는 앞 요청의 cache_read + cache_creation. 90% 이상 읽음 → 1시간. 절반 미만 → 5분 캐시가 끝났거나 캐시가 깨짐:
- * 한도 창이 있는 구독은 1시간이 맞으므로 깨진 것으로 보고 판단하지 않는다.
- * 2026-10-29 이 기계 대화 기록: 1시간 캐시에서 5분 넘게 쉰 1244건 중 1220건이 90% 이상, 깨진 경우 약 3만 토큰만 읽음.
+ * 앞 메인 요청에서 5분 10초~1시간 사이에 온 요청이 캐시를 얼마나 읽었는지 본다.
+ * prevPrefix 는 앞 요청의 cache_read + cache_creation, shared 는 대화 첫 요청이 읽은 양(다른 세션과 같이 쓰는 시스템 프롬프트·도구).
+ * shared 를 뺀 이 세션 몫의 90% 이상을 읽음 → 'hit'(1시간 캐시가 살아 있었음). 절반 미만 → 'miss'(5분 캐시가 끝났거나 캐시가 깨짐).
+ * 2026-10-29 이 기계 대화 기록: 1시간 캐시에서 5분 넘게 쉰 1244건 중 1220건이 90% 이상. 공통 앞부분은 3만~5만 9천 토큰 (실화면).
  */
-export function observeTtl(gapMs: number, read: number, prevPrefix: number, hasWindows: boolean): '1h' | '5m' | null {
-  if (prevPrefix < OBSERVE_MIN_TOKENS || gapMs <= 5 * 60_000 + 10_000 || gapMs >= CACHE_TTL_MS) return null
-  if (read >= prevPrefix * 0.9) return '1h'
-  if (read < prevPrefix * 0.5 && !hasWindows) return '5m'
+export function observeTtl(gapMs: number, read: number, prevPrefix: number, shared: number): 'hit' | 'miss' | null {
+  const own = prevPrefix - shared
+  if (own < OBSERVE_MIN_OWN || gapMs <= 5 * 60_000 + 10_000 || gapMs >= CACHE_TTL_MS) return null
+  if (read - shared >= own * 0.9) return 'hit'
+  if (read - shared < own * 0.5) return 'miss'
   return null
+}
+
+/**
+ * 관찰을 쌓아 수명을 정한다. 적중 한 번이면 1시간. 못 읽은 것은 두 번 이어져야 5분: 한 번은 CLAUDE.md 등이 바뀌어 캐시가 깨진 것일 수 있다
+ * (2026-10-29 기록: 관찰 가능한 406개 세션에서 못 읽음 14번, 두 번 연속은 0번). 한도 창이 있는 구독은 1시간이 맞으므로 못 읽어도 세지 않는다.
+ */
+export function nextObserved(
+  prev: { observed: '1h' | '5m' | null, misses: number },
+  seen: 'hit' | 'miss' | null,
+  hasWindows: boolean,
+): { observed: '1h' | '5m' | null, misses: number } {
+  if (seen === 'hit') return { observed: '1h', misses: 0 }
+  if (seen !== 'miss') return prev
+  if (hasWindows) return { observed: prev.observed, misses: 0 }
+  const misses = prev.misses + 1
+  return { observed: misses >= 2 ? '5m' : prev.observed, misses }
 }
 
 /** 캐시가 남은 시간(ms). 기록이 없으면 null, 만료됐으면 0 이하. */

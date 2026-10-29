@@ -93,6 +93,10 @@ export type Beat = {
   cacheObserved?: '1h' | '5m'
   /** 앞 메인 요청의 cache_read + cache_creation. 다음 요청이 얼마나 읽었는지 비교하는 기준 (0.29.13) */
   cachePrefix?: number
+  /** 대화 첫 메인 요청이 읽은 캐시 = 다른 세션과 같이 쓰는 앞부분. 비율을 잴 때 뺀다 (0.29.14) */
+  cacheShared?: number
+  /** 5분 넘게 쉰 뒤 이어서 못 읽은 횟수. 2번이면 5분 캐시 (0.29.14) */
+  cacheMisses?: number
   updatedAt: number
 }
 

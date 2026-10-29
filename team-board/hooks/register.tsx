@@ -35,6 +35,7 @@ import {
   cacheLeft,
   cacheTtl,
   observeTtl,
+  nextObserved,
   cacheMinutes,
   cacheText,
   cacheWarn,
@@ -815,12 +816,14 @@ export const register: Register = (on, options) => {
       try {
         const rateLimits = (await $.session.usage()).rateLimits
         const u = r.usage
-        let observed = self.beat?.cacheObserved ?? null
+        // 대화 첫 요청(시작·/clear·compact 뒤)이 읽은 양은 다른 세션과 같이 쓰는 앞부분이다
+        const shared = u && prevAt === null ? u.cache_read_input_tokens : self.beat?.cacheShared ?? 0
+        let { observed, misses } = { observed: self.beat?.cacheObserved ?? null, misses: self.beat?.cacheMisses ?? 0 }
         if (u && prevAt !== null) {
-          const seen = observeTtl(at - prevAt, u.cache_read_input_tokens, prevPrefix, rateLimits.length > 0)
+          const seen = observeTtl(at - prevAt, u.cache_read_input_tokens, prevPrefix, shared)
           if (seen) {
-            $.ui.log(`team-board: 캐시 관찰 gap=${Math.round((at - prevAt) / 60_000)}분 read=${u.cache_read_input_tokens} prefix=${prevPrefix} → ${seen}`, { to: 'debug' })
-            observed = seen
+            ;({ observed, misses } = nextObserved({ observed, misses }, seen, rateLimits.length > 0))
+            $.ui.log(`team-board: 캐시 관찰 gap=${Math.round((at - prevAt) / 60_000)}분 read=${u.cache_read_input_tokens} prefix=${prevPrefix} shared=${shared} → ${seen} (${observed ?? '-'}, 연속 ${misses})`, { to: 'debug' })
           }
         }
         const ttl = cacheTtl({
@@ -831,8 +834,9 @@ export const register: Register = (on, options) => {
           observed,
         }, rateLimits)
         const prefix = u ? u.cache_read_input_tokens + u.cache_creation_input_tokens : prevPrefix
-        if (self.beat && (self.beat.cacheTtl !== ttl || (self.beat.cacheObserved ?? null) !== observed || self.beat.cachePrefix !== prefix)) {
-          await save($, { cacheTtl: ttl, cachePrefix: prefix, ...(observed ? { cacheObserved: observed } : {}) })
+        const b = self.beat
+        if (b && (b.cacheTtl !== ttl || (b.cacheObserved ?? null) !== observed || b.cachePrefix !== prefix || b.cacheShared !== shared || (b.cacheMisses ?? 0) !== misses)) {
+          await save($, { cacheTtl: ttl, cachePrefix: prefix, cacheShared: shared, cacheMisses: misses, ...(observed ? { cacheObserved: observed } : {}) })
         }
       } catch (err) {
         $.ui.log(`team-board: 캐시 수명을 읽지 못했습니다: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
