@@ -75,7 +75,7 @@
         "source": "git-subdir",
         "url": "https://github.com/yeochul-jeon/devflow-mods.git",
         "path": "prompt-coach",
-        "ref": "prompt-coach--v0.3.3"
+        "ref": "prompt-coach--v0.3.5"
       }
     },
     {
