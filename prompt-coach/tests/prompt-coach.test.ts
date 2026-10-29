@@ -176,34 +176,33 @@ describe('prompt-coach 흐름', () => {
     expect(await shows('coach-refine')).toBe(false) // 빈 입력창: 버튼 없음
     await type(DRAFT)
     expect(await text(/OTHER-MOD-BAND/)).toBe(true)
-    expect(await text(/^━━ prompt-coach ━{104}$/)).toBe(true) // 띠 폭(bodyColumns 120)을 채운다
-    // 위 대화 메시지와 띄우는 빈 줄. 띠에 줄이 모자라면 뺀다 (find 는 props 로 거르지 않아 맨 위 Box 의 첫 자식을 본다)
-    const gap = async (maxRows: number) => {
+    // 다른 mod 띠가 먼저(위), 이 mod 는 그 아래. 쉬는 동안은 머리줄 없이 한 줄
+    const kids = async (maxRows = 10) => {
       const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
-      const root = (await band.find({ type: 'Box' })) as any
+      const k = ((await band.find({ type: 'Box' })) as any).children
       await band.unmount()
-      return root.children[0].props.marginTop
+      return k
     }
-    expect(await gap(10)).toBe(1)
-    expect(await gap(2)).toBe(0)
-    // 아래 띠와 나누는 끝줄: 흐린 ─ 줄이 다른 mod 띠 바로 앞에 오고, 그 아래 빈 줄. 띠에 줄이 모자라면 빈 줄만 뺀다
-    const foot = async (maxRows: number) => {
-      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
-      const kids = ((await band.find({ type: 'Box' })) as any).children
-      await band.unmount()
-      const f = kids[kids.length - 2]
-      return { line: f.type === 'Box' && f.children[0].props.dimColor === true && f.children[0].children[0] === '─'.repeat(120), gap: f.props.marginBottom, restLast: JSON.stringify(kids[kids.length - 1]).includes('OTHER-MOD-BAND') }
+    const idle = await kids()
+    expect(idle.length).toBe(2)
+    expect(JSON.stringify(idle[0])).toContain('OTHER-MOD-BAND')
+    expect(idle[1].props.height).toBe(1)
+    expect(await text(/^━━ prompt-coach/)).toBe(false)
+    expect(await text(/─{120}/)).toBe(false) // 끝줄 없음
+    // 단계 안: 다른 mod 띠 → 머리줄(위 띠와 띄우는 빈 줄, 줄이 모자라면 뺀다) → 내용. 끝줄 없음
+    const order = async (maxRows: number) => {
+      const k = await kids(maxRows)
+      return { restFirst: JSON.stringify(k[0]).includes('OTHER-MOD-BAND'), gap: k[1].props.marginTop, foot: JSON.stringify(k).includes('─'.repeat(120)) }
     }
-    expect(await foot(10)).toEqual({ line: true, gap: 1, restLast: true })
-    expect(await foot(2)).toEqual({ line: true, gap: 0, restLast: true })
     await press('coach-refine')
     expect(s.box).toBe('') // 숫자 키로 답하도록 비운다
-    expect(await text(/OTHER-MOD-BAND/)).toBe(true)
-    expect(await foot(10)).toEqual({ line: true, gap: 1, restLast: true }) // 질문 단계
+    expect(await text(/^━━ prompt-coach ━+ 질문 1\/2$/)).toBe(true) // 띠 폭(bodyColumns 120)을 채운다
+    expect(await order(10)).toEqual({ restFirst: true, gap: 1, foot: false }) // 질문 단계
+    expect(await order(2)).toEqual({ restFirst: true, gap: 0, foot: false })
     await press('coach-now')
     expect(s.asked[1].prompt).toContain('<answers>\n\n</answers>')
     expect(s.box).toBe(REFINED)
-    expect(await foot(10)).toEqual({ line: true, gap: 1, restLast: true }) // 입력창에 넣음 단계
+    expect(await order(10)).toEqual({ restFirst: true, gap: 1, foot: false }) // 입력창에 넣음 단계
   })
 
   test('숫자 키: 선택지 1~, 건너뛰기 0, 바로 다듬기 9. 좁은 띠에서는 초안 줄과 직접 쓰기 안내를 뺀다', async ($, on) => {

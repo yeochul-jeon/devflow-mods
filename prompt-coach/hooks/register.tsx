@@ -335,7 +335,8 @@ export const register: Register = on => {
     )
   })
 
-  // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 위에 붙인다.
+  // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 아래(입력창 바로 위)에 붙인다.
+  // 위에 붙이면 이 mod 가 바깥일 때 team-board 띠가 아래로 밀려 잘린다
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const rest = await next(e)
     if (e.props.hasSurvey) return rest
@@ -344,7 +345,7 @@ export const register: Register = on => {
     const before = await read($, original)
     const width = e.props.bodyColumns
     const { Box, Text, Button } = $.ui.resolve(e)
-    // 바로 위 대화 기록과 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
+    // 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
     const isOn = await read($, auto)
     // spin 이 있으면 상태 앞에 노랑 스피너를 둔다
     const head = (status = '', spin = '') => {
@@ -364,12 +365,6 @@ export const register: Register = on => {
         </Box>
       )
     }
-    // 아래 띠(team-board 상자 등)와 나눈다: 머리줄보다 약한 흐린 줄 + 빈 줄. 줄이 모자라면 빈 줄을 뺀다
-    const foot = () => (
-      <Box key="coach-foot" marginBottom={e.props.maxRows >= 3 ? 1 : 0}>
-        <Text color="gray" dimColor wrap="truncate-end">{'─'.repeat(width)}</Text>
-      </Box>
-    )
     const cancelButton = <Button key="coach-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
     const undoButton = before !== '' ? <Button key="coach-undo" label="되돌리기" onPress={() => void undoBox($)} /> : null
 
@@ -378,13 +373,12 @@ export const register: Register = on => {
       const secs = Math.floor(((await $.clock.now()) - f.since) / 1000)
       return (
         <Box flexDirection="column">
+          {rest}
           {head(`${f.stage === 'asking' ? '질문 만드는 중' : '다듬는 중'} ${secs}초`, SPIN_FRAMES[n % SPIN_FRAMES.length])}
           <Box flexDirection="row" columnGap={2} paddingX={1}>
             <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
             {cancelButton}
           </Box>
-          {foot()}
-          {rest}
         </Box>
       )
     }
@@ -395,6 +389,7 @@ export const register: Register = on => {
       if (!q) return rest
       return (
         <Box flexDirection="column">
+          {rest}
           {head(`질문 ${i + 1}/${f.questions.length}`)}
           {/* 질문하는 동안 입력창은 비어 있다. 무엇을 다듬는지 한 줄로 보인다. 좁으면 높이를 아끼려고 이 줄과 직접 쓰기 안내를 뺀다 */}
           {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
@@ -409,8 +404,6 @@ export const register: Register = on => {
             {cancelButton}
           </Box>
           {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
-          {foot()}
-          {rest}
         </Box>
       )
     }
@@ -418,6 +411,7 @@ export const register: Register = on => {
     if (f.stage === 'done') {
       return (
         <Box flexDirection="column">
+          {rest}
           {head('입력창에 넣음')}
           <Box paddingX={1}>
             <Text wrap="truncate-end">
@@ -429,23 +423,20 @@ export const register: Register = on => {
             {undoButton}
             <Text dimColor wrap="truncate-end">초록 답 · 노랑 제안 · 고치거나 그대로 보내세요</Text>
           </Box>
-          {foot()}
-          {rest}
         </Box>
       )
     }
 
     if (e.props.isWorking || !b.hasDraft) return rest
+    // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다
     return (
       <Box flexDirection="column">
-        {head()}
-        <Box flexDirection="row" columnGap={1} paddingX={1}>
+        {rest}
+        <Box flexDirection="row" columnGap={1} paddingX={1} height={1} overflow="hidden">
           <Button key="coach-refine" label="다듬기" onPress={() => void refineBox($)} />
           {undoButton}
-          <Text dimColor wrap="truncate-end">빈 곳을 몇 개 묻고 다듬어요 (Haiku)</Text>
+          <Text dimColor wrap="truncate-end">{`빈 곳을 몇 개 묻고 다듬어요 (Haiku)${isOn ? ' · 자동' : ''}`}</Text>
         </Box>
-        {foot()}
-        {rest}
       </Box>
     )
   })
