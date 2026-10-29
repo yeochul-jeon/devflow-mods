@@ -198,11 +198,13 @@ describe('prompt-coach 흐름', () => {
     expect(s.box).toBe('') // 숫자 키로 답하도록 비운다
     expect(await text(/^━━ prompt-coach ━+ 질문 1\/2$/)).toBe(true) // 띠 폭(bodyColumns 120)을 채운다
     expect(await order(10)).toEqual({ restFirst: true, gap: 1, foot: false }) // 질문 단계
-    expect(await order(2)).toEqual({ restFirst: true, gap: 0, foot: false })
+    expect(await order(6)).toEqual({ restFirst: true, gap: 1, foot: false })
     await press('coach-now')
     expect(s.asked[1].prompt).toContain('<answers>\n\n</answers>')
     expect(s.box).toBe(REFINED)
     expect(await order(10)).toEqual({ restFirst: true, gap: 1, foot: false }) // 입력창에 넣음 단계
+    // 위 띠와 띄우는 빈 줄은 띠 자리가 3줄부터 (질문 단계는 6줄보다 적으면 머리줄째 빠진다)
+    expect(await order(2)).toEqual({ restFirst: true, gap: 0, foot: false })
   })
 
   test('숫자 키: 선택지 1~, 건너뛰기 0, 바로 다듬기 9. 좁은 띠에서는 초안 줄과 직접 쓰기 안내를 뺀다', async ($, on) => {
@@ -219,6 +221,16 @@ describe('prompt-coach 흐름', () => {
     expect(await narrow.find({ type: 'Text', text: /^초안/ })).toBeUndefined()
     expect(await narrow.find({ type: 'Text', text: /이 질문의 답/ })).toBeUndefined()
     await narrow.unmount()
+    // 띠 자리가 6줄보다 적으면 머리줄·초안·안내를 빼고 질문과 선택지만 (창 24줄: 자리 4줄 중 team-board 한 줄)
+    const low = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 5 } })
+    expect(await low.find({ type: 'Text', text: /^━━ prompt-coach/ })).toBeUndefined()
+    expect(await low.find({ type: 'Text', text: /^초안/ })).toBeUndefined()
+    expect(await low.find({ type: 'Text', text: /이 질문의 답/ })).toBeUndefined()
+    expect(await low.find({ key: 'coach-opt-0' })).toBeDefined()
+    await low.unmount()
+    const full = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 6 } })
+    expect(await full.find({ type: 'Text', text: /^초안/ })).toBeDefined()
+    await full.unmount()
   })
 
   test('물을 게 없으면 바로 다듬는다', async ($, on) => {

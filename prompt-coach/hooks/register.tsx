@@ -387,12 +387,14 @@ export const register: Register = on => {
       const i = f.answers.length
       const q = f.questions[i]
       if (!q) return rest
+      // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·질문·선택지·안내 = 6)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
+      const tight = e.props.maxRows < 6
       return (
         <Box flexDirection="column">
           {rest}
-          {head(`질문 ${i + 1}/${f.questions.length}`)}
+          {tight ? null : head(`질문 ${i + 1}/${f.questions.length}`)}
           {/* 질문하는 동안 입력창은 비어 있다. 무엇을 다듬는지 한 줄로 보인다. 좁으면 높이를 아끼려고 이 줄과 직접 쓰기 안내를 뺀다 */}
-          {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
+          {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
           <Box flexDirection="row" columnGap={1} paddingX={1}>
             <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
             <Text bold>{q.q}</Text>
@@ -403,7 +405,7 @@ export const register: Register = on => {
             <Button key="coach-now" label="바로 다듬기" hotkey={NOW_KEY} plain onPress={() => void rewriteNow($)} />
             {cancelButton}
           </Box>
-          {width >= 60 ? <Box paddingX={1}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
+          {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
         </Box>
       )
     }
