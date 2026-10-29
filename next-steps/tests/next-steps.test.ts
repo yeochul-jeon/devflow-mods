@@ -83,6 +83,8 @@ describe('next-steps', () => {
     expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
     // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
     expect(await band.find({ type: 'Text', text: /^── next-steps ─{106}$/ })).toBeDefined()
+    // 다른 mod 띠가 먼저(위), 이 mod 는 그 아래
+    expect(JSON.stringify(((await band.find({ type: 'Box' })) as any).children[0])).toContain('OTHER-MOD-BAND')
     await band.unmount()
 
     // 빈 입력창의 2 → 두 번째 제안이 초안으로. 보내지는 않는다

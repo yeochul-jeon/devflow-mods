@@ -88,7 +88,8 @@ export const register: Register = on => {
     return pick ? next({ ...e, inputText: pick }) : next(e)
   })
 
-  // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 위에 붙인다.
+  // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 아래(입력창 바로 위)에 붙인다.
+  // 위에 붙이면 이 mod 가 바깥일 때 team-board 띠가 아래로 밀려 잘린다
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const rest = await next(e)
     hasSurvey = e.props.hasSurvey
@@ -141,10 +142,10 @@ export const register: Register = on => {
     )
     return (
       <Box flexDirection="column">
-        {/* 바로 위 대화 기록과 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 두 줄도 안 되면 뺀다 */}
+        {rest}
+        {/* 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 두 줄도 안 되면 뺀다 */}
         {e.props.maxRows >= 2 && <Text dimColor wrap="truncate-end">{rule(e.props.bodyColumns)}</Text>}
         <Box paddingX={1}>{mine}</Box>
-        {rest}
       </Box>
     )
   })
