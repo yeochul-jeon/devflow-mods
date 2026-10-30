@@ -128,7 +128,7 @@ describe('prompt-coach 흐름', () => {
   const setup = async ($: any, on: any) => {
     mock.store(on)
     const clock = mock.clock(on, { now: 1_800_000_000_000 })
-    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
+    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], innerRows: -1, qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
     on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
     on('model.complete', ($: any, e: any) => {
@@ -144,7 +144,7 @@ describe('prompt-coach 흐름', () => {
     on('prompt.edit', ($: any, e: any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
     on('prompt.submit', ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', ($: any, e: any) => { s.toasts.push(e.text); return { value: undefined } })
-    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { s.innerRows = e.props.maxRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
     on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -301,6 +301,40 @@ describe('prompt-coach 흐름', () => {
     await press('coach-now')
     expect(s.box).toBe(REFINED)
     expect(await zero()).toBeUndefined()
+  })
+
+  test('쉬는 줄: 그릴 때 1줄을 떼고 안쪽 mod 에 넘긴다. 초안이 없으면 그대로', async ($, on) => {
+    const { s, type, mount } = await setup($, on)
+    const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } }); const shown = (await b.find({ key: 'coach-refine' })) !== undefined; await b.unmount(); return { shown, inner: s.innerRows } }
+    expect(await at(5)).toEqual({ shown: false, inner: 5 })
+    await type(DRAFT)
+    expect(await at(5)).toEqual({ shown: true, inner: 4 })
+    expect(await at(1)).toEqual({ shown: true, inner: 0 })
+    expect(await at(0)).toEqual({ shown: false, inner: 0 })
+    await (await mount()).unmount()
+  })
+
+  const NEXT_STEPS = {
+    name: 'next-steps',
+    register(on: any) {
+      on('tool.call', { tool: 'SetSteps' }, async ($: any, e: any) => {
+        await $.state.set({ plugin: 'next-steps', key: 'steps' }, e.steps)
+        return { result: 'ok' }
+      })
+    },
+  }
+
+  test('제안 목록이 안쪽에 있고 자리가 4줄보다 적으면 [다듬기]를 빼 제안을 남긴다. next-steps 가 바깥이면 뺄 필요 없다', { plugins: [NEXT_STEPS] }, async ($, on) => {
+    const { s, type } = await setup($, on)
+    await type(DRAFT)
+    await $.tool.call({ tool: 'SetSteps', steps: { turnId: 't', items: ['a', 'b'] } } as any)
+    const at = async (maxRows: number, extra = {}) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } }); const shown = (await b.find({ key: 'coach-refine' })) !== undefined; await b.unmount(); return { shown, inner: s.innerRows } }
+    expect(await at(3)).toEqual({ shown: false, inner: 3 })
+    expect(await at(1)).toEqual({ shown: false, inner: 1 })
+    expect(await at(4)).toEqual({ shown: true, inner: 3 })
+    expect(await at(1, { nextStepsRows: 3 })).toEqual({ shown: true, inner: 0 })
+    await $.tool.call({ tool: 'SetSteps', steps: { turnId: 't', items: [] } } as any)
+    expect(await at(1)).toEqual({ shown: true, inner: 0 })
   })
 
   test('긴 질문: 접히는 줄까지 세어 넘치면 머리줄을 빼고, 그래도 넘치면 질문을 한 줄로 자른다', async ($, on) => {

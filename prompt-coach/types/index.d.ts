@@ -49,5 +49,7 @@ declare module 'claude-code' {
     }
     /** 읽기만 한다. team-board 가 없으면 오지 않는다. team-board/types/index.d.ts 의 Beat 에서 쓰는 필드만 */
     'team-board': { me: { state: string; question: string } | null }
+    /** 읽기만 한다. next-steps 가 없으면 오지 않는다. next-steps/types/index.d.ts 의 steps 에서 쓰는 필드만 */
+    'next-steps': { steps: { items: string[] } | null }
   }
 }

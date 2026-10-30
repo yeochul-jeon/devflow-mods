@@ -20,6 +20,8 @@ const bypass = atom({ plugin: 'prompt-coach', key: 'bypass' } as const, false)
 // team-board 가 이 이름으로 읽는다. 바꾸면 team-board 도 바꾼다
 const pending = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
 const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as const, false)
+// next-steps 의 제안 목록. 읽기만 한다
+const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { items: string[] } | null)
 const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as CoachEntry[])
 const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
 const tick = atom({ plugin: 'prompt-coach', key: 'tick' } as const, 0)
@@ -342,12 +344,16 @@ export const register: Register = on => {
   // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 아래(입력창 바로 위)에 붙인다.
   // 위에 붙이면 이 mod 가 바깥일 때 team-board 띠가 아래로 밀려 잘린다
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const rest = await next(e)
+    const f = await read($, flow)
+    const b = await read($, band)
+    // 쉬는 줄을 그리면 그 1줄을 떼고 안쪽 mod 에 넘긴다. 안 떼면 이 mod 가 바깥일 때 안쪽 띠와 합쳐 넘친다.
+    // next-steps 가 안쪽에 있고 자리가 4줄(가로줄·제안 한 줄·팀 한 줄·쉬는 줄)보다 적으면 쉬는 줄을 빼 제안을 남긴다. next-steps 가 바깥이면 제 줄을 이미 뗐다
+    const stepsInside = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined && ((await read($, nextSteps))?.items.length ?? 0) > 0
+    const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepsInside ? 4 : 1)
+    const rest = await next(isIdleLine ? { ...e, props: { ...e.props, maxRows: e.props.maxRows - 1 } } : e)
     if (e.props.hasSurvey) return rest
     // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
     if (e.props.maxRows < 1) return rest
-    const f = await read($, flow)
-    const b = await read($, band)
     const before = await read($, original)
     const width = e.props.bodyColumns
     const { Box, Text, Button } = $.ui.resolve(e)
@@ -503,7 +509,7 @@ export const register: Register = on => {
       )
     }
 
-    if (e.props.isWorking || !b.hasDraft) return rest
+    if (!isIdleLine) return rest
     // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다
     return (
       <Box flexDirection="column">
