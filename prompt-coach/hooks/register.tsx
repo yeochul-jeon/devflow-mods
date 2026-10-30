@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { CoachBand, CoachEntry, CoachFlow, Spent } from '../types'
+import type { CoachBand, CoachEntry, CoachFlow, Question, Spent } from '../types'
 import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort, wrappedRows } from './refine'
 
 // $.state 에 두어 핫 리로드에도 유지된다.
@@ -46,6 +46,20 @@ const OPT_MIN = 5
 /** 띠 자리가 1줄일 때 질문에 남기는 최소 칸. */
 const ASK_MIN = 8
 const SKIP_KEY = '0'
+
+/** 질문 단계의 모양과 줄 수(own). 그리는 쪽과 안쪽 mod 에 넘길 줄 계산이 같은 값을 쓴다. */
+function questionShape(q: Question, width: number, maxRows: number) {
+  const inner = width - 2
+  // 버튼 앞 "1: " 은 엔진이 그려 3칸이 더 든다. 취소는 숫자가 없다
+  const optRows = wrappedRows([...q.options.map(o => cells(o) + 3), cells('건너뛰기') + 3, cells('바로 다듬기') + 3, cells('취소')], inner, 2)
+  // 질문 앞 번호가 4칸을 쓴다. 긴 질문은 접힌다
+  const qRows = Math.ceil((cells(q.q) + 4) / inner)
+  // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·안내 = 4 + 질문 + 선택지)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
+  const tight = maxRows < 4 + qRows + optRows
+  const isCut = maxRows - 1 < optRows
+  const own = isCut ? Math.min(maxRows, 2) : tight ? (maxRows - optRows < qRows ? 1 : qRows) + optRows : (width >= 60 ? 4 : 2) + qRows + optRows
+  return { inner, optRows, qRows, tight, isCut, own }
+}
 const NOW_KEY = '9'
 
 export const register: Register = on => {
@@ -350,7 +364,11 @@ export const register: Register = on => {
     // next-steps 가 안쪽에 있고 자리가 4줄(가로줄·제안 한 줄·팀 한 줄·쉬는 줄)보다 적으면 쉬는 줄을 빼 제안을 남긴다. next-steps 가 바깥이면 제 줄을 이미 뗐다
     const stepsInside = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined && ((await read($, nextSteps))?.items.length ?? 0) > 0
     const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepsInside ? 4 : 1)
-    const rest = await next(isIdleLine ? { ...e, props: { ...e.props, maxRows: e.props.maxRows - 1 } } : e)
+    const q = !e.props.hasSurvey && f.stage === 'questions' && e.props.maxRows >= 1 ? f.questions[f.answers.length] : undefined
+    const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows) : null
+    // 질문도 그릴 줄을 떼고 넘긴다. 이 mod 가 바깥이면 안쪽 team-board 한 줄만큼 넘쳐 선택지가 "↓ n more" 아래로 숨는다. team-board 는 coachRows 를 보고 받은 줄 안에서 그린다
+    const inward = isIdleLine ? { maxRows: e.props.maxRows - 1 } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
+    const rest = await next(inward ? { ...e, props: { ...e.props, ...inward } as typeof e.props } : e)
     if (e.props.hasSurvey) return rest
     // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
     if (e.props.maxRows < 1) return rest
@@ -410,25 +428,20 @@ export const register: Register = on => {
     }
 
     if (f.stage === 'questions') {
+      if (!q || !shape) return rest
       const i = f.answers.length
-      const q = f.questions[i]
-      if (!q) return rest
-      const inner = width - 2
-      // 버튼 앞 "1: " 은 엔진이 그려 3칸이 더 든다. 취소는 숫자가 없다
-      const optRows = wrappedRows([...q.options.map(o => cells(o) + 3), cells('건너뛰기') + 3, cells('바로 다듬기') + 3, cells('취소')], inner, 2)
-      // 질문 앞 번호가 4칸을 쓴다. 긴 질문은 접힌다
-      const qRows = Math.ceil((cells(q.q) + 4) / inner)
-      // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·안내 = 4 + 질문 + 선택지)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
-      const tight = e.props.maxRows < 4 + qRows + optRows
-      // 그래도 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
-      if (e.props.maxRows - 1 < optRows) {
+      const { inner, optRows, qRows, tight } = shape
+      // 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
+      if (shape.isCut) {
         const isLine = e.props.maxRows < 2
         const chip = <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
         const count = q.options.length
         const free = inner - (cells('건너뜀') + 3 + cells('바로') + 3 + cells('취소')) - (count + 2 + (isLine ? 2 : 0))
-        // 한 줄이면 질문은 폭의 1/3 까지, 선택지가 최소 칸을 못 받으면 그만큼 질문을 줄인다
-        const asked = clip(q.q, isLine ? Math.max(ASK_MIN, Math.min(Math.floor(inner / 3), free - 3 - count * (OPT_MIN + 3))) : inner - 4)
-        const room = free - (isLine ? 3 + cells(asked) : 0)
+        // 한 줄이면 질문은 폭의 1/3 까지, 선택지가 최소 칸을 못 받으면 그만큼 질문을 줄인다. 그래도 ASK_MIN 이 안 되면 질문을 빼고 선택지와 버튼을 남긴다 (70칸·선택지 4개). 질문 글은 /coach view 에 있다
+        const askRoom = free - 3 - count * (OPT_MIN + 3)
+        const hasAsk = !isLine || askRoom >= ASK_MIN
+        const asked = hasAsk ? clip(q.q, isLine ? Math.min(Math.floor(inner / 3), askRoom) : inner - 4) : ''
+        const room = free - (isLine && hasAsk ? 3 + cells(asked) : 0)
         const share = Math.max(OPT_MIN, Math.floor(room / count) - 3)
         const options = [
           ...q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={clip(o, share)} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />),
@@ -442,7 +455,7 @@ export const register: Register = on => {
             {isLine ? (
               <Box key="coach-line" flexDirection="row" columnGap={1} paddingX={1}>
                 {chip}
-                <Box flexShrink={0}><Text bold>{asked}</Text></Box>
+                {hasAsk ? <Box flexShrink={0}><Text bold>{asked}</Text></Box> : null}
                 {options}
               </Box>
             ) : (

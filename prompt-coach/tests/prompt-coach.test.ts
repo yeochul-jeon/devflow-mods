@@ -128,7 +128,7 @@ describe('prompt-coach 흐름', () => {
   const setup = async ($: any, on: any) => {
     mock.store(on)
     const clock = mock.clock(on, { now: 1_800_000_000_000 })
-    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], innerRows: -1, qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
+    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], innerRows: -1, innerCoachRows: undefined as number | undefined, qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
     on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
     on('model.complete', ($: any, e: any) => {
@@ -144,7 +144,7 @@ describe('prompt-coach 흐름', () => {
     on('prompt.edit', ($: any, e: any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
     on('prompt.submit', ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', ($: any, e: any) => { s.toasts.push(e.text); return { value: undefined } })
-    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { s.innerRows = e.props.maxRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { s.innerRows = e.props.maxRows; s.innerCoachRows = e.props.coachRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
     on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -362,6 +362,27 @@ describe('prompt-coach 흐름', () => {
     const one = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 1, bodyColumns: 75 } })
     for (let k = 0; k < 4; k++) expect((await one.find({ key: `coach-opt-${k}` }))?.props.label).toBe(`${four[k]!.slice(0, 2)}…`)
     await one.unmount()
+    // 70칸: 질문까지 넣으면 넘쳐 번호와 취소가 밀려난다. 질문 글을 빼고 선택지와 버튼을 남긴다
+    const narrow = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 1, bodyColumns: 70 } })
+    expect(await narrow.find({ type: 'Text', text: /^어떤/ })).toBeUndefined()
+    expect(await narrow.find({ type: 'Text', text: / 1 $/ })).toBeDefined()
+    expect(await narrow.find({ key: 'coach-cancel' })).toBeDefined()
+    for (let k = 0; k < 4; k++) expect((await narrow.find({ key: `coach-opt-${k}` }))?.props.label).toMatch(/^.{2,}…$/)
+    await narrow.unmount()
+  })
+
+  test('질문 단계: 그리는 줄을 떼고 안쪽 mod 에 넘기고, 그 줄 수를 coachRows 로 알린다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    const q = '가'.repeat(40)
+    s.qReply = `<questions>${JSON.stringify([{ q, options: ['a', 'b'] }])}</questions>`
+    await coach(DRAFT)
+    const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75 } }); await b.unmount(); return s.innerRows }
+    expect(await at(12)).toBe(12 - 7) // 빈 줄·머리줄·초안·안내 4 + 질문 2 + 선택지 1
+    expect(await at(6)).toBe(6 - 3) // 질문 2 + 선택지 1
+    expect(s.innerCoachRows).toBe(3)
+    expect(await at(3)).toBe(0)
+    expect(await at(2)).toBe(0) // 질문을 자른 한 줄 + 선택지 1
+    expect(await at(1)).toBe(0)
   })
 
   test('만드는 중: 띠 자리가 1줄이면 스피너·상태·초안·취소를 한 줄에', async ($, on) => {
