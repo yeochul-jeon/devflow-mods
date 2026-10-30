@@ -21,7 +21,7 @@
         "source": "git-subdir",
         "url": "https://github.com/yeochul-jeon/devflow-mods.git",
         "path": "team-board",
-        "ref": "team-board--v0.29.20"
+        "ref": "team-board--v0.29.21"
       }
     },
     {
