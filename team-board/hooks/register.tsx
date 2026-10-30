@@ -1246,8 +1246,10 @@ export const register: Register = (on, options) => {
     // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양 (혼자 창 3줄도 안 들어가면 이 모양, N5)
     // prompt-coach 가 질문 중이어도 이 모양: 아래 질문·선택지에 줄을 양보한다. 안 보이는 선택지를 숫자로 고르게 된다 (T53)
     const coachAsking = !!(await read($, coachQuestion))
-    // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54)
-    if (coachAsking && maxRows < 3) return next(e)
+    // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54).
+    // prompt-coach 가 바깥이면 제 줄을 이미 떼고 coachRows 로 알려 오니 받은 줄이 1줄이라도 그린다
+    const outerCoach = (e.props as { coachRows?: number }).coachRows !== undefined
+    if (coachAsking && maxRows < (outerCoach ? 1 : 3)) return next(e)
     // 안쪽 next-steps 제안에 1줄 이상 남긴다: 창 모양이 다 쓰면 한 줄 모양, 그래도 안 남으면 그리지 않는다 (T55).
     // next-steps 가 바깥이면 제 줄을 이미 떼고 nextStepsRows 로 알려 오니 양보하지 않는다. 작업 중에는 목록을 그리지 않는다
     const outerSteps = (e.props as { nextStepsRows?: number }).nextStepsRows !== undefined

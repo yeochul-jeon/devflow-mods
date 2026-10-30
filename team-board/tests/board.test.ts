@@ -3246,6 +3246,15 @@ describe('자기 세션 표시', () => {
     expect(await bandHas(/결정 1/, 2)).toBe(false)
     expect(await bandHas(/OTHER-MOD-BAND/, 2)).toBe(true)
     expect(await bandHas(/결정 1/, 3)).toBe(true)
+    // prompt-coach 가 바깥이면 제 줄을 이미 떼고 coachRows 로 알려 온다: 받은 줄이 1줄이라도 한 줄 모양을 그린다
+    const inside = async (maxRows: number) => {
+      const b = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 160, coachRows: 6 } } as any)
+      const shown = (await b.find({ type: 'Text', text: /결정 1/ })) !== undefined
+      await b.unmount()
+      return shown
+    }
+    expect(await inside(1)).toBe(true)
+    expect(await inside(0)).toBe(false)
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
     expect(await pane.find({ type: 'Text', text: /prompt-coach: 범위는/ })).toBeDefined()
