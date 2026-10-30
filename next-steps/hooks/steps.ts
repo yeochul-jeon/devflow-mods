@@ -20,7 +20,7 @@ export function buildRequest(history: readonly Message[], answer: string): { sys
     'You read the end of a coding session and predict what the person will type next to their coding assistant.',
     'Give 2 or 3 short, concrete follow-up requests, each an instruction under 60 characters, specific to what just happened (name the file, test or feature).',
     'Write them in the same language the person writes in. Keep file names, commands and code identifiers as they are.',
-    'One per line, no numbering, no quotes, nothing else. If nothing sensible follows, reply with the single word NONE.',
+    'One per line, no numbering, no quotes, nothing else. Plain text, no Markdown or backticks. If nothing sensible follows, reply with the single word NONE.',
   ].join('\n')
   const prompt = [
     `<transcript>\n${recent.map(m => `[${m.role === 'user' ? 'person' : 'assistant'}] ${m.text.slice(0, PER_MESSAGE)}`).join('\n')}\n</transcript>`,
@@ -31,14 +31,15 @@ export function buildRequest(history: readonly Message[], answer: string): { sys
 }
 
 /**
- * 모델 답을 제안 목록으로. 번호·글머리·감싼 따옴표를 걷고, NONE·빈 줄·너무 긴 줄은 버린다.
+ * 모델 답을 제안 목록으로. 번호·글머리·감싼 따옴표·인라인 코드 백틱을 걷고, NONE·빈 줄·코드 울타리 줄·너무 긴 줄·같은 줄은 버린다.
  * 출력 상한에 닿아 끝났으면(truncated) 마지막 줄은 잘렸을 수 있어 버린다. 잘린 초안은 반쪽짜리 요청이 된다.
  */
 export function parseSteps(text: string, truncated = false): string[] {
   const lines = text.trim().split('\n')
   if (truncated) lines.pop()
-  return lines
-    .map(line => line.trim().replace(/^(\d+[.)]|[-*•])\s+/, '').replace(/^["“](.*)["”]$/, '$1').trim())
+  const items = lines
+    .filter(line => !line.trim().startsWith('```'))
+    .map(line => line.trim().replace(/^(\d+[.)]|[-*•])\s+/, '').replace(/^["“](.*)["”]$/, '$1').replace(/(^|[^\w$`])`([^`]+)`(?![\w$`])/g, '$1$2').trim())
     .filter(line => line !== '' && line !== 'NONE' && line.length <= MAX_KEPT)
-    .slice(0, MAX_ITEMS)
+  return [...new Set(items)].slice(0, MAX_ITEMS)
 }

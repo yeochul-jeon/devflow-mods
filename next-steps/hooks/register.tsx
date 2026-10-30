@@ -31,7 +31,10 @@ export const register: Register = on => {
     if (arg === 'on' || arg === 'off') {
       off = arg === 'off'
       await $.store.set(OFF_KEY, off)
-      if (off) await update($, steps, () => null)
+      if (off) {
+        latest = `off-${++submits}` // 만들고 있던 제안도 버린다 (T56)
+        await update($, steps, () => null)
+      }
       return { text: off ? '다음 요청 제안을 껐어요. 다시 켜려면 /next on' : '다음 요청 제안을 켰어요.' }
     }
     if (arg) return { text: '쓰는 법: /next (사용량) · /next on · /next off' }
@@ -48,6 +51,8 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    // 백그라운드 보조 에이전트가 깨어난 턴은 메인 대화의 제안과 무관하다 (T56)
+    if (e.agentId) return next(e)
     latest = e.turnId
     await update($, steps, () => null)
     return next(e)
@@ -80,7 +85,8 @@ export const register: Register = on => {
     const s = await read($, steps)
     // 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다
     if (e.props.hasSurvey || e.props.isWorking || !s || s.items.length === 0 || e.props.maxRows < 1) return next(e)
-    // 줄이 모자라면 한 줄에 모은다. 가로줄 한 줄을 더 센다
+    // 줄이 모자라면 한 줄에 모은다. 펼친 목록은 가로줄 + 제안 + 닫기 줄 = items + 2 줄인데 items + 3 줄을 요구한다.
+    // 이 1줄 여유로 펼쳐도 안쪽 mod 에 1줄이 남는다(딱 맞으면 안쪽이 0줄이 되어 그리지 않는다). 0.1.0 부터 같은 여유 (T56 에서 확인)
     const oneRow = e.props.maxRows < s.items.length + 3
     // 이 띠의 줄 수(가로줄 + 제안 줄들 + 닫기 줄, 또는 가로줄 + 한 줄)를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다.
     // 넘치면 엔진이 위부터 보여 줘 맨 아래인 이 띠가 가려진다. 이 mod 가 바깥이면 안쪽 team-board 가 남은 줄에 맞춰 줄어든다.
@@ -177,7 +183,6 @@ async function suggest($: EngineInterface, turnId: string, answer: string): Prom
     return
   }
   const items = parseSteps(r.text, r.usage.output_tokens >= MAX_TOKENS)
-  // 그사이 전송이나 새 턴이 왔으면 버린다
-  if (latest !== turnId) return
-  await update($, steps, () => (items.length > 0 ? { turnId, items } : null))
+  // 그사이 전송·새 턴·끄기가 왔으면 버린다. 쓰다가 겹치면 update 가 다시 부르므로 그 안에서 본다 (T56)
+  await update($, steps, cur => (latest !== turnId ? cur : items.length > 0 ? { turnId, items } : null))
 }

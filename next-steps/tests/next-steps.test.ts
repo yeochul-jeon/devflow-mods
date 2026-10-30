@@ -9,12 +9,16 @@ const settle = () => new Promise(r => (globalThis as any).setTimeout(r, 20))
 const LONG_ANSWER = 'README 의 설치 절을 고쳤고 테스트 48개가 모두 통과했습니다.'
 
 describe('steps (순수 함수)', () => {
-  test('번호·글머리·따옴표를 걷고 3개까지, NONE 이면 없음, 너무 긴 줄은 자르지 않고 버린다', async () => {
+  test('번호·글머리·따옴표·백틱을 걷고 3개까지, NONE 이면 없음, 너무 긴 줄은 자르지 않고 버린다', async () => {
     expect(parseSteps('1. 테스트를 다시 돌려 줘\n- `board.ts` 도 같은 검사를 넣어 줘\n"PR 초안을 만들어 줘"\n4) 네 번째')).toEqual([
       '테스트를 다시 돌려 줘',
-      '`board.ts` 도 같은 검사를 넣어 줘',
+      'board.ts 도 같은 검사를 넣어 줘',
       'PR 초안을 만들어 줘',
     ])
+    // 코드 울타리 줄은 버리고, 같은 제안은 한 번만 (T56)
+    expect(parseSteps('```\n`lst.sort()` 예제 보여줘\nlst.sort() 예제 보여줘\n```\n정렬 기준 설명해줘')).toEqual(['lst.sort() 예제 보여줘', '정렬 기준 설명해줘'])
+    // 단어에 붙은 백틱은 코드의 일부(태그 템플릿 등)라 그대로 둔다
+    expect(parseSteps('html`<p>` 태그 템플릿 테스트 추가해 줘')).toEqual(['html`<p>` 태그 템플릿 테스트 추가해 줘'])
     expect(parseSteps('NONE')).toEqual([])
     expect(parseSteps('\n\n')).toEqual([])
     expect(parseSteps('짧은 것\n' + 'x'.repeat(121))).toEqual(['짧은 것'])
@@ -36,6 +40,7 @@ describe('steps (순수 함수)', () => {
     expect(system).toContain('same language')
     expect(system).toContain('NONE')
     expect(system).toContain('under 60 characters')
+    expect(system).toContain('no Markdown')
   })
 })
 
@@ -274,8 +279,67 @@ describe('next-steps', () => {
     await settle()
     expect(toasts.join('\n')).toContain('api-error')
     const band = await $.ui.mount(BAND)
-    expect(await band.find({ type: 'Text', text: /0 닫기/ })).toBeUndefined()
+    // 닫기 줄과 가로줄도 없다. 번호 '0: ' 은 엔진이 그려 Text 로는 찾을 수 없다
+    expect(await band.find({ key: 'close' })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /next-steps/ })).toBeUndefined()
     await band.unmount()
+  })
+
+  test('보조 에이전트의 턴 시작은 제안을 지우지 않는다. 늦게 온 답은 /next off·전송·새 턴 뒤면 버린다 (T56)', async ($, on) => {
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('agent.list', () => ({ value: [] }))
+    on('session.messages', () => ({ value: [] }))
+    // hold 면 release() 를 부를 때까지 답을 미룬다
+    let hold = false
+    let release = () => {}
+    on('model.complete', () => {
+      if (!hold) return { value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }
+      return new Promise(r => { release = () => r({ value: { isAnswered: true, text: '늦은 제안', usage: USAGE } }) })
+    })
+    on('turn.complete', () => ({ text: '' }))
+    on('turn.start', ($, e: any) => ({ turnId: e.turnId }))
+    on('prompt.submit', ($, e: any) => ({ text: e.text }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    const complete = (turnId: string) => $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId } as any)
+    const start = (turnId: string, agentId?: string) => $.turn.start({ text: '', turnId, ...(agentId ? { agentId } : {}) } as any)
+    const shows = async (re: RegExp) => {
+      const band = await $.ui.mount(BAND)
+      const found = await band.find({ type: 'Text', text: re })
+      await band.unmount()
+      return found !== undefined
+    }
+    // 답을 붙잡아 둔 채 턴을 끝내고, between 을 한 뒤 답을 보낸다
+    const lateAfter = async (turnId: string, between: () => Promise<unknown>) => {
+      hold = true
+      await complete(turnId)
+      await settle()
+      await between()
+      release()
+      await settle()
+      hold = false
+      return shows(/늦은 제안/)
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await complete('t1')
+    await settle()
+    expect(await shows(/테스트를 다시 돌려 줘/)).toBe(true)
+    // 백그라운드 보조 에이전트가 깨어나 턴을 시작해도 메인 대화의 제안은 그대로
+    await start('s1', 'sub-1')
+    expect(await shows(/테스트를 다시 돌려 줘/)).toBe(true)
+    // 메인의 새 턴은 지운다
+    await start('t2')
+    expect(await shows(/테스트를 다시 돌려 줘/)).toBe(false)
+
+    // 만드는 동안 보조 에이전트 턴이 시작돼도 답은 버리지 않는다
+    expect(await lateAfter('t3', () => start('s2', 'sub-1'))).toBe(true)
+    // 만드는 동안 끄면 늦은 답은 버린다
+    expect(await lateAfter('t4', () => $.command.run({ command: 'next', args: 'off' } as any))).toBe(false)
+    await $.command.run({ command: 'next', args: 'on' } as any)
+    expect(await lateAfter('t5', () => $.prompt.submit({ text: '다른 걸 할게', origin: { kind: 'composer' } } as any))).toBe(false)
+    expect(await lateAfter('t6', () => start('t7'))).toBe(false)
   })
 })
 
