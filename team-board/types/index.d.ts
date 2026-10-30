@@ -167,5 +167,7 @@ declare module 'claude-code' {
     'work-plan': { plan: WorkPlan | null }
     /** 읽기만 한다. prompt-coach 가 답을 기다리는 질문("prompt-coach: …") 또는 null. prompt-coach/types/index.d.ts 의 pending 과 같다 */
     'prompt-coach': { pending: string | null }
+    /** 읽기만 한다. next-steps 가 띄운 다음 요청 제안 또는 null(닫음·꺼짐). next-steps/types/index.d.ts 의 steps 와 같다 */
+    'next-steps': { steps: { turnId: string; items: string[] } | null }
   }
 }

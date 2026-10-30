@@ -3267,6 +3267,73 @@ describe('자기 세션 표시', () => {
   })
 })
 
+const NEXT_STEPS = {
+  name: 'next-steps',
+  register(on: any) {
+    on('tool.call', { tool: 'SetSteps' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'next-steps', key: 'steps' }, e.steps)
+      return { result: 'ok' }
+    })
+  },
+}
+
+describe('next-steps 연동', () => {
+  test('안쪽 next-steps 제안에 1줄 이상 남긴다: 창 모양이 다 쓰면 한 줄 모양, 그래도 안 남으면 그리지 않는다. 바깥 next-steps 에는 양보하지 않는다 (T55)', { plugins: [NEXT_STEPS] }, async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
+    const setSteps = (steps: unknown) => $.tool.call({ tool: 'SetSteps', steps } as any)
+    // 창 모양은 머리 칩 "◆ TEAM 2", 한 줄 모양은 " TEAM 2 "
+    const shape = async (maxRows: number, props: any = {}) => {
+      const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 160, ...props } } as any)
+      const win = await band.find({ type: 'Text', text: /◆ TEAM 2/ })
+      const line = await band.find({ type: 'Text', text: /^ TEAM 2 $/ })
+      const other = await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })
+      await band.unmount()
+      expect(other).toBeDefined()
+      return win ? 'window' : line ? 'line' : 'none'
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    const mineKey = [...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!
+    const other = { ...JSON.parse(files.get(mineKey)!), id: 'a-other', updatedAt: NOW - 1 }
+    files.set(mineKey.replace(/me-[0-9a-f]{8}\.json$/, 'other-00000000.json'), JSON.stringify(other))
+    await clock.advance(3_000)
+    // 제안이 없으면 창 모양 (160칸, 세션 2개: 테두리 2 + 머리 1 + 칸 2 = 5줄)
+    expect(await shape(5)).toBe('window')
+
+    await setSteps({ turnId: 't1', items: ['하나', '둘', '셋'] })
+    // 창 모양이 1줄이라도 남기면 창 모양 (실화면 30줄 창의 띠 자리 6줄). 다 쓰면 한 줄 모양
+    expect(await shape(6)).toBe('window')
+    expect(await shape(5)).toBe('line')
+    expect(await shape(2)).toBe('line')
+    // 한 줄 모양도 1줄을 남기지 못하면 그리지 않는다 (20줄 창의 띠 자리 1줄)
+    expect(await shape(1)).toBe('none')
+    // 작업 중에는 next-steps 가 목록을 그리지 않는다
+    expect(await shape(5, { isWorking: true })).toBe('window')
+    // next-steps 가 바깥이면 제 줄을 이미 떼고 넘긴다. 다시 빼지 않는다
+    expect(await shape(5, { nextStepsRows: 5 })).toBe('window')
+    // 0 으로 닫거나 /next off 면 값이 비고 창 모양으로 돌아온다
+    await setSteps(null)
+    expect(await shape(5)).toBe('window')
+  })
+})
+
 describe('결정 대화상자 위 맥락 (T34 A1)', () => {
   // 대화상자 둘레 그리기는 엔진 노드가 있어야 해서 테스트 키트로는 띄우지 못한다 (실화면 시험으로 확인). 내용만 여기서
   test('요청·계획 단계·직전 Claude 글을 줄마다 78칸 안으로, 아는 것이 없으면 []', async () => {

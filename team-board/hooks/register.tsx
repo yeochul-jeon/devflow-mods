@@ -129,6 +129,8 @@ const look = atom({ plugin: 'team-board', key: 'look' } as const, 'blob' as Look
 const workPlan = atom({ plugin: 'work-plan', key: 'plan' } as const, null as WorkPlan | null)
 // 읽기만 한다. prompt-coach 가 답을 기다리는 질문 글. prompt-coach 가 없으면 값이 없다
 const coachQuestion = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
+// 읽기만 한다. next-steps 가 띄운 다음 요청 제안. 0 으로 닫거나 /next off 면 null. next-steps 가 없으면 값이 없다
+const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { turnId: string; items: string[] } | null)
 const BAND_KEY = 'band-off'
 const BAND_MODE_KEY = 'band-mode'
 const BAND_SOLO_KEY = 'band-solo-off'
@@ -1246,7 +1248,15 @@ export const register: Register = (on, options) => {
     const coachAsking = !!(await read($, coachQuestion))
     // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54)
     if (coachAsking && maxRows < 3) return next(e)
-    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachAsking) {
+    // 안쪽 next-steps 제안에 1줄 이상 남긴다: 창 모양이 다 쓰면 한 줄 모양, 그래도 안 남으면 그리지 않는다 (T55).
+    // next-steps 가 바깥이면 제 줄을 이미 떼고 nextStepsRows 로 알려 오니 양보하지 않는다. 작업 중에는 목록을 그리지 않는다
+    const outerSteps = (e.props as { nextStepsRows?: number }).nextStepsRows !== undefined
+    const steps = e.props.isWorking || outerSteps ? null : await read($, nextSteps)
+    const keep = steps?.items.length ? 1 : 0
+    if (keep && maxRows - keep < 1) return next(e)
+    const layout = bandLayout(list.length, columns, maxRows, head)
+    const stepsCramped = keep > 0 && maxRows - hudRows(layout, list.length - layout.shown, columns, head) < keep
+    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachAsking || stepsCramped) {
       // 칩 글자. 그리는 것과 줄 수 세기(lineShown)가 같은 글자를 쓴다
       const partsOf = (b: Beat) => {
         const stale = isStale(b, now)
@@ -1275,9 +1285,11 @@ export const register: Register = (on, options) => {
       const failChip = ` ⚠ 실패 ${fails} `
       const lead = fails ? [team, failChip] : [team]
       // 높이에 다 안 들어가면 중요한 세션부터 보이고 나머지는 +k (창 모양과 같은 순서)
-      const fitsAll = lineShown(lead, list.map(textOf), columns, maxRows) === list.length
+      // 제안에 남길 줄은 빼고 센다. 칩이 여러 줄로 넘어 제안 자리를 먹지 않게
+      const lineMax = maxRows - keep
+      const fitsAll = lineShown(lead, list.map(textOf), columns, lineMax) === list.length
       const pick = fitsAll ? list : bandOrder(list, now, self.beat?.id)
-      const lineShownN = fitsAll ? list.length : lineShown(lead, pick.map(textOf), columns, maxRows)
+      const lineShownN = fitsAll ? list.length : lineShown(lead, pick.map(textOf), columns, lineMax)
       const lineHidden = pick.length - lineShownN
       const below = await nextWith(lineRows(lead, pick.map(textOf), lineShownN, columns))
       return (
@@ -1295,7 +1307,6 @@ export const register: Register = (on, options) => {
 
     // 창(HUD) 모양: 위에 팀 요약, 아래에 세션 칸을 나란히 (세이브 슬롯처럼)
     // 세션 수·화면 크기에 맞춰 배치: 혼자면 한 줄, 많으면 칸을 한 줄로 줄이고 넘치면 +k
-    const layout = bandLayout(list.length, columns, maxRows, head)
     const slotW = layout.slotW
     const ordered = bandOrder(list, now, self.beat?.id)
     const shown = ordered.slice(0, layout.shown)
