@@ -1337,7 +1337,8 @@ describe('프롬프트 캐시', () => {
     on('settings.read', () => ({ value: ttlSetting ? { promptCacheTtl: ttlSetting } : {} }))
     // 아래 mod 가 받은 줄 수 (N5): team-board 가 자기 높이를 빼고 넘긴다
     let belowRows = -1
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    let belowTeamRows: unknown
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; belowTeamRows = e.props.teamRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     let usage = { ...USAGE }
     on('turn.step', async function* ($, e: any) {
       return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...usage, model: 'm' } }
@@ -1375,6 +1376,7 @@ describe('프롬프트 캐시', () => {
     expect((await band.find({ type: 'Text', text: /^ 캐시 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
     expect(await band.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
     expect(belowRows).toBe(10 - 3) // 혼자 창은 3줄
+    expect(belowTeamRows).toBe(3) // 바깥에서 뗀 줄을 prompt-coach 에 알린다
     // 이 띠를 다른 mod 띠보다 위에 그린다: 넘치면 엔진이 위부터 보여 주므로 결정·실패가 잘리지 않는다 (N5)
     const tree = JSON.stringify(await band.find({ type: 'Box' }))
     expect(tree.indexOf('OTHER-MOD-BAND')).toBeGreaterThan(tree.indexOf('보드 /board'))
@@ -3105,7 +3107,8 @@ describe('prompt-coach 연동', () => {
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
     let belowRows = -1
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    let belowTeamRows: unknown
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; belowTeamRows = e.props.teamRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     const band = async () => {
       const m = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
       const line = (await m.find({ type: 'Text', text: /^ TEAM 1/ })) !== undefined

@@ -1215,7 +1215,8 @@ export const register: Register = (on, options) => {
     if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return next(e)
     // 아래 mod(next-steps·prompt-coach 등)에는 이 띠가 쓰고 남은 줄만 넘기고, 이 띠는 그들보다 위에 그린다 (N5).
     // 넘치면 엔진이 위부터 보여 주므로, 줄 수를 줄이지 않는 띠(prompt-coach, 엔진 Heads up)가 있어도 결정·실패가 가려지지 않는다
-    const nextWith = (h: number) => next({ ...e, props: { ...e.props, maxRows: Math.max(0, (e.props.maxRows ?? 10) - h) } })
+    // teamRows: 이 띠가 바깥에서 줄을 뗐다는 표시. prompt-coach 가 팀 줄을 다시 빼지 않게 한다
+    const nextWith = (h: number) => next({ ...e, props: { ...e.props, maxRows: Math.max(0, (e.props.maxRows ?? 10) - h), teamRows: h } as typeof e.props })
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const asking = list.filter(b => b.state === 'asking' && !isStale(b, now)).length
