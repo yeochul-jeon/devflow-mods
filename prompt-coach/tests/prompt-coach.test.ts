@@ -271,6 +271,11 @@ describe('prompt-coach 흐름', () => {
     expect(s.box).toBe(DRAFT)
     expect(await shows('coach-refine')).toBe(true)
     expect(s.asked).toHaveLength(1)
+    // 위 mod 가 줄을 다 써 받은 줄이 없으면 [다듬기] 줄을 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
+    const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 0 } })
+    expect(await band.find({ key: 'coach-refine' })).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined()
+    await band.unmount()
   })
 
   test('/coach cancel 도 그만둔다. 다듬는 중이 아니면 그렇다고 한다', async ($, on) => {

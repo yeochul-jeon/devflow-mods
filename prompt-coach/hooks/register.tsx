@@ -429,7 +429,8 @@ export const register: Register = on => {
       )
     }
 
-    if (e.props.isWorking || !b.hasDraft) return rest
+    // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
+    if (e.props.isWorking || !b.hasDraft || e.props.maxRows < 1) return rest
     // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다
     return (
       <Box flexDirection="column">
