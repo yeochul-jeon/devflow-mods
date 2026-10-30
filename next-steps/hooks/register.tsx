@@ -1,5 +1,6 @@
 // 답이 끝나면 다음에 보낼 만한 요청 2~3개를 입력창 위에 띄운다.
-// 빈 입력창에서 1~3 을 누르면 그 제안이 초안으로 들어가고(저절로 보내지 않음), 0 은 닫는다. 줄을 클릭하면 커서 자리에 끼워 넣는다.
+// 줄을 클릭하거나 빈 입력창에서 1~3 을 누르면 그 제안을 커서 자리에 넣고(저절로 보내지 않음), 0 은 닫는다.
+// 숫자는 Button hotkey 라 띠가 보일 때만 먹는다. 가려진 띠가 다른 띠(엔진 Heads up 등)의 숫자를 가져가지 않는다
 // 아이디어: hamzafer/claude-code-mods 의 next-steps (MIT). 코드는 새로 썼다.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -16,8 +17,6 @@ let off = false
 /** 제안을 보여도 되는 턴. 전송이나 새 턴이 오면 바뀌어, 늦게 도착한 제안을 버린다. */
 let latest = ''
 let submits = 0
-/** 설문이 떠 있으면 숫자는 설문의 답이다. */
-let hasSurvey = false
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -75,32 +74,27 @@ export const register: Register = on => {
     return r
   }).catch(($, e, next) => next(e)) // 지우지 못해도 prompt-coach 의 기록은 그대로 선다
 
-  // 빈 입력창에 친 숫자 하나는 제안 고르기. 붙여 넣기에는 key 가 없어 그대로 들어간다.
-  on('prompt.edit', async ($, e, next) => {
-    if (hasSurvey || !e.key || e.key.ctrl || e.key.meta || e.text !== '' || e.start !== 0 || e.end !== 0 || !/^[0-9]$/.test(e.inputText)) return next(e)
-    const s = await read($, steps)
-    if (!s) return next(e)
-    if (e.inputText === '0') {
-      await update($, steps, () => null)
-      return { text: '', cursor: 0 }
-    }
-    const pick = s.items[Number(e.inputText) - 1]
-    return pick ? next({ ...e, inputText: pick }) : next(e)
-  })
-
   // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 아래(입력창 바로 위)에 붙인다.
   // 위에 붙이면 이 mod 가 바깥일 때 team-board 띠가 아래로 밀려 잘린다
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const rest = await next(e)
-    hasSurvey = e.props.hasSurvey
     const s = await read($, steps)
-    if (e.props.hasSurvey || e.props.isWorking || !s || s.items.length === 0) return rest
+    // 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다
+    if (e.props.hasSurvey || e.props.isWorking || !s || s.items.length === 0 || e.props.maxRows < 1) return next(e)
+    // 줄이 모자라면 한 줄에 모은다. 가로줄 한 줄을 더 센다
+    const oneRow = e.props.maxRows < s.items.length + 3
+    // 이 띠의 줄 수(가로줄 + 제안 줄들 + 닫기 줄, 또는 가로줄 + 한 줄)를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다.
+    // 넘치면 엔진이 위부터 보여 줘 맨 아래인 이 띠가 가려진다. 이 mod 가 바깥이면 안쪽 team-board 가 남은 줄에 맞춰 줄어든다.
+    // 3줄도 안 되면 가로줄을 빼 한 줄만 쓴다. 2줄 자리를 다른 mod 와 한 줄씩 나눈다
+    const ruled = e.props.maxRows >= 3
+    const own = (ruled ? 1 : 0) + (oneRow ? 1 : s.items.length + 1)
+    const rest = await next({ ...e, props: { ...e.props, maxRows: Math.max(0, e.props.maxRows - own) } })
+    // 같은 숫자는 나중에 그린 이 띠가 이긴다. 위 띠(엔진 Heads up 등)에 숫자 버튼이 있으면 그 숫자를 빼앗지 않도록 클릭만 받는다
+    const keys = !hasDigitKey(rest)
 
     const { Box, Text, Button } = $.ui.resolve(e)
-    // 0 닫기도 제안 줄과 같은 Button. 끝 공백은 아래 제안 줄과 같은 까닭
+    // 번호는 엔진이 hotkey 로 그린다(`1: `, 강조색). 0 닫기도 제안 줄과 같은 Button. 끝 공백은 아래 제안 줄과 같은 까닭
     const close = (
-      <Button key="close" plain onPress={() => void update($, steps, () => null)}>
-        <Text color="cyan" bold>{'0 '}</Text>
+      <Button key="close" hotkey={keys ? '0' : undefined} plain onPress={() => void update($, steps, () => null)}>
         <Text dimColor>{'닫기 '}</Text>
       </Button>
     )
@@ -108,22 +102,18 @@ export const register: Register = on => {
     // 반전이 오른쪽 끝에서 한 칸 모자라 마지막 넓은 글자가 반만 덮이므로 끝에 공백 한 칸을 둔다
     const item = (t: string, i: number, shrink: boolean) => (
       <Box flexShrink={shrink ? 1 : 0}>
-        <Button key={`step-${i + 1}`} plain onPress={() => void pick($, t)}>
-          <Text color="cyan" bold>{`${i + 1} `}</Text>
+        <Button key={`step-${i + 1}`} hotkey={keys ? String(i + 1) : undefined} plain onPress={() => void pick($, t)}>
           <Text wrap="truncate-end">{`${t} `}</Text>
         </Button>
       </Box>
     )
-    // 줄이 모자라면 한 줄에 모은다. 가로줄 한 줄을 더 센다
-    const oneRow = e.props.maxRows < s.items.length + 3
     const mine = oneRow ? (
-      <Box height={1} overflow="hidden">
-        {/* 줄지 않게 두어야 폭이 넘칠 때 라벨·구분 기호가 0칸으로 줄지 않고 오른쪽 끝에서 잘린다 */}
-        <Box key="one-row" flexShrink={0}>
-          <Text dimColor>{'다음: '}</Text>
-          {s.items.flatMap((t, i) => [item(t, i, false), <Text dimColor>{' ·  '}</Text>])}
-          {close}
-        </Box>
+      // 글자 하나하나를 줄지 않는 Box 에 담는다. 엔진이 hotkey 번호(`1: `)를 뺀 폭으로 줄을 재서, 폭이 넘치면 버튼 앞 글자가 번호 폭만큼 줄어 덮였다.
+      // 이렇게 두면 아무것도 줄지 않고 오른쪽 끝에서만 잘린다
+      <Box key="one-row" height={1} overflow="hidden">
+        <Box flexShrink={0}><Text dimColor>{'다음: '}</Text></Box>
+        {s.items.flatMap((t, i) => [item(t, i, false), <Box flexShrink={0}><Text dimColor>{' ·  '}</Text></Box>])}
+        <Box flexShrink={0}>{close}</Box>
       </Box>
     ) : (
       <Box flexDirection="column">
@@ -136,19 +126,27 @@ export const register: Register = on => {
         <Box height={1} overflow="hidden">
           <Text dimColor>{'      '}</Text>
           {close}
-          <Text dimColor wrap="truncate-end">· 클릭이나 빈 입력창에서 숫자</Text>
+          <Text dimColor wrap="truncate-end">{keys ? '· 클릭이나 빈 입력창에서 숫자' : '· 클릭으로 고르기'}</Text>
         </Box>
       </Box>
     )
     return (
       <Box flexDirection="column">
         {rest}
-        {/* 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 두 줄도 안 되면 뺀다 */}
-        {e.props.maxRows >= 2 && <Text dimColor wrap="truncate-end">{rule(e.props.bodyColumns)}</Text>}
+        {/* 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 흐리게 그려 입력창의 가로줄과 다투지 않게 한다. 세 줄도 안 되면 뺀다 */}
+        {ruled && <Text dimColor wrap="truncate-end">{rule(e.props.bodyColumns)}</Text>}
         <Box paddingX={1}>{mine}</Box>
       </Box>
     )
   })
+}
+
+/** 그린 트리(RenderNode: type·props·children)에 숫자 hotkey Button 이 있는지. */
+function hasDigitKey(node: unknown): boolean {
+  if (Array.isArray(node)) return node.some(hasDigitKey)
+  if (!node || typeof node !== 'object') return false
+  const n = node as { type?: unknown; props?: { hotkey?: unknown }; children?: unknown }
+  return (n.type === 'Button' && typeof n.props?.hotkey === 'string' && /^[0-9]$/.test(n.props.hotkey)) || hasDigitKey(n.children)
 }
 
 /** 띠 폭을 채우는 이름 붙은 가로줄. */

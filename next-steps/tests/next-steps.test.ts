@@ -40,7 +40,7 @@ describe('steps (순수 함수)', () => {
 })
 
 describe('next-steps', () => {
-  test('답이 끝나면 제안을 띄우고, 숫자로 초안을 넣고, 0·전송·새 턴에 지운다', async ($, on) => {
+  test('답이 끝나면 제안을 띄우고, 숫자는 Button hotkey 로 받고, 0·전송·새 턴에 지운다', async ($, on) => {
     mock.store(on)
     let calls = 0
     let asked: any = null
@@ -80,25 +80,25 @@ describe('next-steps', () => {
     let band = await $.ui.mount(BAND)
     expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined() // 다른 mod 의 띠를 가리지 않는다
     expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeDefined()
-    expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
+    expect((await band.find({ key: 'close' }))?.text).toBe('닫기 ') // 번호 '0: ' 은 엔진이 hotkey 로 그린다
     // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
     expect(await band.find({ type: 'Text', text: /^── next-steps ─{106}$/ })).toBeDefined()
     // 다른 mod 띠가 먼저(위), 이 mod 는 그 아래
     expect(JSON.stringify(((await band.find({ type: 'Box' })) as any).children[0])).toContain('OTHER-MOD-BAND')
-    await band.unmount()
-
-    // 빈 입력창의 2 → 두 번째 제안이 초안으로. 보내지는 않는다
-    expect((await key('2')).text).toBe('PR 초안을 만들어 줘')
-    // 없는 번호는 그냥 글자
-    expect((await key('7')).text).toBe('7')
+    // 숫자는 Button hotkey: 엔진이 빈 입력창의 숫자를 화면에 보이는 띠 Button 으로 보낸다. 띠가 가려지면 다른 띠(Heads up 등)의 숫자를 가져가지 않는다
+    expect((await band.find({ key: 'step-1' }))?.props).toMatchObject({ hotkey: '1', plain: true })
+    expect((await band.find({ key: 'step-2' }))?.props).toMatchObject({ hotkey: '2' })
+    expect((await band.find({ key: 'close' }))?.props).toMatchObject({ hotkey: '0' })
+    // 입력창 글은 가로채지 않는다
+    expect((await key('2')).text).toBe('2')
 
     // 0 은 닫기
-    expect((await key('0')).text).toBe('')
+    await band.press({ key: 'close' })
+    await band.unmount()
     band = await $.ui.mount(BAND)
     expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
     expect(await band.find({ type: 'Text', text: /next-steps/ })).toBeUndefined()
     await band.unmount()
-    expect((await key('1')).text).toBe('1') // 닫은 뒤의 숫자는 그냥 글자
 
     // 전송하면 지운다
     await complete('t2')
@@ -145,7 +145,7 @@ describe('next-steps', () => {
     let band = await $.ui.mount(BAND)
     // 번호까지 한 Button 이라 마우스 반전이 줄 전체에 걸린다. 반전은 화면에서 본다
     // 끝의 공백 한 칸: 반전이 오른쪽 끝에서 한 칸 모자라 마지막 넓은 글자가 반만 덮이던 것을 그 칸이 받는다
-    expect((await band.find({ key: 'step-2' }))?.text).toBe('2 PR 초안을 만들어 줘 ')
+    expect((await band.find({ key: 'step-2' }))?.text).toBe('PR 초안을 만들어 줘 ')
     await band.press({ key: 'step-2' })
     expect(fills).toEqual([{ text: 'PR 초안을 만들어 줘', mode: 'insert' }])
     expect(submits).toEqual([])
@@ -153,14 +153,17 @@ describe('next-steps', () => {
 
     // 줄이 모자라 한 줄에 모아도 누를 수 있다
     band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 3 } })
-    // 폭이 넘치면 줄어드는 건 라벨·구분 기호뿐이라 사라졌다. 한 줄 전체를 줄지 않는 Box 에 담아 오른쪽 끝에서만 잘리게 한다
+    // 폭이 넘치면 줄어드는 건 라벨·구분 기호뿐이라 사라졌다. 엔진은 hotkey 번호(`1: `)를 뺀 폭으로 재서 버튼 앞 글자가 번호 폭만큼 덮였다.
+    // 글자마다 줄지 않는 Box 에 담아 오른쪽 끝에서만 잘리게 한다
     const row = await band.find({ key: 'one-row' })
-    expect(row?.props.flexShrink).toBe(0)
-    expect(row?.text).toMatch(/^다음: 1 테스트를 다시 돌려 줘 {2}· {2}2 PR 초안을 만들어 줘 {2}· {2}0 닫기 $/)
+    const parts = row?.children.filter((c: any) => c.type === 'Box') ?? []
+    expect(parts.length).toBe(6) // 다음:, 제안 2, 구분 2, 닫기
+    expect(parts.every((c: any) => c.props.flexShrink === 0)).toBe(true)
+    expect(row?.text).toMatch(/^다음: 테스트를 다시 돌려 줘 {2}· {2}PR 초안을 만들어 줘 {2}· {2}닫기 $/)
     await band.press({ key: 'step-1' })
     expect(fills.at(-1)).toEqual({ text: '테스트를 다시 돌려 줘', mode: 'insert' })
     // 0 닫기도 Button 이라 누르면 닫힌다
-    expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
+    expect((await band.find({ key: 'close' }))?.text).toBe('닫기 ') // 번호 '0: ' 은 엔진이 hotkey 로 그린다
     await band.press({ key: 'close' })
     await band.unmount()
     band = await $.ui.mount(BAND)
@@ -171,12 +174,81 @@ describe('next-steps', () => {
     await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't2' } as any)
     await settle()
     band = await $.ui.mount(BAND)
-    expect((await band.find({ key: 'close' }))?.text).toBe('0 닫기 ')
+    expect((await band.find({ key: 'close' }))?.text).toBe('닫기 ') // 번호 '0: ' 은 엔진이 hotkey 로 그린다
     expect(await band.find({ type: 'Text', text: /클릭이나 빈 입력창에서 숫자/ })).toBeDefined()
     await band.press({ key: 'close' })
     await band.unmount()
     band = await $.ui.mount(BAND)
     expect(await band.find({ type: 'Text', text: /PR 초안/ })).toBeUndefined()
+    await band.unmount()
+  })
+
+  test('제안 띠 줄 수를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다. 제안이 없거나 작업 중이면 그대로 넘긴다', async ($, on) => {
+    mock.store(on)
+    const seen: number[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('agent.list', () => ({ value: [] }))
+    on('session.messages', () => ({ value: [] }))
+    on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
+    on('turn.complete', () => ({ text: '' }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { seen.push(e.props.maxRows); return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    const rowsAt = async (maxRows: number, props: any = {}) => {
+      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...props } })
+      await band.unmount()
+      return seen.at(-1)
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    expect(await rowsAt(10)).toBe(10) // 제안이 없으면 다 넘긴다
+
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await settle()
+    expect(await rowsAt(10)).toBe(6) // 여러 줄: 가로줄 + 제안 2 + 닫기 줄 = 4
+    expect(await rowsAt(4)).toBe(2) // 한 줄 모양: 가로줄 + 한 줄 = 2
+    expect(await rowsAt(2)).toBe(1) // 3줄도 안 되면 가로줄을 빼 한 줄만 쓴다. 다른 mod 와 한 줄씩 나눈다
+    expect(await rowsAt(1)).toBe(0)
+    // 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다
+    expect(await rowsAt(0)).toBe(0)
+    const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 0 } })
+    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
+    await band.unmount()
+    expect(await rowsAt(10, { isWorking: true })).toBe(10)
+    expect(await rowsAt(10, { hasSurvey: true })).toBe(10)
+  })
+
+  test('다른 띠(엔진 Heads up 등)에 숫자 hotkey 가 있으면 숫자를 달지 않고 클릭만 받는다', async ($, on) => {
+    mock.store(on)
+    let other = true
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('agent.list', () => ({ value: [] }))
+    on('session.messages', () => ({ value: [] }))
+    on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
+    on('turn.complete', () => ({ text: '' }))
+    // Heads up 처럼 Box 안에 숫자 hotkey Button 을 그리는 띠
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => {
+      const { Box, Text, Button } = $.ui.resolve(e)
+      return Box({ flexDirection: 'column', children: [Text({ children: 'HEADS-UP' }), Box({ children: other ? [Button({ key: 'learn', label: 'Learn more', hotkey: '1', plain: true, onPress: () => {} })] : [] })] })
+    })
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await settle()
+
+    // 같은 숫자는 나중에 그린 이 띠가 이긴다. 그러면 위 띠의 1·2·0 을 빼앗으므로 양보한다
+    let band = await $.ui.mount(BAND)
+    expect((await band.find({ key: 'step-1' }))?.props.hotkey).toBeUndefined()
+    expect((await band.find({ key: 'close' }))?.props.hotkey).toBeUndefined()
+    expect(await band.find({ type: 'Text', text: /클릭으로 고르기/ })).toBeDefined()
+    expect(await band.find({ type: 'Text', text: /빈 입력창에서 숫자/ })).toBeUndefined()
+    await band.unmount()
+
+    // 위 띠의 숫자 버튼이 사라지면 다시 숫자를 단다
+    other = false
+    band = await $.ui.mount(BAND)
+    expect((await band.find({ key: 'step-1' }))?.props).toMatchObject({ hotkey: '1' })
+    expect(await band.find({ type: 'Text', text: /빈 입력창에서 숫자/ })).toBeDefined()
     await band.unmount()
   })
 
