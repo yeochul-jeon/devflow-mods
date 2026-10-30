@@ -1205,7 +1205,8 @@ export const register: Register = (on, options) => {
 
   // 입력창 위 띠: 다른 mod 의 띠 아래에 붙인다 (가리지 않음).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || (await read($, bandOff))) return next(e)
+    // 바깥 mod 가 줄을 다 써 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 바깥 띠까지 가려진다 (T54)
+    if (e.props.hasSurvey || (e.props.maxRows ?? 10) < 1 || (await read($, bandOff))) return next(e)
     const now = await $.clock.now()
     const list = visible(withMe(await read($, beats), await read($, me)), now)
     // 세션 하나: /board band solo off 면 숨김 (기본은 보임)
@@ -1243,6 +1244,8 @@ export const register: Register = (on, options) => {
     // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양 (혼자 창 3줄도 안 들어가면 이 모양, N5)
     // prompt-coach 가 질문 중이어도 이 모양: 아래 질문·선택지에 줄을 양보한다. 안 보이는 선택지를 숫자로 고르게 된다 (T53)
     const coachAsking = !!(await read($, coachQuestion))
+    // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54)
+    if (coachAsking && maxRows < 3) return next(e)
     if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachAsking) {
       // 칩 글자. 그리는 것과 줄 수 세기(lineShown)가 같은 글자를 쓴다
       const partsOf = (b: Beat) => {

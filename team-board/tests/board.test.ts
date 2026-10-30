@@ -3218,8 +3218,8 @@ describe('자기 세션 표시', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
-    const bandHas = async (re: RegExp) => {
-      const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
+    const bandHas = async (re: RegExp, maxRows = 10) => {
+      const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 160 } } as any)
       const found = await band.find({ type: 'Text', text: re })
       await band.unmount()
       return found !== undefined
@@ -3242,12 +3242,20 @@ describe('자기 세션 표시', () => {
     const mineId = JSON.parse(files.get(mineKey)!).id as string
     expect(mineId > 'a-other').toBe(true)
     expect(await bandHas(/·2/)).toBe(true)
+    // 띠 자리가 3줄도 안 되는 낮은 창(20줄)에서는 팀 띠를 그리지 않아 아래 질문·선택지 두 줄이 보인다 (T54). 다른 mod 띠는 그대로
+    expect(await bandHas(/결정 1/, 2)).toBe(false)
+    expect(await bandHas(/OTHER-MOD-BAND/, 2)).toBe(true)
+    expect(await bandHas(/결정 1/, 3)).toBe(true)
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
     expect(await pane.find({ type: 'Text', text: /prompt-coach: 범위는/ })).toBeDefined()
     await pane.unmount()
     await pending(null)
     expect(await bandHas(/결정 1/)).toBe(false)
+    // 위 mod 가 줄을 다 써 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
+    expect(await bandHas(/TEAM/)).toBe(true)
+    expect(await bandHas(/TEAM/, 0)).toBe(false)
+    expect(await bandHas(/OTHER-MOD-BAND/, 0)).toBe(true)
 
     // 계획 보고도 바로: 다음 파일 읽기 전에도 칸이 단계 글이 아니라 막대(지금 단계 알약)로 보인다
     await $.prompt.submit({ text: '두 번째 요청', origin: { kind: 'composer' } } as any)
