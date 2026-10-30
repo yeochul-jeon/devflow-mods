@@ -186,13 +186,14 @@ describe('next-steps', () => {
   test('제안 띠 줄 수를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다. 제안이 없거나 작업 중이면 그대로 넘긴다', async ($, on) => {
     mock.store(on)
     const seen: number[] = []
+    const own: (number | undefined)[] = []
     on('session.start', ($, e) => ({ cwd: e.cwd }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('agent.list', () => ({ value: [] }))
     on('session.messages', () => ({ value: [] }))
     on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
     on('turn.complete', () => ({ text: '' }))
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { seen.push(e.props.maxRows); return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { seen.push(e.props.maxRows); own.push(e.props.nextStepsRows); return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     const rowsAt = async (maxRows: number, props: any = {}) => {
       const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...props } })
       await band.unmount()
@@ -201,10 +202,13 @@ describe('next-steps', () => {
 
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
     expect(await rowsAt(10)).toBe(10) // 제안이 없으면 다 넘긴다
+    expect(own.at(-1)).toBeUndefined()
 
     await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
     await settle()
     expect(await rowsAt(10)).toBe(6) // 여러 줄: 가로줄 + 제안 2 + 닫기 줄 = 4
+    // 뗀 줄 수를 안쪽 mod 에 알린다. team-board 가 이 줄을 다시 빼지 않는다 (T55)
+    expect(own.at(-1)).toBe(4)
     expect(await rowsAt(4)).toBe(2) // 한 줄 모양: 가로줄 + 한 줄 = 2
     expect(await rowsAt(2)).toBe(1) // 3줄도 안 되면 가로줄을 빼 한 줄만 쓴다. 다른 mod 와 한 줄씩 나눈다
     expect(await rowsAt(1)).toBe(0)
@@ -214,6 +218,7 @@ describe('next-steps', () => {
     expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
     await band.unmount()
     expect(await rowsAt(10, { isWorking: true })).toBe(10)
+    expect(own.at(-1)).toBeUndefined()
     expect(await rowsAt(10, { hasSurvey: true })).toBe(10)
   })
 

@@ -87,7 +87,8 @@ export const register: Register = on => {
     // 3줄도 안 되면 가로줄을 빼 한 줄만 쓴다. 2줄 자리를 다른 mod 와 한 줄씩 나눈다
     const ruled = e.props.maxRows >= 3
     const own = (ruled ? 1 : 0) + (oneRow ? 1 : s.items.length + 1)
-    const rest = await next({ ...e, props: { ...e.props, maxRows: Math.max(0, e.props.maxRows - own) } })
+    // 뗀 줄 수도 알린다. 안쪽 team-board 가 이 띠 자리를 다시 빼 팀 창을 괜히 줄이지 않는다 (T55)
+    const rest = await next({ ...e, props: { ...e.props, maxRows: Math.max(0, e.props.maxRows - own), nextStepsRows: own } as typeof e.props })
     // 같은 숫자는 나중에 그린 이 띠가 이긴다. 위 띠(엔진 Heads up 등)에 숫자 버튼이 있으면 그 숫자를 빼앗지 않도록 클릭만 받는다
     const keys = !hasDigitKey(rest)
 
