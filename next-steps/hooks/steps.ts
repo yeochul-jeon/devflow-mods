@@ -10,10 +10,20 @@ export const MAX_TOKENS = 200
 const HISTORY = 6
 const PER_MESSAGE = 800
 const ANSWER_CHARS = 2000
+const OMITTED = '\n[... middle omitted ...]\n'
 
 type Message = { role: 'user' | 'assistant'; text: string }
 
-/** 최근 대화 6개(각 800자)와 최신 답(2000자)으로 Haiku 요청을 만든다. 대화 기록 전체는 보내지 않는다. */
+/** 앞과 끝을 절반씩 남기고 가운데를 뺀다. 표시까지 max 글자 안이다. 긴 답의 질문·다음 단계는 끝에 있다 (T56: 끝 1000자가 그중 80%를 담는다). */
+export function excerpt(text: string, max: number): string {
+  const chars = Array.from(text)
+  if (chars.length <= max) return text
+  const room = max - OMITTED.length
+  const head = Math.floor(room / 2)
+  return chars.slice(0, head).join('') + OMITTED + chars.slice(chars.length - (room - head)).join('')
+}
+
+/** 최근 대화 6개(각 800자)와 최신 답(앞뒤 합쳐 2000자)으로 Haiku 요청을 만든다. 대화 기록 전체는 보내지 않는다. */
 export function buildRequest(history: readonly Message[], answer: string): { system: string; prompt: string } {
   const recent = history.filter(m => m.text.trim() !== '').slice(-HISTORY)
   const system = [
@@ -21,10 +31,11 @@ export function buildRequest(history: readonly Message[], answer: string): { sys
     'Give 2 or 3 short, concrete follow-up requests, each an instruction under 60 characters, specific to what just happened (name the file, test or feature).',
     'Write them in the same language the person writes in. Keep file names, commands and code identifiers as they are.',
     'One per line, no numbering, no quotes, nothing else. Plain text, no Markdown or backticks. If nothing sensible follows, reply with the single word NONE.',
+    'A bracketed marker such as [... middle omitted ...] means text was left out, and excerpts may start or end inside code. Never comment on or continue the excerpt: only predict requests.',
   ].join('\n')
   const prompt = [
     `<transcript>\n${recent.map(m => `[${m.role === 'user' ? 'person' : 'assistant'}] ${m.text.slice(0, PER_MESSAGE)}`).join('\n')}\n</transcript>`,
-    `<latest_reply>\n${answer.slice(0, ANSWER_CHARS)}\n</latest_reply>`,
+    `<latest_reply>\n${excerpt(answer, ANSWER_CHARS)}\n</latest_reply>`,
     'Write the follow-up requests the person is likely to send next: the lines only.',
   ].join('\n\n')
   return { system, prompt }

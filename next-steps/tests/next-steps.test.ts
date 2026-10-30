@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { buildRequest, parseSteps } from '../hooks/steps'
+import { buildRequest, excerpt, parseSteps } from '../hooks/steps'
 
 const USAGE = { input_tokens: 1800, output_tokens: 40, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { plugin: 'next-steps', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } } as any
@@ -29,14 +29,30 @@ describe('steps (순수 함수)', () => {
     expect(parseSteps('테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', false)).toHaveLength(2)
   })
 
+  test('긴 답은 앞과 끝을 남기고 가운데를 뺀다. 표시까지 예산 안이고, 글자를 쪼개지 않는다', async () => {
+    const mark = '\n[... middle omitted ...]\n'
+    const text = `첫머리 ${'가'.repeat(3000)} 어느 쪽으로 할까요?`
+    const out = excerpt(text, 2000)
+    expect(out.startsWith('첫머리 ')).toBe(true)
+    expect(out.endsWith('어느 쪽으로 할까요?')).toBe(true)
+    expect(out).toContain(mark)
+    expect(Array.from(out).length).toBe(2000)
+    expect(excerpt('a'.repeat(2000), 2000)).toBe('a'.repeat(2000)) // 딱 맞으면 그대로
+    expect(excerpt('짧은 답', 2000)).toBe('짧은 답')
+    const emoji = excerpt('😀'.repeat(3000), 2000)
+    expect(Array.from(emoji).filter(c => c !== '😀').join('')).toBe(mark)
+  })
+
   test('최근 대화와 최신 답을 잘라 넣고, 대화 언어를 따르라고 한다', async () => {
     const history = Array.from({ length: 9 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: `m${i} ` + 'a'.repeat(900) }) as const)
     const { system, prompt } = buildRequest([...history], 'b'.repeat(3000))
     expect(prompt).not.toContain('m0 ') // 최근 6개만
     expect(prompt).toContain('m3 ')
     expect(prompt).not.toContain('a'.repeat(801)) // 메시지마다 800자
-    expect(prompt).toContain('b'.repeat(2000))
-    expect(prompt).not.toContain('b'.repeat(2001)) // 최신 답은 2000자
+    expect(prompt).toContain('b'.repeat(987)) // 최신 답은 앞뒤를 합쳐 2000자
+    expect(prompt).not.toContain('b'.repeat(988))
+    expect(prompt).toContain('[... middle omitted ...]')
+    expect(system).toContain('omitted')
     expect(system).toContain('same language')
     expect(system).toContain('NONE')
     expect(system).toContain('under 60 characters')
