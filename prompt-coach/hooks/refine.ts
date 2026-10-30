@@ -51,8 +51,10 @@ export function parseQuestions(text: string): Question[] | null {
   if (!Array.isArray(raw)) return null
   const out: Question[] = []
   for (const item of raw) {
-    const q = typeof item?.q === 'string' ? item.q.trim() : ''
-    const options = Array.isArray(item?.options) ? item.options.filter((o: unknown): o is string => typeof o === 'string' && o.trim() !== '').map((o: string) => o.trim()) : []
+    // 띠는 질문과 선택지 줄 수를 세어 그린다. 줄바꿈이 있으면 그 계산이 틀어진다
+    const flat = (t: string) => t.replace(/\s+/g, ' ').trim()
+    const q = typeof item?.q === 'string' ? flat(item.q) : ''
+    const options = Array.isArray(item?.options) ? item.options.filter((o: unknown): o is string => typeof o === 'string' && o.trim() !== '').map(flat) : []
     if (q === '' || options.length < 2) continue
     out.push({ q, options: options.slice(0, 4) })
   }
@@ -125,6 +127,20 @@ export function rule(width: number, status = ''): string {
   const head = '━━ prompt-coach '
   const tail = status === '' ? '' : ` ${status}`
   return head + '━'.repeat(Math.max(0, width - cells(head) - cells(tail))) + tail
+}
+
+/** 너비가 widths 인 칸들을 폭 width 에 gap 간격으로 늘어놓으면 몇 줄로 접히나. */
+export function wrappedRows(widths: readonly number[], width: number, gap: number): number {
+  let rows = 1
+  let used = 0
+  for (const w of widths) {
+    if (used > 0 && used + gap + w > width) {
+      rows++
+      used = 0
+    }
+    used += (used > 0 ? gap : 0) + w
+  }
+  return rows
 }
 
 /** 띠의 보탠 것 머리: 답·제안 수. 보탠 것이 없으면 순서만 다듬었다고 한다. */

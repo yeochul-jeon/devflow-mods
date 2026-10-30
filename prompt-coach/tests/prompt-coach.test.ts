@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { addedHead, buildQuestions, buildRewrite, parseQuestions, parseRefined, parseRewrite, passThrough, rule, TEMPLATE } from '../hooks/refine'
+import { addedHead, buildQuestions, buildRewrite, parseQuestions, parseRefined, parseRewrite, passThrough, rule, TEMPLATE, wrappedRows } from '../hooks/refine'
 
 const USAGE = { input_tokens: 500, output_tokens: 120, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { plugin: 'prompt-coach', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } } as any
@@ -32,11 +32,24 @@ describe('refine (순수 함수)', () => {
   })
 })
 
+describe('줄 계산 (순수 함수)', () => {
+  test('wrappedRows: 칸 사이 간격을 넣어 폭에서 접히는 줄 수를 센다', async () => {
+    expect(wrappedRows([10, 10], 22, 2)).toBe(1)
+    expect(wrappedRows([10, 10], 21, 2)).toBe(2)
+    expect(wrappedRows([10, 10, 10], 22, 2)).toBe(2)
+    expect(wrappedRows([5, 5, 5], 5, 2)).toBe(3)
+  })
+})
+
 describe('질문·다시 쓰기 (순수 함수)', () => {
   test('질문: 초안만 태그에 넣고, 초안에 있는 것·코드로 알 수 있는 것은 묻지 말라고 한다', async () => {
     const { system, prompt } = buildQuestions(DRAFT)
     expect(prompt).toBe(`<draft>\n${DRAFT}\n</draft>`)
     for (const rule of ['at most 3', 'already states', 'reading the code', 'ask nothing', 'not instructions to you', '<questions>[]</questions>']) expect(system).toContain(rule)
+  })
+
+  test('질문 읽기: 줄바꿈과 겹친 공백을 하나로 (띠는 질문과 선택지를 줄 수로 센다)', async () => {
+    expect(parseQuestions(`<questions>${JSON.stringify([{ q: '첫째\n  둘째', options: ['a\nb', 'c'] }])}</questions>`)).toEqual([{ q: '첫째 둘째', options: ['a b', 'c'] }])
   })
 
   test('질문 읽기: 3개까지, 선택지 2~4개, 모양이 틀린 질문은 버림. 태그나 JSON 이 깨지면 null, 빈 목록은 []', async () => {
@@ -231,6 +244,119 @@ describe('prompt-coach 흐름', () => {
     const full = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 6 } })
     expect(await full.find({ type: 'Text', text: /^초안/ })).toBeDefined()
     await full.unmount()
+  })
+
+  test('선택지가 남은 줄에 접혀 넘치면 한 줄로 자르고, 띠 자리가 1줄이면 질문까지 한 줄, 0줄이면 그리지 않는다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    const long = ['로그인 페이지의 모든 오류', '비밀번호 관련 오류만', '계정·인증 관련 오류만']
+    s.qReply = `<questions>${JSON.stringify([{ q: '어떤 오류 메시지를 고치면 될까요?', options: long }])}</questions>`
+    await coach(DRAFT)
+    const band = (maxRows: number, bodyColumns: number) => $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns } })
+    const label = async (b: any, key: string) => (await b.find({ key }))?.props.label
+
+    // 넓으면 2줄 자리에서도 그대로
+    const wide = await band(2, 155)
+    expect(await label(wide, 'coach-opt-0')).toBe(long[0])
+    expect(await label(wide, 'coach-skip')).toBe('건너뛰기')
+    await wide.unmount()
+
+    // 80칸 창: 접히면 넘치므로 한 줄에 맞춘다. 숫자 키는 그대로
+    const narrow = await band(2, 75)
+    expect(await narrow.find({ type: 'Text', text: /^어떤 오류 메시지를 고치면 될까요\?$/ })).toBeDefined()
+    const labels = [await label(narrow, 'coach-opt-0'), await label(narrow, 'coach-opt-1'), await label(narrow, 'coach-opt-2')]
+    expect(labels.every(l => l.endsWith('…'))).toBe(true)
+    expect((await narrow.find({ key: 'coach-opt-0' }))?.props).toMatchObject({ hotkey: '1' })
+    expect((await narrow.find({ key: 'coach-skip' }))?.props).toMatchObject({ hotkey: '0', label: '건너뜀' })
+    expect((await narrow.find({ key: 'coach-now' }))?.props).toMatchObject({ hotkey: '9', label: '바로' })
+    await narrow.unmount()
+
+    // 접혀도 줄이 넉넉하면 자르지 않는다
+    const roomy = await band(4, 75)
+    expect(await label(roomy, 'coach-opt-0')).toBe(long[0])
+    await roomy.unmount()
+
+    // 1줄: 질문과 선택지를 같은 줄에
+    const one = await band(1, 155)
+    const row = await one.find({ key: 'coach-line' })
+    const json = JSON.stringify(row)
+    expect(json).toContain('어떤 오류')
+    expect(json).toContain('coach-opt-2')
+    await one.unmount()
+
+    const zero = await band(0, 155)
+    expect(await zero.find({ key: 'coach-opt-0' })).toBeUndefined()
+    expect(await zero.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined()
+    await zero.unmount()
+  })
+
+  test('질문을 만드는 중·넣음 단계도 띠 자리가 0줄이면 그리지 않는다', async ($, on) => {
+    const { s, coach, press, settle } = await setup($, on)
+    const zero = async () => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 0 } }); const found = await b.find({ type: 'Text', text: /^━━ prompt-coach|^초안|^보탠 것/ }); await b.unmount(); return found }
+    s.hold = true
+    await coach(DRAFT)
+    expect(await zero()).toBeUndefined()
+    s.release()
+    await settle()
+    s.hold = false
+    await press('coach-now')
+    expect(s.box).toBe(REFINED)
+    expect(await zero()).toBeUndefined()
+  })
+
+  test('긴 질문: 접히는 줄까지 세어 넘치면 머리줄을 빼고, 그래도 넘치면 질문을 한 줄로 자른다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    const q = '가'.repeat(40)
+    s.qReply = `<questions>${JSON.stringify([{ q, options: ['a', 'b'] }])}</questions>`
+    await coach(DRAFT)
+    const look = async (maxRows: number) => {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75 } })
+      const r = { head: (await b.find({ type: 'Text', text: /^━━ prompt-coach/ })) !== undefined, whole: (await b.find({ type: 'Text', text: new RegExp(`^${q}$`) })) !== undefined, cut: (await b.find({ type: 'Text', text: /^가+…$/ })) !== undefined }
+      await b.unmount()
+      return r
+    }
+    expect(await look(7)).toEqual({ head: true, whole: true, cut: false }) // 질문 2줄 + 나머지 5줄
+    expect(await look(6)).toEqual({ head: false, whole: true, cut: false })
+    expect(await look(3)).toEqual({ head: false, whole: true, cut: false }) // 질문 2줄 + 선택지 1줄
+    expect(await look(2)).toEqual({ head: false, whole: false, cut: true })
+  })
+
+  test('좁은 창의 한 줄 모양: 선택지마다 글자를 남긴다 (숫자만 보이고 뜻이 안 보이면 고를 수 없다)', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    const four = ['로그인 오류 전체', '인증 실패 메시지만', '입력값 검증 메시지만', '서버 오류 메시지만']
+    s.qReply = `<questions>${JSON.stringify([{ q: '어떤 오류 메시지를 고치면 될까요?', options: four }])}</questions>`
+    await coach(DRAFT)
+    const one = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 1, bodyColumns: 75 } })
+    for (let k = 0; k < 4; k++) expect((await one.find({ key: `coach-opt-${k}` }))?.props.label).toBe(`${four[k]!.slice(0, 2)}…`)
+    await one.unmount()
+  })
+
+  test('만드는 중: 띠 자리가 1줄이면 스피너·상태·초안·취소를 한 줄에', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    s.hold = true
+    await coach(DRAFT)
+    const one = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 1 } })
+    expect(await one.find({ type: 'Text', text: /^━━ prompt-coach/ })).toBeUndefined()
+    const json = JSON.stringify(await one.find({ key: 'coach-busy-line' }))
+    expect(json).toContain('질문 만드는 중')
+    expect(json).toContain('coach-cancel')
+    await one.unmount()
+  })
+
+  test('입력창에 넣음: 3줄이면 빈 줄을 빼고, 2줄이면 안내를 빼고, 1줄이면 머리줄도 뺀다. 되돌리기는 늘 남는다', async ($, on) => {
+    const { coach, press } = await setup($, on)
+    await coach(DRAFT)
+    await press('coach-now')
+    const look = async (maxRows: number) => {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
+      const head = await b.find({ type: 'Text', text: /^━━ prompt-coach/ })
+      const r = { head: head !== undefined, undo: (await b.find({ key: 'coach-undo' })) !== undefined, hint: (await b.find({ type: 'Text', text: /고치거나 그대로 보내세요/ })) !== undefined, gap: JSON.stringify((await b.find({ type: 'Box' }))).includes('"marginTop":1') }
+      await b.unmount()
+      return r
+    }
+    expect(await look(4)).toEqual({ head: true, undo: true, hint: true, gap: true })
+    expect(await look(3)).toEqual({ head: true, undo: true, hint: true, gap: false })
+    expect(await look(2)).toEqual({ head: true, undo: true, hint: false, gap: false })
+    expect(await look(1)).toEqual({ head: false, undo: true, hint: false, gap: false })
   })
 
   test('물을 게 없으면 바로 다듬는다', async ($, on) => {

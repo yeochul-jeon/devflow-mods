@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { CoachBand, CoachEntry, CoachFlow, Spent } from '../types'
-import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort } from './refine'
+import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort, wrappedRows } from './refine'
 
 // $.state 에 두어 핫 리로드에도 유지된다.
 const band = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false } as CoachBand)
@@ -39,6 +39,10 @@ const MAX_HISTORY = 20
 const PANE = 'prompt-coach'
 
 /** 입력창이 비었을 때 띠의 버튼을 누르는 숫자. 선택지는 1~4. */
+/** 한 줄로 자른 선택지의 최소 칸: 글자 2개 + 말줄임표. 이보다 줄면 숫자만 남아 뜻을 알 수 없다. */
+const OPT_MIN = 5
+/** 띠 자리가 1줄일 때 질문에 남기는 최소 칸. */
+const ASK_MIN = 8
 const SKIP_KEY = '0'
 const NOW_KEY = '9'
 
@@ -340,6 +344,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const rest = await next(e)
     if (e.props.hasSurvey) return rest
+    // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
+    if (e.props.maxRows < 1) return rest
     const f = await read($, flow)
     const b = await read($, band)
     const before = await read($, original)
@@ -348,11 +354,11 @@ export const register: Register = on => {
     // 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
     const isOn = await read($, auto)
     // spin 이 있으면 상태 앞에 노랑 스피너를 둔다
-    const head = (status = '', spin = '') => {
+    const head = (status = '', spin = '', gap = e.props.maxRows >= 3) => {
       const tail = spin ? `${spin} ${status}` : status || (isOn ? '자동' : '')
       const line = rule(width, tail)
       return (
-        <Box marginTop={e.props.maxRows >= 3 ? 1 : 0}>
+        <Box marginTop={gap ? 1 : 0}>
           {spin ? (
             <Text color="gray" wrap="truncate-end">
               {line.slice(0, line.length - tail.length)}
@@ -371,10 +377,24 @@ export const register: Register = on => {
     if (f.stage === 'asking' || f.stage === 'rewriting') {
       const n = await read($, tick)
       const secs = Math.floor(((await $.clock.now()) - f.since) / 1000)
+      const status = `${f.stage === 'asking' ? '질문 만드는 중' : '다듬는 중'} ${secs}초`
+      const spin = SPIN_FRAMES[n % SPIN_FRAMES.length]
+      if (e.props.maxRows < 2) {
+        return (
+          <Box flexDirection="column">
+            {rest}
+            <Box key="coach-busy-line" flexDirection="row" columnGap={2} paddingX={1}>
+              <Box flexShrink={0}><Text><Text color={SPIN_COLOR}>{spin}</Text>{` ${status}`}</Text></Box>
+              <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
+              {cancelButton}
+            </Box>
+          </Box>
+        )
+      }
       return (
         <Box flexDirection="column">
           {rest}
-          {head(`${f.stage === 'asking' ? '질문 만드는 중' : '다듬는 중'} ${secs}초`, SPIN_FRAMES[n % SPIN_FRAMES.length])}
+          {head(status, spin)}
           <Box flexDirection="row" columnGap={2} paddingX={1}>
             <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
             {cancelButton}
@@ -387,8 +407,48 @@ export const register: Register = on => {
       const i = f.answers.length
       const q = f.questions[i]
       if (!q) return rest
-      // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·질문·선택지·안내 = 6)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
-      const tight = e.props.maxRows < 6
+      const inner = width - 2
+      // 버튼 앞 "1: " 은 엔진이 그려 3칸이 더 든다. 취소는 숫자가 없다
+      const optRows = wrappedRows([...q.options.map(o => cells(o) + 3), cells('건너뛰기') + 3, cells('바로 다듬기') + 3, cells('취소')], inner, 2)
+      // 질문 앞 번호가 4칸을 쓴다. 긴 질문은 접힌다
+      const qRows = Math.ceil((cells(q.q) + 4) / inner)
+      // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·안내 = 4 + 질문 + 선택지)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
+      const tight = e.props.maxRows < 4 + qRows + optRows
+      // 그래도 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
+      if (e.props.maxRows - 1 < optRows) {
+        const isLine = e.props.maxRows < 2
+        const chip = <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
+        const count = q.options.length
+        const free = inner - (cells('건너뜀') + 3 + cells('바로') + 3 + cells('취소')) - (count + 2 + (isLine ? 2 : 0))
+        // 한 줄이면 질문은 폭의 1/3 까지, 선택지가 최소 칸을 못 받으면 그만큼 질문을 줄인다
+        const asked = clip(q.q, isLine ? Math.max(ASK_MIN, Math.min(Math.floor(inner / 3), free - 3 - count * (OPT_MIN + 3))) : inner - 4)
+        const room = free - (isLine ? 3 + cells(asked) : 0)
+        const share = Math.max(OPT_MIN, Math.floor(room / count) - 3)
+        const options = [
+          ...q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={clip(o, share)} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />),
+          <Button key="coach-skip" label="건너뜀" hotkey={SKIP_KEY} plain dimColor onPress={() => void answer($, null)} />,
+          <Button key="coach-now" label="바로" hotkey={NOW_KEY} plain onPress={() => void rewriteNow($)} />,
+          cancelButton,
+        ]
+        return (
+          <Box flexDirection="column">
+            {rest}
+            {isLine ? (
+              <Box key="coach-line" flexDirection="row" columnGap={1} paddingX={1}>
+                {chip}
+                <Box flexShrink={0}><Text bold>{asked}</Text></Box>
+                {options}
+              </Box>
+            ) : (
+              <Box flexDirection="row" columnGap={1} paddingX={1}>
+                {chip}
+                <Text bold>{asked}</Text>
+              </Box>
+            )}
+            {isLine ? null : <Box flexDirection="row" columnGap={1} paddingX={1}>{options}</Box>}
+          </Box>
+        )
+      }
       return (
         <Box flexDirection="column">
           {rest}
@@ -397,7 +457,7 @@ export const register: Register = on => {
           {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
           <Box flexDirection="row" columnGap={1} paddingX={1}>
             <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
-            <Text bold>{q.q}</Text>
+            <Text bold>{e.props.maxRows - optRows < qRows ? clip(q.q, inner - 4) : q.q}</Text>
           </Box>
           <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingX={1}>
             {q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={o} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />)}
@@ -411,16 +471,30 @@ export const register: Register = on => {
     }
 
     if (f.stage === 'done') {
+      const addedLine = (
+        <Text wrap="truncate-end">
+          <Text bold>{addedHead(f.added)}</Text>
+          {f.added.map((a, k) => <Text key={`added-${k}`} color={a.kind === 'answer' ? 'green' : 'yellow'}>{`  + ${a.text}`}</Text>)}
+        </Text>
+      )
+      // 3줄을 못 받으면 안내를 빼고 되돌리기와 보탠 것을 한 줄에 둔다. 1줄이면 머리줄도 뺀다
+      if (e.props.maxRows < 3) {
+        return (
+          <Box flexDirection="column">
+            {rest}
+            {e.props.maxRows < 2 ? null : head('입력창에 넣음')}
+            <Box flexDirection="row" columnGap={1} paddingX={1}>
+              {undoButton}
+              {addedLine}
+            </Box>
+          </Box>
+        )
+      }
       return (
         <Box flexDirection="column">
           {rest}
-          {head('입력창에 넣음')}
-          <Box paddingX={1}>
-            <Text wrap="truncate-end">
-              <Text bold>{addedHead(f.added)}</Text>
-              {f.added.map((a, k) => <Text key={`added-${k}`} color={a.kind === 'answer' ? 'green' : 'yellow'}>{`  + ${a.text}`}</Text>)}
-            </Text>
-          </Box>
+          {head('입력창에 넣음', '', e.props.maxRows >= 4)}
+          <Box paddingX={1}>{addedLine}</Box>
           <Box flexDirection="row" columnGap={1} paddingX={1}>
             {undoButton}
             <Text dimColor wrap="truncate-end">초록 답 · 노랑 제안 · 고치거나 그대로 보내세요</Text>
@@ -429,8 +503,7 @@ export const register: Register = on => {
       )
     }
 
-    // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
-    if (e.props.isWorking || !b.hasDraft || e.props.maxRows < 1) return rest
+    if (e.props.isWorking || !b.hasDraft) return rest
     // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다
     return (
       <Box flexDirection="column">
