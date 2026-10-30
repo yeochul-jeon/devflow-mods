@@ -22,6 +22,7 @@ const pending = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null a
 const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as const, false)
 // next-steps 의 제안 목록. 읽기만 한다
 const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { items: string[] } | null)
+const teamMe = atom({ plugin: 'team-board', key: 'me' } as const, null as { state: string; question: string } | null)
 const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as CoachEntry[])
 const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
 const tick = atom({ plugin: 'prompt-coach', key: 'tick' } as const, 0)
@@ -57,8 +58,9 @@ function questionShape(q: Question, width: number, maxRows: number) {
   // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·안내 = 4 + 질문 + 선택지)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
   const tight = maxRows < 4 + qRows + optRows
   const isCut = maxRows - 1 < optRows
-  const own = isCut ? Math.min(maxRows, 2) : tight ? (maxRows - optRows < qRows ? 1 : qRows) + optRows : (width >= 60 ? 4 : 2) + qRows + optRows
-  return { inner, optRows, qRows, tight, isCut, own }
+  const isClipped = maxRows - optRows < qRows
+  const own = isCut ? Math.min(maxRows, 2) : tight ? (isClipped ? 1 : qRows) + optRows : (width >= 60 ? 4 : 2) + qRows + optRows
+  return { inner, optRows, qRows, tight, isCut, isClipped, own }
 }
 const NOW_KEY = '9'
 
@@ -365,7 +367,9 @@ export const register: Register = on => {
     const stepsInside = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined && ((await read($, nextSteps))?.items.length ?? 0) > 0
     const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepsInside ? 4 : 1)
     const q = !e.props.hasSurvey && f.stage === 'questions' && e.props.maxRows >= 1 ? f.questions[f.answers.length] : undefined
-    const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows) : null
+    // team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 안 남기면 질문이 줄을 다 쓰는 높이에서만 팀 줄이 사라진다. 바깥이면 teamRows 로 알려 오고 이미 뗐다. 3줄보다 적으면 team-board 가 양보한다
+    const teamInside = (e.props as { teamRows?: number }).teamRows === undefined && e.props.maxRows >= 3 && !!(await read($, teamMe))
+    const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows - (teamInside ? 1 : 0)) : null
     // 질문도 그릴 줄을 떼고 넘긴다. 이 mod 가 바깥이면 안쪽 team-board 한 줄만큼 넘쳐 선택지가 "↓ n more" 아래로 숨는다. team-board 는 coachRows 를 보고 받은 줄 안에서 그린다
     const inward = isIdleLine ? { maxRows: e.props.maxRows - 1 } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
     const rest = await next(inward ? { ...e, props: { ...e.props, ...inward } as typeof e.props } : e)
@@ -430,7 +434,7 @@ export const register: Register = on => {
     if (f.stage === 'questions') {
       if (!q || !shape) return rest
       const i = f.answers.length
-      const { inner, optRows, qRows, tight } = shape
+      const { inner, optRows, tight } = shape
       // 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
       if (shape.isCut) {
         const isLine = e.props.maxRows < 2
@@ -476,7 +480,7 @@ export const register: Register = on => {
           {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
           <Box flexDirection="row" columnGap={1} paddingX={1}>
             <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
-            <Text bold>{e.props.maxRows - optRows < qRows ? clip(q.q, inner - 4) : q.q}</Text>
+            <Text bold>{shape.isClipped ? clip(q.q, inner - 4) : q.q}</Text>
           </Box>
           <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingX={1}>
             {q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={o} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />)}

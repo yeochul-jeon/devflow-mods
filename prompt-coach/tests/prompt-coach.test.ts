@@ -337,6 +337,18 @@ describe('prompt-coach 흐름', () => {
     expect(await at(1)).toEqual({ shown: true, inner: 0 })
   })
 
+  test('질문 단계: team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 바깥이면(teamRows) 다시 빼지 않는다', { plugins: [TEAM_BOARD] }, async ($, on) => {
+    const { s, coach } = await setup($, on)
+    s.qReply = `<questions>${JSON.stringify([{ q: '가'.repeat(40), options: ['a', 'b'] }])}</questions>`
+    await coach(DRAFT)
+    await $.tool.call({ tool: 'SetMe', me: { state: 'idle', question: '' } } as any)
+    const at = async (maxRows: number, extra = {}) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75, ...extra } }); await b.unmount(); return s.innerRows }
+    expect(await at(7)).toBe(7 - 3) // 다 그리면 7줄이라 팀 줄이 사라지는 높이: 질문 2 + 선택지 1
+    expect(await at(3)).toBe(3 - 2) // 질문을 자른 한 줄 + 선택지 1
+    expect(await at(2)).toBe(0) // team-board 가 양보한다
+    expect(await at(7, { teamRows: 1 })).toBe(0)
+  })
+
   test('긴 질문: 접히는 줄까지 세어 넘치면 머리줄을 빼고, 그래도 넘치면 질문을 한 줄로 자른다', async ($, on) => {
     const { s, coach } = await setup($, on)
     const q = '가'.repeat(40)
