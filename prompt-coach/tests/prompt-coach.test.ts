@@ -120,6 +120,10 @@ const TEAM_BOARD = {
       await $.state.set({ plugin: 'team-board', key: 'me' }, e.me)
       return { result: 'ok' }
     })
+    on('tool.call', { tool: 'SetBandOff' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'team-board', key: 'bandOff' }, e.off)
+      return { result: 'ok' }
+    })
   },
 }
 
@@ -142,6 +146,7 @@ describe('prompt-coach 흐름', () => {
     on('prompt.fill', ($: any, e: any) => { s.fills.push(e.text); s.box = e.text; return { isFilled: true } })
     on('prompt.read', () => ({ value: { text: s.box, cursor: s.box.length } }))
     on('prompt.edit', ($: any, e: any) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+    on('prompt.change', ($: any, e: any) => ({ text: e.text }))
     on('prompt.submit', ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', ($: any, e: any) => { s.toasts.push(e.text); return { value: undefined } })
     on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { s.innerRows = e.props.maxRows; s.innerCoachRows = e.props.coachRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
@@ -347,6 +352,20 @@ describe('prompt-coach 흐름', () => {
     expect(await at(3)).toBe(3 - 2) // 질문을 자른 한 줄 + 선택지 1
     expect(await at(2)).toBe(0) // team-board 가 양보한다
     expect(await at(7, { teamRows: 1 })).toBe(0)
+    await $.tool.call({ tool: 'SetBandOff', off: true } as any)
+    expect(await at(7)).toBe(0) // /board band off: 그릴 팀 줄이 없어 7줄을 다 쓴다
+  })
+
+  test('입력창이 prompt.change 로 비면(Ctrl+C, Esc 두 번) [다듬기]를 그리지 않고 줄도 떼지 않는다', async ($, on) => {
+    const { s, type, shows } = await setup($, on)
+    await type(DRAFT)
+    expect(await shows('coach-refine')).toBe(true)
+    s.box = ''
+    await ($ as any).prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
+    expect(await shows('coach-refine')).toBe(false)
+    expect(s.innerRows).toBe(10)
+    await type(DRAFT)
+    expect(await shows('coach-refine')).toBe(true)
   })
 
   test('긴 질문: 접히는 줄까지 세어 넘치면 머리줄을 빼고, 그래도 넘치면 질문을 한 줄로 자른다', async ($, on) => {

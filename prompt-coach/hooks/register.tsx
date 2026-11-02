@@ -23,6 +23,7 @@ const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as con
 // next-steps 의 제안 목록. 읽기만 한다
 const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { items: string[] } | null)
 const teamMe = atom({ plugin: 'team-board', key: 'me' } as const, null as { state: string; question: string } | null)
+const teamBandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
 const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as CoachEntry[])
 const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
 const tick = atom({ plugin: 'prompt-coach', key: 'tick' } as const, 0)
@@ -134,6 +135,13 @@ export const register: Register = on => {
       if (await read($, bypass)) await update($, bypass, () => false)
     }
     return r
+  })
+
+  // prompt.edit 가 나르지 않는 변경: Ctrl+C·Esc 두 번으로 비움, 히스토리, 긴 붙여넣기
+  on('prompt.change', async ($, e, next) => {
+    const hasDraft = e.text.trim() !== ''
+    if ((await read($, band)).hasDraft !== hasDraft) await update($, band, b => ({ ...b, hasDraft }))
+    return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
@@ -367,8 +375,8 @@ export const register: Register = on => {
     const stepsInside = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined && ((await read($, nextSteps))?.items.length ?? 0) > 0
     const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepsInside ? 4 : 1)
     const q = !e.props.hasSurvey && f.stage === 'questions' && e.props.maxRows >= 1 ? f.questions[f.answers.length] : undefined
-    // team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 안 남기면 질문이 줄을 다 쓰는 높이에서만 팀 줄이 사라진다. 바깥이면 teamRows 로 알려 오고 이미 뗐다. 3줄보다 적으면 team-board 가 양보한다
-    const teamInside = (e.props as { teamRows?: number }).teamRows === undefined && e.props.maxRows >= 3 && !!(await read($, teamMe))
+    // team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 안 남기면 질문이 줄을 다 쓰는 높이에서만 팀 줄이 사라진다. 바깥이면 teamRows 로 알려 오고 이미 뗐다. 3줄보다 적으면 team-board 가 양보한다. /board band off 면 그릴 팀 줄이 없다
+    const teamInside = (e.props as { teamRows?: number }).teamRows === undefined && e.props.maxRows >= 3 && !!(await read($, teamMe)) && !(await read($, teamBandOff))
     const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows - (teamInside ? 1 : 0)) : null
     // 질문도 그릴 줄을 떼고 넘긴다. 이 mod 가 바깥이면 안쪽 team-board 한 줄만큼 넘쳐 선택지가 "↓ n more" 아래로 숨는다. team-board 는 coachRows 를 보고 받은 줄 안에서 그린다
     const inward = isIdleLine ? { maxRows: e.props.maxRows - 1 } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
