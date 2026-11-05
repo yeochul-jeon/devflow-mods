@@ -131,6 +131,11 @@ const workPlan = atom({ plugin: 'work-plan', key: 'plan' } as const, null as Wor
 const coachQuestion = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
 // 읽기만 한다. next-steps 가 띄운 다음 요청 제안. 0 으로 닫거나 /next off 면 null. next-steps 가 없으면 값이 없다
 const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { turnId: string; items: string[] } | null)
+// 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호들. 없으면 빈 목록. image-preview 가 없으면 값이 없다
+const imageDraft = atom({ plugin: 'image-preview', key: 'draft' } as const, [] as number[])
+// 읽기만 한다. prompt-coach 의 입력창 글 유무와 다듬기 단계. prompt-coach 가 없으면 값이 없다
+const coachBand = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false })
+const coachFlow = atom({ plugin: 'prompt-coach', key: 'flow' } as const, { stage: 'idle' } as { stage: string })
 const BAND_KEY = 'band-off'
 const BAND_MODE_KEY = 'band-mode'
 const BAND_SOLO_KEY = 'band-solo-off'
@@ -1255,7 +1260,14 @@ export const register: Register = (on, options) => {
     // next-steps 가 바깥이면 제 줄을 이미 떼고 nextStepsRows 로 알려 오니 양보하지 않는다. 작업 중에는 목록을 그리지 않는다
     const outerSteps = (e.props as { nextStepsRows?: number }).nextStepsRows !== undefined
     const steps = e.props.isWorking || outerSteps ? null : await read($, nextSteps)
-    const keep = steps?.items.length ? 1 : 0
+    // image-preview 가 안쪽이면 이미지 칩 줄(1줄)이 이 띠 아래에 그려진다. 바깥이면 제 줄을 이미 떼고 imagePreviewRows 로 알려 온다.
+    // 같은 안쪽에서 prompt-coach 의 [ 다듬기 ] 줄도 그려지면(초안이 있고 idle, 작업 중 아님) 1줄을 더 남긴다.
+    // prompt-coach 가 실제로는 바깥이면 이중으로 세어 박스 대신 한 줄 모양이 될 수 있다: 넘치는 것보다 낫다
+    // image-preview 가 바깥이어도 다듬기 줄 1줄은 남긴다. 안 남기면 칩 줄이 1줄을 먼저 떼어 24·20줄에서 다듬기 줄이 빠진다 (T60 실측, prependPlugins 가 안 먹는 Team·Enterprise 로그인에서 생기는 순서)
+    const chipsOuter = ((e.props as { imagePreviewRows?: number }).imagePreviewRows ?? 0) > 0
+    const chipsInside = (e.props as { imagePreviewRows?: number }).imagePreviewRows === undefined && e.viewport?.isFullscreen !== false && !e.props.hasSurvey && (await read($, imageDraft)).length > 0
+    const coachLine = (chipsInside || chipsOuter) && (await read($, coachBand)).hasDraft && (await read($, coachFlow)).stage === 'idle' && !e.props.isWorking
+    const keep = (steps?.items.length ? 1 : 0) + (chipsInside ? 1 : 0) + (coachLine ? 1 : 0)
     if (keep && maxRows - keep < 1) return next(e)
     const layout = bandLayout(list.length, columns, maxRows, head)
     const stepsCramped = keep > 0 && maxRows - hudRows(layout, list.length - layout.shown, columns, head) < keep

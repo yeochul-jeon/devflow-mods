@@ -3346,6 +3346,106 @@ describe('next-steps 연동', () => {
   })
 })
 
+// image-preview 칩 줄과 prompt-coach 다듬기 줄을 다른 mod 가 쓰는 것처럼 상태 원자에 넣는 시험용 mod. 원자는 주인 이름으로만 쓸 수 있다
+const IMAGE_DRAFT = {
+  name: 'image-preview',
+  register(on: any) {
+    on('tool.call', { tool: 'SetImages' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'image-preview', key: 'draft' }, e.ids)
+      return { result: 'ok' }
+    })
+  },
+}
+const COACH_BAND = {
+  name: 'prompt-coach',
+  register(on: any) {
+    on('tool.call', { tool: 'SetCoach' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'prompt-coach', key: 'band' }, { hasDraft: e.hasDraft })
+      await $.state.set({ plugin: 'prompt-coach', key: 'flow' }, { stage: e.stage })
+      return { result: 'ok' }
+    })
+  },
+}
+
+describe('image-preview 연동', () => {
+  test('안쪽 image-preview 칩 줄(과 prompt-coach 다듬기 줄)에 줄을 남긴다: 창 모양이 못 남기면 한 줄 모양, 그래도 안 남으면 그리지 않는다. 바깥 image-preview 에는 양보하지 않는다', { plugins: [IMAGE_DRAFT, COACH_BAND] }, async ($, on) => {
+    const files = new Map<string, string>()
+    const clock = mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('session.usage', () => ({ value: { startedAt: 0, rateLimits: [], context: { tokens: 24_000, window: 200_000, percent: 12 } } }))
+    on('session.cwd', () => ({ value: '/repo/order-svc' }))
+    on('session.repo', () => ({ value: { root: '/repo/order-svc', remote: null, internal: false, name: 'order-svc' } }))
+    on('session.id', () => ({ value: 'me' }))
+    on('session.messages', () => ({ value: [] }))
+    on('env.get', () => ({ value: '/home/me' }))
+    on('fs.write', ($, e: any) => { files.set(e.path, e.text); return { value: undefined } })
+    on('fs.list', ($, e: any) => ({
+      value: [...files.keys()].filter(k => k.startsWith(e.path + '/')).map(k => ({ name: k.split('/').pop()!, kind: 'file' as const, mtimeMs: NOW, size: 0, isLink: false })),
+    }))
+    on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
+    on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    // 안쪽 mod 가 받은 줄 수
+    let belowRows = -1
+    let belowTeamRows: unknown
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; belowTeamRows = e.props.teamRows; return $.ui.resolve(e).Text({ children: 'INNER' }) })
+    const setDraft = async (ids: number[], hasDraft = true, stage = 'idle') => {
+      await $.tool.call({ tool: 'SetImages', ids } as any)
+      await $.tool.call({ tool: 'SetCoach', hasDraft, stage } as any)
+    }
+    // 세션 하나: 창 모양(혼자 창 3줄)은 오른쪽 버튼 "보드 /board", 한 줄 모양은 " TEAM 1 ". inner 는 안쪽 mod 가 받은 maxRows/teamRows
+    const shape = async (maxRows: number, props: any = {}, viewport?: any) => {
+      belowRows = -1
+      belowTeamRows = undefined
+      const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 160, ...props }, viewport } as any)
+      const win = (JSON.stringify(await band.find({ type: 'Box' })) ?? '').includes('보드 /board')
+      const line = await band.find({ type: 'Text', text: /^ TEAM 1 $/ })
+      const inner = await band.find({ type: 'Text', text: /^INNER$/ })
+      await band.unmount()
+      expect(inner).toBeDefined()
+      return `${win ? 'window' : line ? 'line' : 'none'} INNER ${belowRows}/${belowTeamRows}`
+    }
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await clock.advance(3_000)
+    // 이미지가 없으면 그대로: 혼자 창은 3줄 (160칸). 3줄이 안 되면 한 줄 모양
+    expect(await shape(4)).toBe('window INNER 1/3')
+    expect(await shape(2)).toBe('line INNER 1/1')
+    // 초안이 비면 다듬기 줄도 없으니 이미지 칩 줄이 없는 것과 같다
+    await setDraft([], true)
+    expect(await shape(4)).toBe('window INNER 1/3')
+
+    // 칩 줄 1 + 다듬기 줄 1 = 2줄을 남긴다
+    await setDraft([1])
+    // 2: 2 - keep 2 < 1 이라 그리지 않는다. 안쪽에는 받은 2줄 그대로
+    expect(await shape(2)).toBe('none INNER 2/undefined')
+    // 4: 창 모양이 3줄을 쓰면 1줄 남아 keep 2 에 모자라니 한 줄 모양
+    expect(await shape(4)).toBe('line INNER 3/1')
+    // 5: 창 모양을 쓰고 2줄이 남는다
+    expect(await shape(5)).toBe('window INNER 2/3')
+    expect(await shape(6)).toBe('window INNER 3/3')
+    // 다듬기 줄이 안 그려지면(초안 없음·작업 중·단계가 idle 아님) 칩 줄 1줄만 남긴다
+    await setDraft([1], false)
+    expect(await shape(4)).toBe('window INNER 1/3')
+    await setDraft([1], true, 'questions')
+    expect(await shape(4)).toBe('window INNER 1/3')
+    await setDraft([1], true)
+    expect(await shape(4, { isWorking: true })).toBe('window INNER 1/3')
+    // image-preview 가 바깥이면 제 줄을 이미 떼고 imagePreviewRows 로 알려 온다: 양보하지 않는다
+    expect(await shape(4, { imagePreviewRows: 1 })).toBe('window INNER 1/3')
+    // 그래도 다듬기 줄 1줄은 남긴다: 칩이 1줄을 먼저 뗀 3줄에서 창 모양(3줄)을 쓰면 다듬기 줄이 빠진다 (T60 순서 O 실측)
+    expect(await shape(3, { imagePreviewRows: 1 })).toBe('line INNER 2/1')
+    expect(await shape(1, { imagePreviewRows: 1 })).toBe('none INNER 1/undefined')
+    // 전체화면이 아니면 image-preview 가 칩 줄을 그리지 않는다
+    expect(await shape(4, {}, { columns: 160, rows: 40, isFullscreen: false })).toBe('window INNER 1/3')
+    // survey 중에도 그리지 않는다 (맨 앞에서 그대로 넘긴다)
+    expect(await shape(4, { hasSurvey: true })).toBe('none INNER 4/undefined')
+    await setDraft([], true)
+    expect(await shape(4)).toBe('window INNER 1/3')
+  })
+})
+
 describe('결정 대화상자 위 맥락 (T34 A1)', () => {
   // 대화상자 둘레 그리기는 엔진 노드가 있어야 해서 테스트 키트로는 띄우지 못한다 (실화면 시험으로 확인). 내용만 여기서
   test('요청·계획 단계·직전 Claude 글을 줄마다 78칸 안으로, 아는 것이 없으면 []', async () => {
