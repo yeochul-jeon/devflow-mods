@@ -586,6 +586,10 @@ test('in herdr (TERM_PROGRAM=ghostty, HERDR_* set) the card opens in a window, n
   expect(await opensWindow($, on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1-p1' })).toBe(1)
 })
 
+test('in the herdr app (TERM=xterm-ghostty, HC_TERMINAL_ID set by herdr-core) the card opens in a window', async ($, on) => {
+  expect(await opensWindow($, on, { TERM: 'xterm-ghostty', HC_TERMINAL_ID: 't10' })).toBe(1)
+})
+
 test('in cmux (TERM_PROGRAM=ghostty, CMUX_* set) the card opens in a window, not in the band', async ($, on) => {
   expect(await opensWindow($, on, { CMUX_SURFACE_ID: 'surface-1', CMUX_WORKSPACE_ID: 'ws-1' })).toBe(1)
 })

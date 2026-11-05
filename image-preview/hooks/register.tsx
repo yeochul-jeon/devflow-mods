@@ -614,7 +614,7 @@ export const register: Register = (on, options) => {
     poll?.cancel()
     poll = undefined
     const result = await next(e)
-    const [program, term, kittyWindow, forceImages, sshConnection, sshTty, herdrEnv, herdrPane, cmuxSurface, cmuxWorkspace] = await Promise.all([
+    const [program, term, kittyWindow, forceImages, sshConnection, sshTty, herdrEnv, herdrPane, hcTerminal, cmuxSurface, cmuxWorkspace] = await Promise.all([
       $.env.get('TERM_PROGRAM'),
       $.env.get('TERM'),
       $.env.get('KITTY_WINDOW_ID'),
@@ -623,6 +623,7 @@ export const register: Register = (on, options) => {
       $.env.get('SSH_TTY'),
       $.env.get('HERDR_ENV'),
       $.env.get('HERDR_PANE_ID'),
+      $.env.get('HC_TERMINAL_ID'),
       $.env.get('CMUX_SURFACE_ID'),
       $.env.get('CMUX_WORKSPACE_ID')
     ])
@@ -633,10 +634,11 @@ export const register: Register = (on, options) => {
     // the pointer, on the desktop the session runs on: not over SSH, where that is another machine's.
     windowing = undefined
     const isRemote = sshConnection !== undefined || sshTty !== undefined
-    // herdr and cmux say TERM_PROGRAM=ghostty, but herdr draws no picture and cmux draws the card
+    // herdr's app and cmux say TERM_PROGRAM=ghostty, but herdr draws no picture and cmux draws the card
     // too small to read in the band: there, as with the preferWindow option, the window is used too.
     // Where it shows none, the terminal still draws the card.
-    const isPane = herdrEnv === '1' || herdrPane !== undefined || cmuxSurface !== undefined || cmuxWorkspace !== undefined
+    // The herdr app runs its terminals through herdr-core (hc), which sets HC_TERMINAL_ID, not HERDR_*.
+    const isPane = herdrEnv === '1' || herdrPane !== undefined || hcTerminal !== undefined || cmuxSurface !== undefined || cmuxWorkspace !== undefined
     const prefersWindow = options.preferWindow === true || isPane
     if (options.window !== false && (graphics === 'none' || prefersWindow) && e.isInteractive && !isRemote) {
       const system = await platformOf($)
