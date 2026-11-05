@@ -356,6 +356,68 @@ describe('prompt-coach 흐름', () => {
     expect(await at(7)).toBe(0) // /board band off: 그릴 팀 줄이 없어 7줄을 다 쓴다
   })
 
+  const IMAGE_PREVIEW = {
+    name: 'image-preview',
+    register(on: any) {
+      on('tool.call', { tool: 'SetImages' }, async ($: any, e: any) => {
+        await $.state.set({ plugin: 'image-preview', key: 'draft' }, e.draft)
+        return { result: 'ok' }
+      })
+    },
+  }
+
+  test('쉬는 줄: image-preview 칩이 안쪽이면 받은 줄이 3 이상일 때 칩과 쉬는 줄 사이 빈 줄 1줄을 위해 2줄을 떼고, 모자라면 1줄만 뗀다', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
+    const { s, type } = await setup($, on)
+    await type(DRAFT)
+    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
+    const at = async (maxRows: number, extra = {}) => {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } })
+      const kids = ((await b.find({ type: 'Box' })) as any).children
+      await b.unmount()
+      return { inner: s.innerRows, wrap: JSON.stringify(kids[1]) }
+    }
+    const r3 = await at(3)
+    expect(r3.inner).toBe(1)
+    expect(r3.wrap).toContain('"marginTop":1') // 칩(rest) 아래, 쉬는 줄 위
+    expect(r3.wrap).not.toContain('"marginBottom":1')
+    expect((await at(2)).inner).toBe(1)
+    expect((await at(2)).wrap).not.toContain('marginTop')
+    expect((await at(1)).inner).toBe(0)
+    expect((await at(1)).wrap).not.toContain('marginTop')
+    // 칩이 바깥이면(imagePreviewRows) 쉬는 줄 아래에 둔다
+    const outer = await at(3, { imagePreviewRows: 1 })
+    expect(outer.inner).toBe(1)
+    expect(outer.wrap).toContain('"marginBottom":1')
+    expect(outer.wrap).not.toContain('"marginTop":1')
+    // 바깥 칩은 안쪽에 줄을 쓰지 않아 2줄이면 쉬는 줄 + 빈 줄이 딱 맞다. 1줄이면 빈 줄이 없다
+    const outer2 = await at(2, { imagePreviewRows: 1 })
+    expect(outer2.inner).toBe(0)
+    expect(outer2.wrap).toContain('"marginBottom":1')
+    const outer1 = await at(1, { imagePreviewRows: 1 })
+    expect(outer1.inner).toBe(0)
+    expect(outer1.wrap).not.toContain('"marginBottom":1')
+    // 바깥 칩이 있으면 입력창 이미지 목록이 비어도 같다. 안쪽 칩 줄은 계산하지 않는다
+    await $.tool.call({ tool: 'SetImages', draft: [] } as any)
+    expect((await at(3, { imagePreviewRows: 1 })).inner).toBe(1)
+    // 이미지가 없으면 그대로 1줄만 뗀다
+    const none = await at(3)
+    expect(none.inner).toBe(2)
+    expect(none.wrap).not.toContain('margin')
+  })
+
+  test('쉬는 줄: 쉬는 단계가 아니면(질문 중) 이미지가 있어도 빈 줄을 두지 않는다. 팀 줄이 안쪽이면 그 줄까지 센다', { plugins: [IMAGE_PREVIEW, TEAM_BOARD] }, async ($, on) => {
+    const { s, type, coach } = await setup($, on)
+    await type(DRAFT)
+    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
+    const at = async (maxRows: number, extra = {}) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } }); await b.unmount(); return s.innerRows }
+    await $.tool.call({ tool: 'SetMe', me: { state: 'idle', question: '' } } as any)
+    expect(await at(4)).toBe(2) // 칩 1 + 팀 1 + 빈 줄 + 쉬는 줄 = 4
+    expect(await at(3)).toBe(2) // 칩과 팀 줄에 2줄이 필요해 빈 줄은 없다
+    await $.tool.call({ tool: 'SetMe', me: null } as any)
+    await coach(DRAFT)
+    expect(await at(3)).toBe(3 - 2) // 질문 단계: 질문 몫(질문·선택지)만 뗀다, 빈 줄 몫이 아니다
+  })
+
   test('입력창이 prompt.change 로 비면(Ctrl+C, Esc 두 번) [다듬기]를 그리지 않고 줄도 떼지 않는다', async ($, on) => {
     const { s, type, shows } = await setup($, on)
     await type(DRAFT)

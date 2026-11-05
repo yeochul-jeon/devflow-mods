@@ -24,6 +24,7 @@ const claudeAsking = atom({ plugin: 'prompt-coach', key: 'claudeAsking' } as con
 const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { items: string[] } | null)
 const teamMe = atom({ plugin: 'team-board', key: 'me' } as const, null as { state: string; question: string } | null)
 const teamBandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
+const imageDraft = atom({ plugin: 'image-preview', key: 'draft' } as const, [] as number[])
 const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as CoachEntry[])
 const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
 const tick = atom({ plugin: 'prompt-coach', key: 'tick' } as const, 0)
@@ -379,7 +380,12 @@ export const register: Register = on => {
     const teamInside = (e.props as { teamRows?: number }).teamRows === undefined && e.props.maxRows >= 3 && !!(await read($, teamMe)) && !(await read($, teamBandOff))
     const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows - (teamInside ? 1 : 0)) : null
     // 질문도 그릴 줄을 떼고 넘긴다. 이 mod 가 바깥이면 안쪽 team-board 한 줄만큼 넘쳐 선택지가 "↓ n more" 아래로 숨는다. team-board 는 coachRows 를 보고 받은 줄 안에서 그린다
-    const inward = isIdleLine ? { maxRows: e.props.maxRows - 1 } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
+    // image-preview 칩 줄과 쉬는 줄이 붙어 구분이 안 된다. 칩이 안쪽이면 rest 의 마지막 줄이라 쉬는 줄 위에, 바깥이면 이 mod 출력 바로 아래라 쉬는 줄 아래에 빈 줄 1줄을 둔다. 안쪽 칩·팀 줄이 먼저 자리를 받고도 한 줄이 남을 때만 둔다
+    const imageRows = (e.props as { imagePreviewRows?: number }).imagePreviewRows
+    const chipsInside = imageRows === undefined && e.viewport?.isFullscreen !== false && !e.props.hasSurvey && (await read($, imageDraft)).length > 0
+    const chipsOuter = (imageRows ?? 0) > 0
+    const gap = isIdleLine && (chipsInside || chipsOuter) && e.props.maxRows - 2 >= (chipsInside ? 1 : 0) + (teamInside ? 1 : 0)
+    const inward = isIdleLine ? { maxRows: e.props.maxRows - (gap ? 2 : 1) } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
     const rest = await next(inward ? { ...e, props: { ...e.props, ...inward } as typeof e.props } : e)
     if (e.props.hasSurvey) return rest
     // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
@@ -536,14 +542,17 @@ export const register: Register = on => {
 
     if (!isIdleLine) return rest
     // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다
+    const idleLine = (
+      <Box flexDirection="row" columnGap={1} paddingX={1} height={1} overflow="hidden">
+        <Button key="coach-refine" label="다듬기" onPress={() => void refineBox($)} />
+        {undoButton}
+        <Text dimColor wrap="truncate-end">{`빈 곳을 몇 개 묻고 다듬어요 (Haiku)${isOn ? ' · 자동' : ''}`}</Text>
+      </Box>
+    )
     return (
       <Box flexDirection="column">
         {rest}
-        <Box flexDirection="row" columnGap={1} paddingX={1} height={1} overflow="hidden">
-          <Button key="coach-refine" label="다듬기" onPress={() => void refineBox($)} />
-          {undoButton}
-          <Text dimColor wrap="truncate-end">{`빈 곳을 몇 개 묻고 다듬어요 (Haiku)${isOn ? ' · 자동' : ''}`}</Text>
-        </Box>
+        {gap ? <Box flexDirection="column" marginTop={chipsInside ? 1 : 0} marginBottom={chipsOuter ? 1 : 0}>{idleLine}</Box> : idleLine}
       </Box>
     )
   })
