@@ -204,6 +204,45 @@ describe('next-steps', () => {
     await band.unmount()
   })
 
+  const IMAGE_PREVIEW = {
+    name: 'image-preview',
+    register(on: any) {
+      on('tool.call', { tool: 'SetImages' }, async ($: any, e: any) => {
+        await $.state.set({ plugin: 'image-preview', key: 'draft' }, e.draft)
+        return { result: 'ok' }
+      })
+    },
+  }
+
+  test('image-preview 칩 줄이 안쪽이면 칩 줄과 다듬기 줄 2줄을 남긴다: 가로줄은 5줄부터, 펼친 목록은 items + 4 줄부터 (T60)', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
+    mock.store(on)
+    const seen: number[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
+    on('agent.list', () => ({ value: [] }))
+    on('session.messages', () => ({ value: [] }))
+    on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
+    on('turn.complete', () => ({ text: '' }))
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { seen.push(e.props.maxRows); return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    const rowsAt = async (maxRows: number, props: any = {}) => {
+      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...props } })
+      await band.unmount()
+      return seen.at(-1)
+    }
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
+    await settle()
+    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
+    expect(await rowsAt(10)).toBe(6) // 펼친 목록 4줄, 안쪽 6줄
+    expect(await rowsAt(5)).toBe(3) // 한 줄 모양 + 가로줄 = 2, 안쪽 3줄
+    expect(await rowsAt(4)).toBe(3) // 가로줄을 빼 1줄만 쓴다: 칩·다듬기 2줄이 남는다
+    expect(await rowsAt(3)).toBe(2)
+    // image-preview 가 바깥(imagePreviewRows)이면 제 줄을 이미 뗐다: 예전과 같다
+    expect(await rowsAt(4, { imagePreviewRows: 1 })).toBe(2)
+    await $.tool.call({ tool: 'SetImages', draft: [] } as any)
+    expect(await rowsAt(4)).toBe(2)
+  })
+
   test('제안 띠 줄 수를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다. 제안이 없거나 작업 중이면 그대로 넘긴다', async ($, on) => {
     mock.store(on)
     const seen: number[] = []
