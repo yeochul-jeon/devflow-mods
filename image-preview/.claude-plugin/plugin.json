@@ -1,0 +1,28 @@
+{
+  "name": "image-preview",
+  "version": "0.2.2",
+  "description": "Hover a pasted [Image #N] to see the picture: above the prompt while you write, and on the prompts you sent. (devflow-mods fork of midudev/better-claude@5abacf0)",
+  "author": {
+    "name": "Miguel Ángel Durán (midudev)",
+    "url": "https://github.com/midudev"
+  },
+  "homepage": "https://github.com/yeochul-jeon/devflow-mods/tree/main/image-preview",
+  "repository": "https://github.com/yeochul-jeon/devflow-mods",
+  "license": "MIT",
+  "keywords": [
+    "images",
+    "paste",
+    "preview",
+    "hover",
+    "mod"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "window": {
+      "type": "boolean",
+      "title": "Preview in a window",
+      "description": "Where the terminal cannot draw the picture itself, show it in a small window of its own by the pointer, outside the terminal, at full quality (macOS, Windows, and Linux with X11 and Python's tkinter). Off, the terminal draws it in cells.",
+      "default": true
+    }
+  }
+}
