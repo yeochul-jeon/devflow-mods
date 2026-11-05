@@ -1,5 +1,12 @@
 # Image Preview
 
+> **devflow-mods fork.** [midudev/better-claude](https://github.com/midudev/better-claude) `plugins/image-preview` 의 커밋 [`5abacf0`](https://github.com/midudev/better-claude/tree/5abacf0/plugins/image-preview)(0.2.2)를 가져와 고친 판입니다. 원본과 같은 MIT 라이선스이며 저작권 고지는 [LICENSE](LICENSE)에 있습니다. 이 fork 에서 바꾼 것(0.3.0):
+>
+> - 입력창 위 칩 줄이 `maxRows` 를 넘겨 `↓ 2 more` 밑에 가려지던 것을 고쳤습니다. 칩 줄(과 띠 안에 들어가는 카드)의 줄을 먼저 떼고 안쪽 mod 에 넘기며, 뗀 줄 수를 `imagePreviewRows` 로 알립니다. 띠 안 카드는 남은 줄에 들어갈 때만 그립니다.
+> - 칩 줄을 한 줄로 고정하고 왼쪽을 한 칸 띄워 prompt-coach·next-steps 줄과 맞췄습니다.
+> - herdr 와 cmux(둘 다 `TERM_PROGRAM=ghostty`)에서는 미리보기를 터미널 안 카드 대신 별도 창으로 엽니다. `HERDR_ENV`·`HERDR_PANE_ID`·`CMUX_SURFACE_ID`·`CMUX_WORKSPACE_ID` 로 알아봅니다. 다른 터미널에서도 창을 쓰려면 `preferWindow` 옵션을 켭니다.
+> - 아래 영어 본문은 원본 그대로이고, 설치와 개발 명령, 창 옵션, herdr 줄만 고쳤습니다.
+
 A Claude Code mod: hover a pasted `[Image #1]` and the picture opens by the pointer, in a small window of its own or drawn in the terminal. Click it and the image opens in the system's viewer.
 
 ```text
@@ -28,7 +35,7 @@ The picture shows as it is, sharp: a screenshot of text reads as it was. It is s
 | WSL | The same Windows Forms window, run by `powershell.exe` from WSL, by the Windows pointer | Nothing to install |
 | Linux | A Tk tooltip window on X11, the picture shrunk to a PNG | Python's Tk (`python3-tk` on Debian and Ubuntu, `python3-tkinter` on Fedora) and ImageMagick |
 
-Turn it off with the **Preview in a window** option (`/config`) to keep the preview in the terminal. Over SSH the window would open on the other machine, so there the terminal draws it. Where the window's program cannot show one, the terminal draws the previews for the rest of the session.
+In herdr and cmux, which say `TERM_PROGRAM=ghostty` but draw no picture or one too small to read, the window is used too (devflow-mods fork); the **preferWindow** option uses it in Ghostty and kitty as well. Turn it off with the **Preview in a window** option (`/config`) to keep the preview in the terminal. Over SSH the window would open on the other machine, so there the terminal draws it. Where the window's program cannot show one, the terminal draws the previews for the rest of the session.
 
 ## In the terminal
 
@@ -51,8 +58,8 @@ Warp speaks the kitty graphics protocol, but not the Unicode placeholders Claude
 ## Install
 
 ```text
-/plugin marketplace add midudev/better-claude
-/plugin install image-preview@better-claude
+claude plugin marketplace add yeochul-jeon/devflow-mods#stable
+claude plugin install image-preview@devflow-mods
 ```
 
 ## Limits
@@ -64,7 +71,7 @@ Warp speaks the kitty graphics protocol, but not the Unicode placeholders Claude
 - On Linux the window needs X11 (or XWayland): under Wayland alone there is none, and the terminal draws the card. Under XWayland the window may not stand by the pointer when the terminal is a Wayland window.
 - On Windows the first window compiles a small helper into the temp folder, which takes a second. The Windows window and converter have been written and checked (the scripts parse, the commands are tested) and have been run on Windows from WSL.
 - Under WSL (`WSL_DISTRO_NAME` is set) the session is Linux but the desktop is Windows', so the window, the converter and the viewer are Windows': a WSLg window could not tell where the pointer is over a Windows terminal.
-- Hovering needs the terminal to report mouse motion. A terminal multiplexer between Claude Code and the terminal must pass it on: in testing, herdr 0.9.1 did not, and no preview opened.
+- Hovering needs the terminal to report mouse motion. A terminal multiplexer between Claude Code and the terminal must pass it on: in testing, herdr 0.9.1 did not, and no preview opened; herdr 0.9.5 did (devflow-mods, 2026-11-04).
 - It reads the images Claude Code stores for the session, in its temp folder (`<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>/…/images`; on Windows `<CLAUDE_CODE_TMPDIR or %TEMP%>\claude\…\images`), and keeps its shrunk copies in an `image-preview` folder beside them. Images from a session started before you installed the mod are found too; images from another session are not.
 - A session resumed with `--continue` draws its rows all at once, its prompts apart from the rest; the mod puts them back in order by turns. A turn with no `done` line (one interrupted) can put a card a few rows off.
 - It shrinks the picture with `sips` on macOS, ImageMagick (`magick` or `convert`) on Linux, and ImageMagick or PowerShell on Windows and under WSL (there `powershell.exe`, its variables passed through `WSLENV`). Without them, the card says it cannot read it.
@@ -82,8 +89,8 @@ One hooks module ([`hooks/register.tsx`](hooks/register.tsx)), a surface module 
 ## Development
 
 ```bash
-claude plugin validate ./plugins/image-preview   # from the repository root
-claude plugin test ./plugins/image-preview       # runs hooks/register.test.tsx against the engine
+claude plugin validate ./image-preview   # from the devflow-mods root
+claude plugin test ./image-preview       # runs hooks/register.test.tsx against the engine
 ```
 
 MIT © Miguel Ángel Durán (midudev)

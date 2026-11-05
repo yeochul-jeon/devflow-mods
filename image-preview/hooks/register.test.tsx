@@ -571,6 +571,37 @@ test('where the terminal cannot draw the picture, the card opens in a window of 
   expect(w.windows[0]!.isEnded).toBe(true)
 })
 
+// herdr and cmux say TERM_PROGRAM=ghostty: herdr draws no picture, cmux draws one too small to read.
+const opensWindow = async ($: Engine, on: On, env: Record<string, string>) => {
+  const w = world(on, { draft: '[Image #1]', env: { TERM_PROGRAM: 'ghostty', ...env } })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($)
+  await point(ui, 'chip:1')
+  await w.clock.advance(100)
+  return w.windows.length
+}
+
+test('in herdr (TERM_PROGRAM=ghostty, HERDR_* set) the card opens in a window, not in the band', async ($, on) => {
+  expect(await opensWindow($, on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1-p1' })).toBe(1)
+})
+
+test('in cmux (TERM_PROGRAM=ghostty, CMUX_* set) the card opens in a window, not in the band', async ($, on) => {
+  expect(await opensWindow($, on, { CMUX_SURFACE_ID: 'surface-1', CMUX_WORKSPACE_ID: 'ws-1' })).toBe(1)
+})
+
+test('in Ghostty itself the terminal still draws the card', async ($, on) => {
+  expect(await opensWindow($, on, {})).toBe(0)
+})
+
+test('the preferWindow option opens the window in Ghostty too', { options: { preferWindow: true } }, async ($, on) => {
+  expect(await opensWindow($, on, {})).toBe(1)
+})
+
+test('with the window option off, herdr gets no window either', { options: { window: false } }, async ($, on) => {
+  expect(await opensWindow($, on, { HERDR_ENV: '1', HERDR_PANE_ID: 'w1-p1' })).toBe(0)
+})
+
 test('moving from one image to the next ends the first window and opens the next', async ($, on) => {
   const w = world(on, { draft: '[Image #1] [Image #2]', files: { '1.png': 2048, '2.png': 2048 } })
   await startSession($)

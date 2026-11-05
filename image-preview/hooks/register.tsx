@@ -614,13 +614,17 @@ export const register: Register = (on, options) => {
     poll?.cancel()
     poll = undefined
     const result = await next(e)
-    const [program, term, kittyWindow, forceImages, sshConnection, sshTty] = await Promise.all([
+    const [program, term, kittyWindow, forceImages, sshConnection, sshTty, herdrEnv, herdrPane, cmuxSurface, cmuxWorkspace] = await Promise.all([
       $.env.get('TERM_PROGRAM'),
       $.env.get('TERM'),
       $.env.get('KITTY_WINDOW_ID'),
       $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES'),
       $.env.get('SSH_CONNECTION'),
-      $.env.get('SSH_TTY')
+      $.env.get('SSH_TTY'),
+      $.env.get('HERDR_ENV'),
+      $.env.get('HERDR_PANE_ID'),
+      $.env.get('CMUX_SURFACE_ID'),
+      $.env.get('CMUX_WORKSPACE_ID')
     ])
     const isNative = program === 'ghostty' || term === 'xterm-ghostty' || term === 'xterm-kitty' || kittyWindow !== undefined
     const isForced = /^(1|true|yes|on)$/i.test(forceImages ?? '')
@@ -629,7 +633,12 @@ export const register: Register = (on, options) => {
     // the pointer, on the desktop the session runs on: not over SSH, where that is another machine's.
     windowing = undefined
     const isRemote = sshConnection !== undefined || sshTty !== undefined
-    if (options.window !== false && graphics === 'none' && e.isInteractive && !isRemote) {
+    // herdr and cmux say TERM_PROGRAM=ghostty, but herdr draws no picture and cmux draws the card
+    // too small to read in the band: there, as with the preferWindow option, the window is used too.
+    // Where it shows none, the terminal still draws the card.
+    const isPane = herdrEnv === '1' || herdrPane !== undefined || cmuxSurface !== undefined || cmuxWorkspace !== undefined
+    const prefersWindow = options.preferWindow === true || isPane
+    if (options.window !== false && (graphics === 'none' || prefersWindow) && e.isInteractive && !isRemote) {
       const system = await platformOf($)
       if (system === 'macos' || system === 'windows') windowing = system
       // Under WSL the window is Windows', by the pointer: not WSLg's, which cannot tell where it is.
