@@ -684,6 +684,20 @@
 ### 0.1.0 (2026-10-12)
 - 처음 공개: 답변이 끝나면 다음 요청 제안 2~3개(Haiku), 빈 입력창에서 숫자로 초안 넣기, `/next` 사용량·켜기·끄기.
 
+## image-preview
+
+[midudev/better-claude](https://github.com/midudev/better-claude) 의 image-preview 를 가져와 고친 판입니다.
+
+### 0.3.0 (2026-11-06)
+- 입력창 위 칩 줄(`[Image #1] hover to preview · click to open`)이 80×24 같은 작은 창에서 `↓ 2 more` 밑에 가려지던 것을 고쳤습니다. 칩 줄과 띠 안 카드의 줄을 먼저 떼고 안쪽 mod 에 넘기며, 뗀 줄 수를 `imagePreviewRows` 로 알립니다. 받은 줄이 없으면 그리지 않습니다.
+- 띠 안 카드는 칩 줄을 뺀 남은 줄이 6줄 이상이고 카드가 그 안에 들어갈 때만 그립니다. 그래서 Ghostty·kitty 에서 띠 안 카드가 원본보다 작아지거나 뜨지 않을 수 있습니다. 클릭하면 Preview 로 여는 것은 그대로입니다.
+- 칩 줄을 한 줄로 고정하고 왼쪽을 한 칸 띄워 prompt-coach·next-steps 줄과 맞췄습니다. 칩이 많아 한 줄을 넘으면 오른쪽이 잘립니다.
+- herdr·cmux(둘 다 `TERM_PROGRAM=ghostty`)에서는 마우스를 올리면 터미널 안 카드 대신 별도 창을 엽니다. `HERDR_ENV`·`HERDR_PANE_ID`·`CMUX_SURFACE_ID`·`CMUX_WORKSPACE_ID` 로 알아봅니다. 새 옵션 `preferWindow`(기본 꺼짐)를 켜면 Ghostty·kitty 에서도 별도 창을 씁니다.
+- 실화면(2026-11-05, Claude Code 2.1.318, tmux 80칸): team-board·next-steps·prompt-coach 와 함께, 두 순서에서 창 40줄부터 20줄까지 `↓ more` 가 없고 칩 줄이 보입니다. herdr·cmux 의 별도 창은 단위 테스트로만 확인했습니다(실화면 미확인).
+
+### 0.2.2 (2026-11-05)
+- 원본 [`5abacf0`](https://github.com/midudev/better-claude/tree/5abacf0/plugins/image-preview) 을 그대로 가져왔습니다. `plugin.json` 의 homepage·repository 와 fork 표시만 바꿨습니다.
+
 ## eli12
 
 ### 0.2.0 (2026-10-22)

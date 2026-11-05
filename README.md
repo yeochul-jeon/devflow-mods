@@ -1,6 +1,6 @@
 # devflow-mods
 
-Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 기간별 돌아보기, 12살 버전 설명, 오해 없는 절차 글, 다음 요청 제안, 초안 다듬기를 제공합니다.
+Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 기간별 돌아보기, 12살 버전 설명, 오해 없는 절차 글, 다음 요청 제안, 초안 다듬기, 이미지 미리보기를 제공합니다.
 
 [![Claude Code](https://img.shields.io/badge/Claude_Code-2.1.311%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
@@ -22,6 +22,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 📏 | [**ste100**](#-ste100-오해-없는-절차-글) | 절차·지시·결정 항목을 ASD-STE100 에서 착안한 문체로 씁니다. | 없음 (스킬만) |
 | 💡 | [**next-steps**](#-next-steps-다음-요청-제안) | 답변이 끝나면 다음 요청 2~3개를 제안합니다. | `/next [on\|off]` |
 | 📝 | [**prompt-coach**](#-prompt-coach-초안-다듬기) | 보내기 전에 초안의 빈 곳을 묻고 다듬습니다. | `/coach <초안>\|view\|auto on\|off`, `[다듬기]`·`[되돌리기]` 버튼 |
+| 📷 | [**image-preview**](#-image-preview-이미지-미리보기) | 붙인 이미지의 `[Image #N]` 에 마우스를 올리면 그림을 보여 주고, 클릭하면 Preview 로 엽니다. [midudev/better-claude](https://github.com/midudev/better-claude) 의 fork 입니다. | 없음 (입력창 위 칩 줄) |
 
 | 설정 | mod | 바꾸는 곳 | 기본값 |
 | --- | --- | --- | --- |
@@ -37,6 +38,8 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 용어 풀이 | plain-terms | `claude plugin disable plain-terms@devflow-mods` | 켜짐 |
 | 다음 요청 제안 | next-steps | `/next on\|off` | 켜짐 |
 | 보낼 때마다 다듬기 | prompt-coach | `/coach auto on\|off` (모든 세션) | 꺼짐 |
+| 미리보기 별도 창 `window` | image-preview | `claude plugin configure image-preview@devflow-mods` | 켜짐 |
+| Ghostty·kitty 에서도 별도 창 `preferWindow` | image-preview | `claude plugin configure image-preview@devflow-mods` | 꺼짐 (herdr·cmux 는 저절로 창) |
 
 ## 필요한 것
 
@@ -45,6 +48,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | Claude Code | 필수 | v2.1.311 이상을 권장합니다(실제로 돌려 확인한 버전). v2.1.295 미만에서는 상황판·패널이 그려지지 않으니 그 이상을 쓰세요. `claude --version` 으로 확인하세요. |
 | git | 선택 (team-board) | 카드의 `변경` 줄과 워크트리 브랜치 이름을 읽습니다. 없거나 git 저장소가 아니면 그 줄만 빠집니다. |
 | 알림 소리 명령 | 선택 (team-board) | macOS 는 따로 설치할 것이 없습니다. Linux 는 `paplay`(PulseAudio) 또는 `aplay`(ALSA), Windows 는 PowerShell 로 소리를 냅니다. 없으면 소리만 나지 않습니다. |
+| fullscreen 화면 | 필수 (image-preview) | 마우스 올리기는 Claude Code 의 fullscreen 화면(`"tui": "fullscreen"` 또는 `/config`)에서만 됩니다. 그림 줄이기는 macOS 의 `sips`(기본 설치), Linux·Windows 는 ImageMagick 을 씁니다. |
 | `date` 명령 | 선택 (look-back) | 시스템 시간대를 읽어 날짜를 나눕니다. 없으면(Windows 기본 셸 등) UTC 기준으로 나눕니다. |
 
 - 설치되는 최소 버전(2.1.290)은 버전마다 `claude plugin validate` 로 모든 mod 를 검사해 정했습니다(2.1.286 ~ 2.1.312, 2026-10-28). 2.1.289 이하는 next-steps 를 거부하고, 나머지 mod 는 2.1.286 부터 통과합니다. 이 검사는 Claude Code 가 mod 를 받아 주는지만 보며, 결과 값이 비거나 동작이 다른 것은 잡지 못합니다.
@@ -66,6 +70,7 @@ claude plugin install eli12@devflow-mods
 claude plugin install ste100@devflow-mods          # 별도 모델 호출 없음. 스킬이 발동할 때만 스킬 본문이 대화에 들어갑니다
 claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출합니다
 claude plugin install prompt-coach@devflow-mods   # 다듬을 때 Haiku 2회. 자동 모드(기본 꺼짐)면 보낼 때마다
+claude plugin install image-preview@devflow-mods  # 모델 호출 없음. 이미지를 붙였을 때만 입력창 위에 한 줄
 ```
 
 - `#stable` 은 릴리즈된 버전만 받습니다. 버전마다 변경 내역은 [Releases](https://github.com/yeochul-jeon/devflow-mods/releases) 에 있습니다. `#stable` 없이 추가하면 main 의 개발 중 버전을 받습니다.
@@ -365,6 +370,32 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 
 ---
 
+## 📷 image-preview: 이미지 미리보기
+
+- 입력창에 이미지를 붙이면 입력창 위에 `[Image #1] hover to preview · click to open` 칩 줄이 생깁니다.
+- 칩에 마우스를 올리면 그림이 뜨고, 내리면 닫힙니다. 클릭하면 macOS Preview 에서 원본이 열립니다.
+- 그림이 뜨는 곳은 터미널마다 다릅니다(2026-11-03~04 실측).
+
+  | 터미널 | 마우스를 올리면 |
+  | --- | --- |
+  | Orca, Warp | 별도 창에 선명한 그림 |
+  | herdr, cmux | 별도 창 (이 fork 의 0.3.0 부터. 0.2.2 에서는 띠 안 카드가 잘리거나 글자만 보였습니다) |
+  | Ghostty, kitty | 터미널 안 카드. `preferWindow` 를 켜면 별도 창 (시험하지 않았습니다) |
+
+- 줄이 모자라면 팀 창이 한 줄 모양으로 바뀌어 칩 줄과 prompt-coach `[ 다듬기 ]` 줄을 남깁니다. 줄이 남으면 두 줄 사이에 빈 줄 1줄을 둡니다.
+- [midudev/better-claude](https://github.com/midudev/better-claude) `5abacf0` 의 image-preview(0.2.2, MIT)를 가져와 고친 판입니다. 바꾼 점과 원본 설명은 [image-preview/README.md](image-preview/README.md)를 보세요.
+
+<details>
+<summary>비용과 주의</summary>
+
+- 모델을 호출하지 않습니다. 이미지가 있을 때 0.5초마다 입력창을 읽고, 그림을 줄일 때 `sips` 를 돌립니다.
+- 다음 요청 제안이 떠 있는 20줄 창에서는 칩 줄과 `[ 다듬기 ]` 줄이 숨고 제안만 남습니다.
+- herdr·cmux 감지는 각 터미널이 셸에 넣는 `HERDR_ENV`·`HERDR_PANE_ID`·`CMUX_SURFACE_ID`·`CMUX_WORKSPACE_ID` 를 봅니다. 이 이름은 herdr 연동 스크립트와 cmux 실행 파일에서 찾았습니다.
+
+</details>
+
+---
+
 ## 다른 mod와 함께 쓰기
 
 다른 mod가 입력창 위 영역을 차지하면 팀 창이 보이지 않을 수 있습니다. 이때 `~/.claude/settings.json` 에 아래 설정을 넣으세요.
@@ -385,6 +416,7 @@ claude plugin test ./work-plan
 claude plugin test ./plain-terms
 claude plugin test ./draw
 claude plugin test ./look-back
+claude plugin test ./image-preview
 claude plugin validate ./ste100         # ste100 은 스킬만 있어 테스트 대신 eval 을 씁니다
 claude plugin eval ./ste100
 ```
@@ -399,5 +431,7 @@ claude plugin eval ./ste100
 ## 라이선스
 
 [MIT](LICENSE)
+
+`image-preview/` 는 [midudev/better-claude](https://github.com/midudev/better-claude)(MIT, © Miguel Ángel Durán)의 image-preview 를 가져와 고쳤습니다. 원본 고지는 [image-preview/LICENSE](image-preview/LICENSE)에 있습니다.
 
 `team-board/hooks/failure.ts` 의 숨은 실패 규칙 일부는 [reasonofmoon-mods](https://github.com/Reasonofmoon/reasonofmoon-mods)(MIT, © Reason of Moon)를 바탕으로 고쳐 썼습니다.
