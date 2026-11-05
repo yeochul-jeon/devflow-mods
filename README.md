@@ -390,7 +390,7 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 
 - 모델을 호출하지 않습니다. 이미지가 있을 때 0.5초마다 입력창을 읽고, 그림을 줄일 때 `sips` 를 돌립니다.
 - 다음 요청 제안이 떠 있는 20줄 창에서는 칩 줄과 `[ 다듬기 ]` 줄이 숨고 제안만 남습니다.
-- herdr·cmux 감지는 각 터미널이 셸에 넣는 `HERDR_ENV`·`HERDR_PANE_ID`·`CMUX_SURFACE_ID`·`CMUX_WORKSPACE_ID` 를 봅니다. 이 이름은 herdr 연동 스크립트와 cmux 실행 파일에서 찾았습니다.
+- herdr·cmux 감지는 각 터미널이 셸에 넣는 변수를 봅니다. herdr 앱은 `HC_TERMINAL_ID`, herdr TUI 는 `HERDR_ENV`·`HERDR_PANE_ID`(둘 다 2026-11-06 실제 창에서 확인), cmux 는 `CMUX_SURFACE_ID`·`CMUX_WORKSPACE_ID`(cmux 실행 파일에서 찾은 이름, 실제 창에서는 미확인)입니다.
 
 </details>
 

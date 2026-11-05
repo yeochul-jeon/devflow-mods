@@ -688,6 +688,10 @@
 
 [midudev/better-claude](https://github.com/midudev/better-claude) 의 image-preview 를 가져와 고친 판입니다.
 
+### 0.3.1 (2026-11-06)
+- herdr 앱(Herdr.app)에서도 별도 창을 엽니다. herdr 앱의 터미널은 herdr-core 가 띄워 `HERDR_*` 대신 `HC_TERMINAL_ID` 를 넣고 `TERM=xterm-ghostty` 라, 0.3.0 은 이를 알아보지 못했습니다.
+- 확인(2026-11-06, Claude Code 2.1.318): herdr-core 터미널의 실제 env 에 `HC_TERMINAL_ID` 가 있고 `HERDR_*` 는 없습니다. herdr TUI 0.9.5 창에는 `HERDR_ENV=1`·`HERDR_PANE_ID` 가 있습니다. tmux 에서 이 env 로 칩에 마우스 이동을 보내면 osascript 창이 하나 뜨고, 칩 밖으로 옮기면 닫힙니다. cmux 는 외부 프로세스의 연결을 거부해 실제 창의 env 를 확인하지 못했습니다.
+
 ### 0.3.0 (2026-11-06)
 - 입력창 위 칩 줄(`[Image #1] hover to preview · click to open`)이 80×24 같은 작은 창에서 `↓ 2 more` 밑에 가려지던 것을 고쳤습니다. 칩 줄과 띠 안 카드의 줄을 먼저 떼고 안쪽 mod 에 넘기며, 뗀 줄 수를 `imagePreviewRows` 로 알립니다. 받은 줄이 없으면 그리지 않습니다.
 - 띠 안 카드는 칩 줄을 뺀 남은 줄이 6줄 이상이고 카드가 그 안에 들어갈 때만 그립니다. 그래서 Ghostty·kitty 에서 띠 안 카드가 원본보다 작아지거나 뜨지 않을 수 있습니다. 클릭하면 Preview 로 여는 것은 그대로입니다.
