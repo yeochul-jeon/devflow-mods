@@ -96,11 +96,14 @@ function world (
       opened.isEnded = true
     }
   })
+  // The props the band's inner mods were handed, in the order of the draws.
+  const inner: Record<string, unknown>[] = []
   on('ui.render', ($, e) => {
+    if (e.component === 'AbovePrompt') inner.push({ ...e.props })
     const { Box } = $.ui.resolve(e)
     return <Box key="engine" />
   })
-  return { clock, runs, runEnvs, box, session, windows }
+  return { clock, runs, runEnvs, box, session, windows, inner }
 }
 
 type Drawn = RenderElement & { children?: Drawn[]; props?: { key?: string } }
@@ -131,7 +134,7 @@ const running = async ($: Engine, clock: { advance: (ms: number) => Promise<void
   await startSession($)
   await clock.advance(1000)
 }
-const band = ($: Engine) => $.ui.mount({ plugin: 'image-preview', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+const band = ($: Engine, props: typeof BAND = BAND) => $.ui.mount({ plugin: 'image-preview', surface: 'terminal', component: 'AbovePrompt', props })
 const sent = ($: Engine, text: string, onScreen?: Shown, requestId = 'm-1') =>
   $.ui.mount({
     plugin: 'image-preview',
@@ -393,6 +396,58 @@ test('on a screen too short to float a card over the transcript, the band holds 
 
   expect(await only.find({ key: 'float-1' })).toBeUndefined()
   expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster' })
+})
+
+test('the chip row takes its row off the band slot before the inner mods draw, and says so', cells, async ($, on) => {
+  const w = world(on, { draft: '[Image #1]' })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($, { ...BAND, maxRows: 4 })
+  expect(w.inner.at(-1)).toMatchObject({ maxRows: 3, imagePreviewRows: 1 })
+  expect(await ui.find({ key: 'chip:1' })).toBeDefined()
+})
+
+test('a band slot with no row left draws nothing and hands the props down unchanged', cells, async ($, on) => {
+  const w = world(on, { draft: '[Image #1]' })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($, { ...BAND, maxRows: 0 })
+  expect(w.inner.at(-1)).toMatchObject({ maxRows: 0 })
+  expect(w.inner.at(-1)).not.toHaveProperty('imagePreviewRows')
+  expect(await ui.find({ key: 'chip:1' })).toBeUndefined()
+})
+
+test('with no chip and no card the props go down unchanged', cells, async ($, on) => {
+  const w = world(on, { draft: 'just words' })
+  await startSession($)
+  await w.clock.settle()
+  await band($, { ...BAND, maxRows: 4 })
+  expect(w.inner.at(-1)).toMatchObject({ maxRows: 4 })
+  expect(w.inner.at(-1)).not.toHaveProperty('imagePreviewRows')
+})
+
+test('a card the band holds takes its rows too: the chip row and the card come off the slot', cells, async ($, on) => {
+  const w = world(on, { draft: '[Image #1]' })
+  await startSession($)
+  await w.clock.settle()
+  await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
+  const ui = await band($, { ...BAND, maxRows: 20 })
+  await point(ui, 'chip:1')
+  // The 2x2 picture is one row of cells: a row, and its border and caption.
+  expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster', props: { rows: 1 } })
+  expect(w.inner.at(-1)).toMatchObject({ maxRows: 20 - 1 - 4, imagePreviewRows: 1 + 4 })
+})
+
+test('a card that does not fit the rows the chips leave is not drawn, the chip row still is', cells, async ($, on) => {
+  const w = world(on, { draft: '[Image #1]' })
+  await startSession($)
+  await w.clock.settle()
+  await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
+  const ui = await band($, { ...BAND, maxRows: 5 })
+  await point(ui, 'chip:1')
+  expect(await ui.find({ key: 'image-1' })).toBeUndefined()
+  expect(await ui.find({ key: 'chip:1' })).toBeDefined()
+  expect(w.inner.at(-1)).toMatchObject({ maxRows: 4, imagePreviewRows: 1 })
 })
 
 test('a card writes every cell it covers, caption and all, so the transcript under it does not show through', cells, async ($, on) => {

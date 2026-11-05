@@ -377,6 +377,18 @@ function closeWindow () {
 }
 
 /**
+ * The size of image `id`'s card within the bounds: the picture's cells and the rows the whole card
+ * takes, its border and caption included. Where there is no picture to draw (loading, or no preview)
+ * the card is one line. The band budgets its rows by this, and `card` draws by it.
+ */
+function cardSize (all: Record<string, Picture>, id: number, bounds: Bounds) {
+  const picture = all[id]
+  if (!picture || 'error' in picture || !thumbs.has(id)) return { columns: bounds.columns, rows: 0, height: 1 }
+  const { columns, rows } = fit(picture.width, picture.height, bounds.columns - CARD_COLUMNS, bounds.rows - CARD_ROWS)
+  return { columns, rows, height: rows + CARD_ROWS }
+}
+
+/**
  * The picture of image `id` in a bordered card, as large as the bounds allow, its caption under it.
  * It floats over the transcript, which shows through any cell it leaves unwritten: every line is
  * written to the card's width, spaces and all.
@@ -388,7 +400,7 @@ function card ({ Box, Image, Raster, Text }: Ui, all: Record<string, Picture>, i
   if (!picture || (!('error' in picture) && !thumbs.has(id))) return line(`${label} loading…`, bounds.columns)
   if ('error' in picture) return line(`${label} no preview: ${picture.error}`, bounds.columns)
 
-  const { columns, rows } = fit(picture.width, picture.height, bounds.columns - CARD_COLUMNS, bounds.rows - CARD_ROWS)
+  const { columns, rows } = cardSize(all, id, bounds)
   const view = views.get(id)
   const source = !picture.png ? undefined : graphics === 'file' ? { file: picture.png, format: 'png' as const } : view && { png: view }
   const key = `${id}:${columns}x${rows}`
@@ -742,22 +754,31 @@ export const register: Register = (on, options) => {
     const inBand = now && now.host === null && now.edge !== 'window' ? now.id : undefined
     if (ids.length === 0 && inBand === undefined) return next(e)
     if (e.viewport) screenRows = e.viewport.rows
+    if (e.props.maxRows < 1) return next(e)
 
+    // The rows this band takes come off the slot before the mods inside it draw: the chip row, and
+    // the card where it fits what the chips leave (a picture is worth at least MIN_CARD_ROWS).
     const ui = $.ui.resolve(e)
     const { Box, Client, Text } = ui
-    const below: RenderElement = await next(e)
+    const chipRows = ids.length > 0 ? 1 : 0
     const bounds = {
       columns: Math.max(8, Math.min(MAX_COLUMNS, e.props.bodyColumns)),
-      rows: Math.max(4, Math.min(MAX_ROWS, e.props.maxRows - 1))
+      rows: Math.min(MAX_ROWS, e.props.maxRows - chipRows)
     }
+    const all = inBand !== undefined ? await read($, pictures) : {}
+    const size = inBand !== undefined ? cardSize(all, inBand, bounds) : undefined
+    const hasCard = size !== undefined && size.height <= bounds.rows && (size.rows === 0 || bounds.rows >= MIN_CARD_ROWS)
+    const own = chipRows + (hasCard ? size.height : 0)
+    if (own === 0) return next(e)
+    const below: RenderElement = await next({ ...e, props: { ...e.props, maxRows: e.props.maxRows - own, imagePreviewRows: own } as typeof e.props })
     return (
       <Box flexDirection="column">
         {below}
-        {inBand !== undefined && card(ui, await read($, pictures), inBand, bounds)}
+        {hasCard && card(ui, all, inBand!, bounds)}
         {ids.length > 0 && (
-          <Box flexDirection="row" columnGap={1}>
+          <Box flexDirection="row" columnGap={1} height={1} overflow="hidden" paddingX={1}>
             {ids.map(id => <Client key={`chip:${id}`} module="./chip.tsx" props={{ label: `[Image #${id}]` }} />)}
-            <Text dimColor>hover to preview · click to open</Text>
+            <Text dimColor wrap="truncate-end">hover to preview · click to open</Text>
           </Box>
         )}
       </Box>
