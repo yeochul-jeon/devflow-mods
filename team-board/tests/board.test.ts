@@ -5,6 +5,7 @@ import {
   crowned,
   leadTarget,
   fitStrip,
+  tableLines,
   wrapCells,
   stampTasks,
   stepTimes,
@@ -2220,13 +2221,15 @@ describe('팀 상황판', () => {
     expect(sep?.text).toMatch(/^─+$/)
     expect(JSON.stringify(sep)).toContain(paletteOf('night').dim)
 
-    // 도움말 상자 (T52): 머리줄 아래 조작 안내와 버튼. 맨 아래 안내 줄은 없다. 누르면 명령 목록이 펼쳐지고 다시 누르면 접힌다
+    // 도움말 상자 (T52, T61): 머리줄 아래 버튼과 짧은 설명. 키 안내와 명령 목록은 누르면 펼쳐지고 다시 누르면 접힌다
     expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▾')
-    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤 · Home 처음 · \[자세히 →\] 세션 보기/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /스크롤 키와 \/board 명령 안내/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤/ })).toBeUndefined()
     expect(await pane.find({ type: 'Text', text: /명령 목록 \/board help/ })).toBeUndefined()
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
     await pane.press({ key: 'help' })
-    expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('닫기 ▴')
+    expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▴')
+    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤 · Home 처음 · \[자세히 →\] 세션 보기/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^팀 상황판 명령$/ })).toBeUndefined() // 명령 목록 제목줄은 뺀다
     await pane.press({ key: 'help' })
@@ -2392,6 +2395,10 @@ describe('팀 상황판', () => {
     await pane.press({ key: 'detail-peer' })
     expect(await pane.find({ type: 'Text', text: /PR39 로그/ })).toBeDefined()
     expect(await pane.find({ key: 'back' })).toBeDefined()
+    // 맨 아래 [← 전체 보기] 도 같은 일을 한다 (T61)
+    await pane.press({ key: 'back-end' })
+    expect(await pane.find({ key: 'detail-peer' })).toBeDefined()
+    expect(await pane.find({ key: 'back' })).toBeUndefined()
     await pane.unmount()
 
     // 모듈이 다시 로드돼도(session.start 가 다시 와도) 같은 세션으로 이어진다
@@ -3812,5 +3819,32 @@ describe('리더 왕관 (T43)', () => {
     await clock.advance(800)
     await clock.advance(800)
     expect(blits.length).toBe(3)
+  })
+})
+
+describe('결정할 것의 마크다운 표 (T61)', () => {
+  const table = ['| 날짜 | tune 행 | 그중 binds |', '|---|---|---|', '| 09-10 | 3 | 2 |', '| 11-06 | 6 | 0(비움) |']
+
+  test('폭 안이면 구분 행을 빼고 열을 맞춘다', () => {
+    expect(tableLines(table, 60)).toEqual([
+      { text: '날짜   tune 행  그중 binds', table: true },
+      { text: '09-10  3        2', table: true },
+      { text: '11-06  6        0(비움)', table: true },
+    ])
+  })
+
+  test('폭을 넘으면 · 로 잇는다', () => {
+    expect(tableLines(table, 20).map(r => r.text)).toEqual(['날짜 · tune 행 · 그중 binds', '09-10 · 3 · 2', '11-06 · 6 · 0(비움)'])
+  })
+
+  test('표 앞뒤 글과 구분 행이 없는(머리가 잘린) 표는 그대로', () => {
+    const cut = ['앞 글', '| 09-10 | 3 | 2 |', '| 11-06 | 6 | 0 |', '어떻게 할까요?']
+    expect(tableLines(cut, 60)).toEqual(cut.map(text => ({ text, table: false })))
+  })
+
+  test('? 로 끝나는 표 칸도 표 줄로 둔다', () => {
+    const rows = tableLines(['| 질문 | 답 |', '| :-- | --: |', '| 5분? | 1시간? |'], 60)
+    expect(rows.every(r => r.table)).toBe(true)
+    expect(rows.length).toBe(2)
   })
 })

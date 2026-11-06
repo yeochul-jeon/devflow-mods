@@ -791,6 +791,45 @@ export function wrapCells(text: string, width: number, hang = 2): string[] {
   return out
 }
 
+// 마크다운 표의 행 `| a | b |` 와 구분 행 `|---|:--:|`
+const TABLE_ROW = /^\s*\|.*\|\s*$/
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/
+
+/**
+ * 결정할 것 줄 중 마크다운 표를 터미널용으로 바꾼다 (T61). 구분 행이 있는 표만: 구분 행을 빼고,
+ * 열을 맞춘 폭이 width 안이면 칸을 두 칸 띄워 맞추고, 넘치면 ` · ` 로 잇는다.
+ * 구분 행이 없는 `|` 줄(머리가 잘린 표 포함)은 그대로 둔다. table 이 true 인 줄은 질문 줄로 강조하지 않는다.
+ */
+export function tableLines(lines: string[], width: number): { text: string; table: boolean }[] {
+  const out: { text: string; table: boolean }[] = []
+  for (let i = 0; i < lines.length; ) {
+    let end = i
+    while (end < lines.length && TABLE_ROW.test(lines[end]!)) end++
+    const run = lines.slice(i, end)
+    if (!run.length) {
+      out.push({ text: lines[i]!, table: false })
+      i++
+      continue
+    }
+    i = end
+    if (run.length < 2 || !TABLE_SEP.test(run[1]!)) {
+      out.push(...run.map(text => ({ text, table: false })))
+      continue
+    }
+    const rows = run.filter(l => !TABLE_SEP.test(l)).map(l => l.trim().slice(1, -1).split('|').map(c => c.trim()))
+    const n = Math.max(...rows.map(r => r.length))
+    const w = Array.from({ length: n }, (_, k) => Math.max(...rows.map(r => cells(r[k] ?? ''))))
+    const fits = w.reduce((a, b) => a + b, 0) + 2 * (n - 1) <= width
+    out.push(
+      ...rows.map(r => ({
+        text: fits ? r.map((c, k) => (k < r.length - 1 ? c + ' '.repeat(w[k]! - cells(c)) : c)).join('  ') : r.join(' · '),
+        table: true,
+      })),
+    )
+  }
+  return out
+}
+
 /**
  * /board 자세히의 할 일 한 줄 (T25, plan-progress 의 보조 띠 모양). 끝남 초록, 막힘 빨강.
  * 지금 단계는 작업 중이면 '진행 중', 결정 대기면 '질문 대기', 그 밖(중단·오류로 끝난 턴)이면 '멈춤'.

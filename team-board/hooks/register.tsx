@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderSurface } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface, UiScrollArgs } from 'claude-code'
 
 import type { PillBar, PillTone, SoundOs, Strip, TodoStrip } from './board'
 import type { Beat, Decision, Event, Explain, ExplainItem, ExplainKind, RecentLine, SteExplain, SubAgent, WorkPlan } from '../types'
@@ -20,6 +20,7 @@ import {
   leadTarget,
   parseGitStatus,
   parseShortstat,
+  tableLines,
   wrapCells,
   agentSummary,
   agentSync,
@@ -402,6 +403,13 @@ async function pressExplain($: EngineInterface, action: 'tab' | 'regen', kind: E
 }
 
 /** HTML 버튼: 보드를 연 이 세션에 요청을 보낸다 (질문 하나에 한 번). 끝날 때까지 기다리지 않는다 (await 하면 멈춘다). */
+/** 상황판 창 스크롤을 옮긴다 (T61). 옮기지 못하면(이 API 가 없는 옛 엔진 포함) 이유를 debug 로그에 남긴다 */
+async function scrollPane($: EngineInterface, args: UiScrollArgs): Promise<void> {
+  // 이 API 가 없는 엔진에서는 부르는 순간 TypeError 라 try 로 받는다
+  const r = await (async () => $.ui.scroll(args))().catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
+  if (r.deny !== undefined) $.ui.log(`team-board: 상황판 스크롤을 옮기지 못했습니다: ${r.deny}`, { to: 'debug' })
+}
+
 async function pressHtml($: EngineInterface, id: string): Promise<void> {
   const target = (await read($, beats)).find(b => b.id === id)
   if (!target?.question) return
@@ -1194,8 +1202,21 @@ export const register: Register = (on, options) => {
     const flowPress = /^flow-(.+)-(\d+)-([a-z]+)$/.exec(key)
     if (tabKey) await pressExplain($, tabKey[1] as 'tab' | 'regen', tabKey[2] as ExplainKind, tabKey[3]!)
     else if (key.startsWith('html-')) await pressHtml($, key.slice('html-'.length))
-    else if (key.startsWith('detail-')) await update($, focus, () => key.slice('detail-'.length))
-    else if (key === 'back') await update($, focus, () => null)
+    else if (key.startsWith('detail-')) {
+      await update($, focus, () => key.slice('detail-'.length))
+      // 창 스크롤은 화면이 바뀌어도 그대로라 맨 위 [← 전체 보기]가 안 보인다 (T61). 옮기지 못한 엔진은 이유만 남긴다
+      await scrollPane($, { in: PANE, to: 'start' })
+    } else if (key === 'back' || key === 'back-end') {
+      const from = await read($, focus)
+      await update($, focus, () => null)
+      // 보던 세션 카드로 돌아간다. 누른 순간에는 목록이 아직 안 그려져 바로 스크롤하면 거절된다(no element … drawn under that key).
+      // focus 는 그려질 때까지 기다리므로 그 카드의 [자세히 →] 에 초점을 먼저 옮기고 스크롤한다
+      if (from) {
+        const f = await (async () => $.ui.focus({ requestId: PANE, key: `detail-${from}` }))().catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
+        if (f.deny !== undefined) $.ui.log(`team-board: 상황판 초점을 옮기지 못했습니다: ${f.deny}`, { to: 'debug' })
+        await scrollPane($, { in: PANE, to: { key: `detail-${from}` }, block: 'center' })
+      }
+    }
     else if (key === 'help') await update($, helpOpen, v => !v)
     else if (flowPress) await copyFlow($, flowPress[1]!, Number(flowPress[2]), flowPress[3]!, e.surface)
     else if (key === 'band-board') await $.command.run({ command: 'board', args: '' })
@@ -1648,7 +1669,13 @@ export const register: Register = (on, options) => {
     }
 
     // 카드 머리: 주의 띠 + [아이콘 | 이름·상태 / 지금 무엇 / 경로]
-    const headOf = (b: Beat) => {
+    // action: 머리 아래 구분선 바로 위 왼쪽에 둘 줄 (T61: 전체 보기의 [자세히 →]. 펼친 설명 아래까지 내려가지 않게)
+    const headOf = (b: Beat, action?: JSX.Element) => {
+      const rule = () => (
+        <Box height={1} overflow="hidden">
+          <Text color={pal.isRaw ? pal.frame : pal.dim} wrap="wrap">{'─'.repeat(cols)}</Text>
+        </Box>
+      )
       const showsPrompt = !(b.state === 'asking' && b.question) && !(b.state === 'working' && b.step) && !b.last
       const second =
         b.state === 'asking' && b.question
@@ -1674,10 +1701,10 @@ export const register: Register = (on, options) => {
               {strips}
             </Box>
           </Box>
-          {/* 머리와 몸을 나눈다 (T43). 한 줄 높이 Box 가 넘친 줄을 숨긴다 */}
-          <Box height={1} overflow="hidden">
-            <Text color={pal.isRaw ? pal.frame : pal.dim} wrap="wrap">{'─'.repeat(cols)}</Text>
-          </Box>
+          {/* 머리와 몸을 나눈다 (T43). 한 줄 높이 Box 가 넘친 줄을 숨긴다. action 이 있으면 위아래로 줄을 그어 따로 둔다 (T61) */}
+          {action ? rule() : null}
+          {action}
+          {rule()}
         </Box>
       )
     }
@@ -1935,7 +1962,8 @@ export const register: Register = (on, options) => {
 
     const askBlock = (b: Beat, maxLines: number) => {
       if (b.state !== 'asking' || !b.question) return null
-      const all = b.question.split('\n').filter(l => l.trim())
+      // 마크다운 표는 열을 맞춰 바꾸고 질문 줄 강조에서 뺀다 (T61). 막대 칸 2 를 뺀 폭
+      const all = tableLines(b.question.split('\n').filter(l => l.trim()), cols - 8)
       const shown = all.slice(-maxLines)
       return (
         <Box flexDirection="column" marginTop={1}>
@@ -1945,10 +1973,11 @@ export const register: Register = (on, options) => {
           {/* 줄을 직접 접어 접힌 줄에도 막대를 잇고 둘째 줄부터 내어 쓴다. 묻는 줄은 굵은 막대 ┃, 그 앞에 빈 줄 하나 (T32).
               접는 폭: 카드 안쪽(cols - 6) 에서 막대 칸 2 */}
           {shown.map((l, i) => {
-            const asks = isAskingLine(l)
+            const asks = !l.table && isAskingLine(l.text)
+            const prev = shown[i - 1]
             return (
-              <Box flexDirection="column" marginTop={asks && i > 0 && !isAskingLine(shown[i - 1]!) ? 1 : 0}>
-                {wrapCells(l, cols - 8).map(part => (
+              <Box flexDirection="column" marginTop={asks && prev && (prev.table || !isAskingLine(prev.text)) ? 1 : 0}>
+                {wrapCells(l.text, cols - 8).map(part => (
                   <Box flexDirection="row">
                     <Box width={2} flexShrink={0}>
                       <Text color={pal.ask}>{asks ? '┃' : '│'}</Text>
@@ -1976,13 +2005,21 @@ export const register: Register = (on, options) => {
     if (focused) {
       const b = focused
       const { done, total } = progress(b.tasks)
+      // 구역(할 일·보조 에이전트·결정 기록·흐름) 사이 빈 줄 대신 흐린 가로줄 (T61). 카드 테두리 바로 아래 첫 구역은 빈 줄 그대로
+      const rule = (after: boolean, key: string) =>
+        after ? (
+          <Box key={`rule-${key}`} height={1} overflow="hidden">
+            <Text color={pal.isRaw ? pal.frame : pal.dim} wrap="wrap">{'─'.repeat(cols)}</Text>
+          </Box>
+        ) : null
+      const gap = (after: boolean) => (after ? {} : { marginTop: 1 })
       return (
         <Box flexDirection="column" paddingX={1}>
-          {e.props.view?.agentId ? (
-            <Box marginBottom={1}>
-              <Button key="view-main" label="← 메인 대화" onPress={noop} />
-            </Box>
-          ) : null}
+          {/* T61: 돌아가는 버튼을 맨 위에도 둔다. 흐름 끝까지 읽은 사람을 위해 맨 아래 것도 남긴다 */}
+          <Box flexDirection="row" columnGap={1} marginBottom={1}>
+            <Button key="back" label="← 전체 보기" onPress={noop} />
+            {e.props.view?.agentId ? <Button key="view-main" label="← 메인 대화" onPress={noop} /> : null}
+          </Box>
           <Box {...cardProps(b)}>
             {headOf(b)}
             {b.prompt ? row('요청', <Text color={pal.text} wrap="truncate-end">{b.prompt}</Text>) : null}
@@ -2008,7 +2045,8 @@ export const register: Register = (on, options) => {
           ) : null}
 
           {b.agents.length ? (
-            <Box flexDirection="column" marginTop={1}>
+            <Box flexDirection="column" {...gap(Boolean(total))}>
+              {rule(Boolean(total), 'agents')}
               <Text>
                 <Text color={pal.accent} bold>보조 에이전트 </Text>
                 <Text color={pal.dim}>{agentSummary(b.agents)}</Text>
@@ -2025,13 +2063,14 @@ export const register: Register = (on, options) => {
                     </Text>
                   </Box>
                   {/* 자기 세션의 보조만 그 대화를 열 수 있다 (T34 D3) */}
-                  {b.id === self.beat?.id ? <Box flexShrink={0}><Button key={`view-${a.id}`} plain label=" 보기 " onPress={noop} /></Box> : null}
+                  {b.id === self.beat?.id ? <Box flexShrink={0}><Button key={`view-${a.id}`} plain onPress={noop}><Text color={pal.accent} bold>[ 보기 ]</Text></Button></Box> : null}
                 </Box>
               ))}
             </Box>
           ) : null}
 
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column" {...gap(Boolean(total || b.agents.length))}>
+            {rule(Boolean(total || b.agents.length), 'decisions')}
             <Text>
               <Text color={pal.accent} bold>결정 기록 </Text>
               <Text color={pal.dim}>{`${b.decisions.length}건`}</Text>
@@ -2052,7 +2091,8 @@ export const register: Register = (on, options) => {
             ))}
           </Box>
 
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column">
+            {rule(true, 'flow')}
             <Text color={pal.accent} bold>흐름</Text>
             {[...b.timeline].reverse().map(ev => {
               const c = ev.kind === 'decide' ? pal.ok : ev.kind === 'ask' ? pal.ask : ev.kind === 'abort' ? pal.bad : ev.kind === 'prompt' ? pal.work : pal.dim
@@ -2075,7 +2115,7 @@ export const register: Register = (on, options) => {
           </Box>
 
           <Box marginTop={1}>
-            <Button key="back" label="← 전체 보기" onPress={noop} />
+            <Button key="back-end" label="← 전체 보기" onPress={noop} />
           </Box>
         </Box>
       )
@@ -2110,15 +2150,17 @@ export const register: Register = (on, options) => {
         </Box>
 
         {/* 도움말 상자 (T52): 카드 목록 끝에 있으면 스크롤해야 보여서 머리줄 아래로. 버튼으로 명령 목록(/board help)을 펼친다 */}
-        <Box borderStyle="round" borderColor={pal.frame} flexDirection="column" paddingX={1} marginBottom={1}>
+        {/* T61: 카드와 다른 옅은 바탕(색을 섞을 수 있는 팔레트만)과 accent 테두리로 구분한다. 버튼은 왼쪽, 라벨 폭은 펼침과 같게 */}
+        <Box borderStyle="round" borderColor={pal.accent} flexDirection="column" paddingX={1} marginBottom={1} {...(pal.isRaw ? { backgroundColor: mix(pal.accent, pal.card, 0.88) } : {})}>
           <Box flexDirection="row">
-            <Box flexGrow={1} flexShrink={1}>
-              <Text color={pal.dim} wrap="truncate-end">PgUp/PgDn 스크롤 · Home 처음 · [자세히 →] 세션 보기</Text>
+            <Box flexShrink={0} marginRight={1}>
+              <Button key="help" label={help ? '도움말 ▴' : '도움말 ▾'} onPress={noop} />
             </Box>
-            <Box flexShrink={0} marginLeft={1}>
-              <Button key="help" label={help ? '닫기 ▴' : '도움말 ▾'} onPress={noop} />
+            <Box flexGrow={1} flexShrink={1}>
+              <Text color={pal.text} wrap="truncate-end">스크롤 키와 /board 명령 안내</Text>
             </Box>
           </Box>
+          {help ? <Text key="help-keys" color={pal.text} wrap="truncate-end">PgUp/PgDn 스크롤 · Home 처음 · [자세히 →] 세션 보기</Text> : null}
           {help
             ? BOARD_HELP.split('\n').slice(2).map((l, i) => <Text key={`help-${i}`} color={pal.text} wrap="truncate-end">{l || ' '}</Text>)
             : null}
@@ -2128,7 +2170,7 @@ export const register: Register = (on, options) => {
           const lastDecision = b.decisions[b.decisions.length - 1]
           return (
             <Box key={b.id} {...cardProps(b)}>
-              {headOf(b)}
+              {headOf(b, <Box flexDirection="row"><Button key={`detail-${b.id}`} label="자세히 →" onPress={noop} /></Box>)}
               {lastDecision
                 ? row(
                     '답함',
@@ -2147,9 +2189,6 @@ export const register: Register = (on, options) => {
               {uncheckedRow(b)}
               {overlapRow(b)}
               {askBlock(b, 6)}
-              <Box flexDirection="row" justifyContent="flex-end">
-                <Button key={`detail-${b.id}`} label="자세히 →" onPress={noop} />
-              </Box>
             </Box>
           )
         })}
