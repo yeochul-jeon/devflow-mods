@@ -134,6 +134,9 @@ export const register: Register = on => {
       if ((await read($, flow)).stage === 'done') await setFlow($, { stage: 'idle' })
       // 다듬은 글·돌려놓은 초안을 지웠으면 다음 보내기는 다시 묻는다
       if (await read($, bypass)) await update($, bypass, () => false)
+    } else if (e.text.trim() === '' && (await read($, bypass))) {
+      // 빈 입력창에 새로 쓰기 시작: Ctrl+C·Esc 두 번으로 다듬은 글을 비운 뒤다. 비울 때 끄지 않는 까닭은 prompt.change 에 있다
+      await update($, bypass, () => false)
     }
     return r
   })
@@ -142,6 +145,15 @@ export const register: Register = on => {
   on('prompt.change', async ($, e, next) => {
     const hasDraft = e.text.trim() !== ''
     if ((await read($, band)).hasDraft !== hasDraft) await update($, band, b => ({ ...b, hasDraft }))
+    // 다듬은 글을 비웠으면 보탠 것 줄도 내린다. 보낼 때도 clear 가 오지만 prompt.submit 도 같은 일을 하므로 순서와 상관없다
+    if (!hasDraft && (await read($, flow)).stage === 'done') await setFlow($, { stage: 'idle' })
+    // bypass 는 여기서 끄지 않는다: 보낼 때의 clear 가 prompt.submit 보다 먼저 와서(2.1.319 실측) 다듬은 글을 다시 묻게 된다.
+    // 비운 뒤 새로 쓰면 prompt.edit 가, 히스토리에서 다른 글을 불러오면 여기서 끈다. 히스토리를 벗어나 다듬은 글로 돌아오면(이것도 history) 다시 켠다
+    if (e.origin.kind === 'history') {
+      const mine = await read($, refined)
+      const skip = mine !== '' && e.text === mine
+      if ((await read($, bypass)) !== skip) await update($, bypass, () => skip)
+    }
     return next(e)
   })
 

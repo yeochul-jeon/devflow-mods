@@ -728,6 +728,62 @@ describe('prompt-coach 흐름', () => {
     expect(s.asked).toHaveLength(2)
   })
 
+  test('다듬은 글을 Ctrl+C 로 비우면 보탠 것 줄이 내려가고, 새로 쓴 글이나 히스토리 글은 자동 모드에서 다시 묻는다', async ($, on) => {
+    const { s, settle, coach, press, text, type } = await setup($, on)
+    await coach('auto on')
+    const refine = async () => {
+      await coach(LONG)
+      await press('coach-now')
+      expect(s.box).toBe(REFINED)
+      expect(await text(/입력창에 넣음$/)).toBe(true)
+    }
+    const clear = async () => {
+      s.box = ''
+      await ($ as any).prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
+    }
+    await refine()
+    await clear()
+    expect(await text(/입력창에 넣음$/)).toBe(false)
+    await type(LONG)
+    expect(await submit($, LONG)).toHaveProperty('drop')
+    await settle()
+    expect(s.asked).toHaveLength(3)
+    await coach('cancel')
+    // 히스토리에서 다른 글을 불러와도 다시 묻는다
+    await refine()
+    await clear()
+    s.box = LONG
+    await ($ as any).prompt.change({ text: LONG, cursor: LONG.length, origin: { kind: 'history' } })
+    expect(await submit($, LONG)).toHaveProperty('drop')
+    await settle()
+    expect(s.asked).toHaveLength(6)
+  })
+
+  test('자동 모드: 다듬은 글을 보낼 때 clear 가 prompt.submit 보다 먼저 와도(2.1.319) 다시 묻지 않는다', async ($, on) => {
+    const { s, coach, press } = await setup($, on)
+    await coach('auto on')
+    await coach(LONG)
+    await press('coach-now')
+    expect(s.box).toBe(REFINED)
+    s.box = ''
+    await ($ as any).prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
+    expect(await submit($, REFINED)).toMatchObject({ text: REFINED })
+    expect(s.asked).toHaveLength(2)
+  })
+
+  test('자동 모드: 다듬은 글에서 히스토리로 올라갔다가 다듬은 글로 돌아오면 다시 묻지 않는다', async ($, on) => {
+    const { s, coach, press } = await setup($, on)
+    await coach('auto on')
+    await coach(LONG)
+    await press('coach-now')
+    expect(s.box).toBe(REFINED)
+    const recall = (text: string) => { s.box = text; return ($ as any).prompt.change({ text, cursor: text.length, origin: { kind: 'history' } }) }
+    await recall('예전에 보낸 긴 프롬프트 하나를 다시 불러온 글입니다 확인해 주세요')
+    await recall(REFINED)
+    expect(await submit($, REFINED)).toMatchObject({ text: REFINED })
+    expect(s.asked).toHaveLength(2)
+  })
+
   test('/coach auto off 로 끈다. 켜면 띠 머리에 자동', async ($, on) => {
     const { coach, type, text } = await setup($, on)
     await coach('auto on')
