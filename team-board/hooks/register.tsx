@@ -1234,15 +1234,15 @@ export const register: Register = (on, options) => {
   // 입력창 위 띠: 다른 mod 의 띠 아래에 붙인다 (가리지 않음).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // 바깥 mod 가 줄을 다 써 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 바깥 띠까지 가려진다 (T54)
-    if (e.props.hasSurvey || (e.props.maxRows ?? 10) < 1 || (await read($, bandOff))) return next(e)
+    // teamRows: 이 띠가 바깥에서 뗀 줄 수. 그리지 않을 때도 0 으로 알린다. 안 알리면 prompt-coach 가 팀 줄이 안쪽에 있다고 보고 1줄을 남겨 둔다
+    const nextWith = (h: number) => next({ ...e, props: { ...e.props, maxRows: Math.max(0, (e.props.maxRows ?? 10) - h), teamRows: h } as typeof e.props })
+    if (e.props.hasSurvey || (e.props.maxRows ?? 10) < 1 || (await read($, bandOff))) return nextWith(0)
     const now = await $.clock.now()
     const list = visible(withMe(await read($, beats), await read($, me)), now)
     // 세션 하나: /board band solo off 면 숨김 (기본은 보임)
-    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return next(e)
+    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return nextWith(0)
     // 아래 mod(next-steps·prompt-coach 등)에는 이 띠가 쓰고 남은 줄만 넘기고, 이 띠는 그들보다 위에 그린다 (N5).
     // 넘치면 엔진이 위부터 보여 주므로, 줄 수를 줄이지 않는 띠(prompt-coach, 엔진 Heads up)가 있어도 결정·실패가 가려지지 않는다
-    // teamRows: 이 띠가 바깥에서 줄을 뗐다는 표시. prompt-coach 가 팀 줄을 다시 빼지 않게 한다
-    const nextWith = (h: number) => next({ ...e, props: { ...e.props, maxRows: Math.max(0, (e.props.maxRows ?? 10) - h), teamRows: h } as typeof e.props })
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const asking = list.filter(b => b.state === 'asking' && !isStale(b, now)).length
@@ -1276,7 +1276,7 @@ export const register: Register = (on, options) => {
     // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54).
     // prompt-coach 가 바깥이면 제 줄을 이미 떼고 coachRows 로 알려 오니 받은 줄이 1줄이라도 그린다
     const outerCoach = (e.props as { coachRows?: number }).coachRows !== undefined
-    if (coachAsking && maxRows < (outerCoach ? 1 : 3)) return next(e)
+    if (coachAsking && maxRows < (outerCoach ? 1 : 3)) return nextWith(0)
     // 안쪽 next-steps 제안에 1줄 이상 남긴다: 창 모양이 다 쓰면 한 줄 모양, 그래도 안 남으면 그리지 않는다 (T55).
     // next-steps 가 바깥이면 제 줄을 이미 떼고 nextStepsRows 로 알려 오니 양보하지 않는다. 작업 중에는 목록을 그리지 않는다
     const outerSteps = (e.props as { nextStepsRows?: number }).nextStepsRows !== undefined
@@ -1289,7 +1289,7 @@ export const register: Register = (on, options) => {
     const chipsInside = (e.props as { imagePreviewRows?: number }).imagePreviewRows === undefined && e.viewport?.isFullscreen !== false && !e.props.hasSurvey && (await read($, imageDraft)).length > 0
     const coachLine = (chipsInside || chipsOuter) && (await read($, coachBand)).hasDraft && (await read($, coachFlow)).stage === 'idle' && !e.props.isWorking
     const keep = (steps?.items.length ? 1 : 0) + (chipsInside ? 1 : 0) + (coachLine ? 1 : 0)
-    if (keep && maxRows - keep < 1) return next(e)
+    if (keep && maxRows - keep < 1) return nextWith(0)
     const layout = bandLayout(list.length, columns, maxRows, head)
     const stepsCramped = keep > 0 && maxRows - hudRows(layout, list.length - layout.shown, columns, head) < keep
     if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachAsking || stepsCramped) {

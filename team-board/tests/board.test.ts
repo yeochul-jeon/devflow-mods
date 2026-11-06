@@ -3419,14 +3419,22 @@ describe('image-preview 연동', () => {
     // 이미지가 없으면 그대로: 혼자 창은 3줄 (160칸). 3줄이 안 되면 한 줄 모양
     expect(await shape(4)).toBe('window INNER 1/3')
     expect(await shape(2)).toBe('line INNER 1/1')
+    // 세션 하나에 /board band solo off, /board band off: 그리지 않고 안쪽에 teamRows 0 을 알린다
+    await $.command.run({ command: 'board', args: 'band solo off' } as any)
+    expect(await shape(4)).toBe('none INNER 4/0')
+    await $.command.run({ command: 'board', args: 'band solo on' } as any)
+    await $.command.run({ command: 'board', args: 'band off' } as any)
+    expect(await shape(4)).toBe('none INNER 4/0')
+    await $.command.run({ command: 'board', args: 'band on' } as any)
+    expect(await shape(4)).toBe('window INNER 1/3')
     // 초안이 비면 다듬기 줄도 없으니 이미지 칩 줄이 없는 것과 같다
     await setDraft([], true)
     expect(await shape(4)).toBe('window INNER 1/3')
 
     // 칩 줄 1 + 다듬기 줄 1 = 2줄을 남긴다
     await setDraft([1])
-    // 2: 2 - keep 2 < 1 이라 그리지 않는다. 안쪽에는 받은 2줄 그대로
-    expect(await shape(2)).toBe('none INNER 2/undefined')
+    // 2: 2 - keep 2 < 1 이라 그리지 않는다. 안쪽에는 받은 2줄 그대로, 팀 줄은 0줄이라고 알린다(prompt-coach 가 팀 줄 몫을 남기지 않게)
+    expect(await shape(2)).toBe('none INNER 2/0')
     // 4: 창 모양이 3줄을 쓰면 1줄 남아 keep 2 에 모자라니 한 줄 모양
     expect(await shape(4)).toBe('line INNER 3/1')
     // 5: 창 모양을 쓰고 2줄이 남는다
@@ -3443,11 +3451,11 @@ describe('image-preview 연동', () => {
     expect(await shape(4, { imagePreviewRows: 1 })).toBe('window INNER 1/3')
     // 그래도 다듬기 줄 1줄은 남긴다: 칩이 1줄을 먼저 뗀 3줄에서 창 모양(3줄)을 쓰면 다듬기 줄이 빠진다 (T60 순서 O 실측)
     expect(await shape(3, { imagePreviewRows: 1 })).toBe('line INNER 2/1')
-    expect(await shape(1, { imagePreviewRows: 1 })).toBe('none INNER 1/undefined')
+    expect(await shape(1, { imagePreviewRows: 1 })).toBe('none INNER 1/0')
     // 전체화면이 아니면 image-preview 가 칩 줄을 그리지 않는다
     expect(await shape(4, {}, { columns: 160, rows: 40, isFullscreen: false })).toBe('window INNER 1/3')
-    // survey 중에도 그리지 않는다 (맨 앞에서 그대로 넘긴다)
-    expect(await shape(4, { hasSurvey: true })).toBe('none INNER 4/undefined')
+    // survey 중에도 그리지 않는다 (맨 앞에서 줄을 떼지 않고 넘긴다)
+    expect(await shape(4, { hasSurvey: true })).toBe('none INNER 4/0')
     await setDraft([], true)
     expect(await shape(4)).toBe('window INNER 1/3')
   })
