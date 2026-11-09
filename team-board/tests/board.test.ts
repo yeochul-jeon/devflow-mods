@@ -2229,7 +2229,13 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
     await pane.press({ key: 'help' })
     expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▴')
-    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤 · Home 처음 · Tab\/Enter 버튼 · Esc 닫기 · \[자세히\u00a0→\] 세션 보기/ })).toBeDefined()
+    // 패널 조작 (T63): 한 줄에 키 하나, 키 칸은 명령 칸보다 좁게 따로
+    expect(await pane.find({ type: 'Text', text: /^패널 조작$/ })).toBeDefined()
+    for (const [k, d] of [['PgUp/PgDn', '위/아래로 스크롤 (마우스 휠도)'], ['Home', '맨 위로'], ['Tab', '다음 버튼으로 이동'], ['Enter', '버튼 누르기'], ['Esc', '패널 닫기'], ['[자세히 →]', '그 세션 자세히 보기']] as const) {
+      expect(await pane.find({ type: 'Text', text: k })).toBeDefined()
+      expect(await pane.find({ type: 'Text', text: d })).toBeDefined()
+    }
+    expect((await pane.find({ key: 'help-key-0' }))?.props.flexDirection).toBe('row')
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^팀 상황판 명령$/ })).toBeUndefined() // 명령 목록 제목줄은 뺀다
     // T63: 묶음마다 상자, 90칸은 명령 │ 설명 두 칸. 설명·예시는 자르지 않고 줄바꿈한다
@@ -2243,6 +2249,7 @@ describe('팀 상황판', () => {
     await pane.unmount()
     const narrow = await $.ui.mount({ ...PANE, props: { bodyColumns: 60 } })
     expect((await narrow.find({ key: 'help-0-1' }))?.props.flexDirection).toBe('column')
+    expect((await narrow.find({ key: 'help-key-0' }))?.props.flexDirection).toBe('row') // 키는 좁아도 두 칸
     expect(await narrow.find({ type: 'Text', text: /^\/board <세션>$/ })).toBeDefined()
     await narrow.unmount()
     pane = await $.ui.mount(PANE)

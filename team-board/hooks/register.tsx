@@ -489,8 +489,17 @@ const HELP_SECTIONS: { title: string; note?: string; items: HelpItem[] }[] = [
     ],
   },
 ]
-/** 패널 안에서만 쓰는 키 안내. /board help 평문에는 넣지 않는다 */
-const HELP_KEYS = 'PgUp/PgDn 스크롤 · Home 처음 · Tab/Enter 버튼 · Esc 닫기 · [자세히\u00a0→] 세션 보기'
+/** 패널 안에서만 쓰는 조작 안내 (T63: 다른 묶음처럼 한 줄에 하나). /board help 평문에는 넣지 않는다 */
+const HELP_KEYS: { key: string; desc: string }[] = [
+  { key: 'PgUp/PgDn', desc: '위/아래로 스크롤 (마우스 휠도)' },
+  { key: 'Home', desc: '맨 위로' },
+  { key: 'Tab', desc: '다음 버튼으로 이동' },
+  { key: 'Enter', desc: '버튼 누르기' },
+  { key: 'Esc', desc: '패널 닫기' },
+  { key: '[자세히 →]', desc: '그 세션 자세히 보기' },
+]
+/** 키 칸 폭: 명령 칸(약 27칸)을 같이 쓰면 짧은 키 옆이 비고 좁은 창에서 줄이 두 배가 되어 따로 둔다 */
+const HELP_KEY_CELLS = Math.max(...HELP_KEYS.map(k => widthOf(k.key)))
 /** 명령 칸 폭: 모든 묶음에서 가장 넓은 명령 기준이라 상자끼리 칸이 맞는다 */
 const HELP_CMD_CELLS = Math.max(...HELP_SECTIONS.flatMap(s => s.items.map(i => widthOf(i.cmd))))
 
@@ -1646,14 +1655,17 @@ export const register: Register = (on, options) => {
       </Box>
     )
     const helpBoxes = () => [
-      <Box key="help-keys" borderStyle="round" borderColor={pal.dim} flexDirection="row" columnGap={2} paddingX={1}>
-        <Box flexShrink={0}>
-          <Text color={pal.accent} bold>패널 키</Text>
+      // 키는 짧아서 좁은 창에서도 두 칸으로 둔다
+      helpBox('help-keys', '패널 조작', undefined, HELP_KEYS.map((k, j) => (
+        <Box key={`help-key-${j}`} flexDirection="row">
+          <Box width={HELP_KEY_CELLS + 2} flexShrink={0}>
+            <Text color={pal.text}>{k.key}</Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1}>
+            <Text color={pal.text} wrap="wrap">{k.desc}</Text>
+          </Box>
         </Box>
-        <Box flexGrow={1} flexShrink={1}>
-          <Text color={pal.text} wrap="wrap">{HELP_KEYS}</Text>
-        </Box>
-      </Box>,
+      ))),
       ...HELP_SECTIONS.map((s, i) => helpBox(`help-sec-${i}`, s.title, s.note, s.items.map((it, j) => helpItem(it, `help-${i}-${j}`)))),
     ]
 
