@@ -2229,10 +2229,30 @@ describe('팀 상황판', () => {
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
     await pane.press({ key: 'help' })
     expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▴')
-    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤 · Home 처음 · \[자세히 →\] 세션 보기/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /PgUp\/PgDn 스크롤 · Home 처음 · Tab\/Enter 버튼 · Esc 닫기 · \[자세히\u00a0→\] 세션 보기/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^팀 상황판 명령$/ })).toBeUndefined() // 명령 목록 제목줄은 뺀다
+    // T63: 묶음마다 상자, 90칸은 명령 │ 설명 두 칸. 설명·예시는 자르지 않고 줄바꿈한다
+    expect((await pane.find({ key: 'help-sec-0' }))?.props.borderStyle).toBe('round')
+    expect((await pane.find({ key: 'help-0-1' }))?.props.flexDirection).toBe('row')
+    expect((await pane.find({ type: 'Text', text: /^카드 캐릭터$/ }))).toBeDefined()
+    expect((await pane.find({ type: 'Text', text: /^기본 말랑이, 다음 세션에도 유지$/ }))).toBeDefined()
+    expect((await pane.find({ type: 'Text', text: /^예\) \/board sub-2$/ }))?.props.wrap).toBe('wrap')
+    expect((await pane.find({ type: 'Text', text: /섞기 = 세션마다 다르게/ }))?.props.wrap).toBe('wrap')
+    // 좁은 창(70칸 미만)은 명령 아래 설명
+    await pane.unmount()
+    const narrow = await $.ui.mount({ ...PANE, props: { bodyColumns: 60 } })
+    expect((await narrow.find({ key: 'help-0-1' }))?.props.flexDirection).toBe('column')
+    expect(await narrow.find({ type: 'Text', text: /^\/board <세션>$/ })).toBeDefined()
+    await narrow.unmount()
+    pane = await $.ui.mount(PANE)
     await pane.press({ key: 'help' })
+    expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
+    // /board 로 다시 열면 펼쳐 둔 도움말을 접고 시작한다 (T63)
+    await pane.press({ key: 'help' })
+    expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▴')
+    await $.command.run({ command: 'board', args: '' } as any)
+    expect((await pane.find({ type: 'Button', key: 'help' }))?.props.label).toBe('도움말 ▾')
     expect(await pane.find({ type: 'Text', text: /\/board band off \| on/ })).toBeUndefined()
 
     // 12살 탭: 지난 결정까지 맥락으로 넘긴다
@@ -2486,6 +2506,15 @@ describe('팀 상황판', () => {
     // 명령 안내: /board help, 모르는 옵션은 help 로
     const help = (await $.command.run({ command: 'board', args: 'help' } as any)).text
     for (const w of ['/board band hud | line', '/board sound test', '/board fail clear', '/board name <이름>']) expect(help).toContain(w)
+    // T63: 평문도 같은 데이터에서. 캐릭터 선택지는 설명 칸, 예시는 같은 줄 끝, 명령 칸은 한글 폭으로 맞춘다
+    expect(help).toContain('/board 캐릭터 <모양>')
+    expect(help).toContain('말랑이 | 삐삐 | 둥실 | 섞기')
+    expect(help).toContain('예) /board sub-2')
+    expect(help).toContain('카드 캐릭터 (기본 말랑이, 다음 세션에도 유지)')
+    expect(help).not.toContain('PgUp')
+    const descAt = help!.split('\n').filter(l => l.startsWith('  /')).map(l => cells(l.slice(0, /^ {2}\S.*?\s{2,}(?=\S)/.exec(l)![0].length)))
+    expect(descAt.length).toBe(14)
+    expect(new Set(descAt).size).toBe(1)
     expect((await $.command.run({ command: 'board', args: 'band blue' } as any)).text).toContain('모르는 옵션')
 
     // /clear: 숨지 않고 대기로. 결정 기록은 남고 대기 질문·할 일·숨은 실패는 비운다

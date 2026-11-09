@@ -438,34 +438,69 @@ async function sessionTitle($: EngineInterface): Promise<string> {
   return grep ? lastCustomTitle(grep.stdout) : ''
 }
 
+/** 도움말 묶음 (T63): 패널은 묶음마다 상자로, /board help 는 평문으로 같은 데이터를 그린다 */
+type HelpItem = { cmd: string; desc: string; ex?: string }
+const HELP_SECTIONS: { title: string; note?: string; items: HelpItem[] }[] = [
+  {
+    title: '보기',
+    items: [
+      { cmd: '/board', desc: '전체: 세션마다 요청·진행·결정·결정 대기' },
+      { cmd: '/board <세션>', desc: '자세히: 할 일, 보조 에이전트, 결정 기록 전체, 흐름, 편집 파일', ex: '/board sub-2' },
+    ],
+  },
+  {
+    title: '이름',
+    items: [
+      { cmd: '/board name <이름>', desc: '이 세션의 보드 이름 (다시 열어도 유지)', ex: '/board name api-fix' },
+      { cmd: '/rename <이름>', desc: 'Claude Code 세션 이름 = 보드 이름 (빈칸이면 Claude Code가 지은 이름)' },
+    ],
+  },
+  {
+    title: '입력창 위 팀 창',
+    items: [
+      { cmd: '/board band off | on', desc: '끄기 / 켜기 (기본 켜짐)' },
+      { cmd: '/board band hud | line', desc: '창 모양 / 한 줄 모양' },
+      { cmd: '/board band solo off | on', desc: '세션이 하나일 때 숨기기 / 보이기' },
+    ],
+  },
+  {
+    title: '카드 캐릭터',
+    note: '기본 말랑이, 다음 세션에도 유지',
+    items: [
+      { cmd: '/board 캐릭터 <모양>', desc: '말랑이 | 삐삐 | 둥실 | 섞기 (섞기 = 세션마다 다르게)', ex: '/board 캐릭터 둥실' },
+      { cmd: '/board look <모양>', desc: '같은 명령 (영문 blob | bot | ghost | mix)' },
+    ],
+  },
+  {
+    title: '결정 대기 알림',
+    note: '결정을 20초 넘게 기다리면 소리와 OS 알림. OS 알림은 preferredNotifChannel 설정',
+    items: [
+      { cmd: '/board sound off | on', desc: '소리·OS 알림 끄기 / 켜기 (기본 켜짐)' },
+      { cmd: '/board sound test', desc: '미리 듣기, OS 알림이 나가는지 확인' },
+    ],
+  },
+  {
+    title: '숨은 실패',
+    note: 'exit 0 인데 실패한 빌드·테스트',
+    items: [
+      { cmd: '/board fail', desc: '보고서 (/board fail <세션> 은 그 세션만)' },
+      { cmd: '/board fail clear', desc: '이 세션 표시 지우기' },
+      { cmd: '/board fail off | on', desc: '감지 끄기 / 켜기 (끄면 표시도 지움)' },
+    ],
+  },
+]
+/** 패널 안에서만 쓰는 키 안내. /board help 평문에는 넣지 않는다 */
+const HELP_KEYS = 'PgUp/PgDn 스크롤 · Home 처음 · Tab/Enter 버튼 · Esc 닫기 · [자세히\u00a0→] 세션 보기'
+/** 명령 칸 폭: 모든 묶음에서 가장 넓은 명령 기준이라 상자끼리 칸이 맞는다 */
+const HELP_CMD_CELLS = Math.max(...HELP_SECTIONS.flatMap(s => s.items.map(i => widthOf(i.cmd))))
+
 const BOARD_HELP = [
   '팀 상황판 명령',
-  '',
-  '보기',
-  '  /board                     전체: 세션마다 요청·진행·결정·결정 대기',
-  '  /board <세션>              자세히: 할 일, 보조 에이전트, 결정 기록 전체, 흐름, 편집 파일   예) /board sub-2',
-  '',
-  '이름',
-  '  /board name <이름>         이 세션의 표시 이름 (다시 열어도 유지)          예) /board name api-fix',
-  '  /rename <이름>             Claude Code 세션 이름 = 보드 이름',
-  '',
-  '입력창 위 팀 창',
-  '  /board band off | on       끄기 / 켜기',
-  '  /board band hud | line     창 모양 / 한 줄 모양',
-  '  /board band solo off | on  세션이 하나일 때 숨기기 / 보이기',
-  '',
-  '카드 캐릭터',
-  '  /board 캐릭터 말랑이|삐삐|둥실|섞기  카드 왼쪽 캐릭터 (섞기 = 세션마다 다르게)',
-  '  /board look blob|bot|ghost|mix     같은 명령 (영문)',
-  '',
-  '결정 대기 알림 (소리는 macOS 음성·chime, OS 알림은 preferredNotifChannel)',
-  '  /board sound off | on      끄기 / 켜기 (기본 켜짐)',
-  '  /board sound test          미리 듣기, OS 알림이 나가는지 확인',
-  '',
-  '숨은 실패 (exit 0 인데 실패한 빌드·테스트)',
-  '  /board fail                보고서',
-  '  /board fail clear          이 세션 표시 지우기',
-  '  /board fail off | on       감지 끄기 / 켜기',
+  ...HELP_SECTIONS.flatMap(s => [
+    '',
+    s.note ? `${s.title} (${s.note})` : s.title,
+    ...s.items.map(i => `  ${i.cmd}${' '.repeat(HELP_CMD_CELLS - widthOf(i.cmd) + 2)}${i.desc}${i.ex ? `   예) ${i.ex}` : ''}`),
+  ]),
 ].join('\n')
 
 const TITLE_EVERY_MS = 15_000
@@ -1175,6 +1210,8 @@ export const register: Register = (on, options) => {
       await update($, focus, () => null)
     }
     // 직접 연 패널이니 키보드를 가져온다: Tab 으로 버튼 이동, Enter 로 누름, Esc 로 닫기.
+    // 펼친 도움말은 약 45줄이라 다시 열면 카드가 안 보인다 (T63). /board 로 열 때마다 접어서 시작한다
+    await update($, helpOpen, () => false)
     const opened = await $.ui.open({ id: PANE, title: '팀 상황판', focus: true, closeOnEscape: true })
     // 열렸지만 그려지지 않으면 엔진이 준 이유를 그대로 보여 준다
     if (!opened.isPlaced) return { text: `팀 상황판을 그리지 못했어요: ${opened.reason}` }
@@ -1567,6 +1604,58 @@ export const register: Register = (on, options) => {
         <Box flexGrow={1} flexShrink={1}>{body}</Box>
       </Box>
     )
+
+    // 도움말 묶음 상자 (T63): 묶음마다 상자 하나. 넓으면 명령 │ 설명 두 칸, 좁으면 명령 아래 들여쓴 설명.
+    // 설명·예시는 잘리지 않게 줄바꿈한다. 명령 칸 폭은 모든 묶음이 같아서 상자끼리 칸이 맞는다
+    // 두 칸이면 60칸 창에서 설명 칸이 20칸뿐이라 한 설명이 4줄이 됐다. 70칸부터 두 칸: 82칸 창은 설명이 2줄 이하, 72칸 창은 세로(tmux 실측)
+    const helpWide = cols >= 70
+    const helpItem = (it: HelpItem, key: string) => {
+      const body = (
+        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+          <Text color={pal.text} wrap="wrap">{it.desc}</Text>
+          {it.ex ? <Text color={pal.dim} wrap="wrap">{`예) ${it.ex}`}</Text> : null}
+        </Box>
+      )
+      return helpWide ? (
+        <Box key={key} flexDirection="row">
+          <Box width={HELP_CMD_CELLS + 2} flexShrink={0}>
+            <Text color={pal.text} wrap="wrap">{it.cmd}</Text>
+          </Box>
+          {body}
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="column">
+          <Text color={pal.text} wrap="wrap">{it.cmd}</Text>
+          <Box paddingLeft={2}>{body}</Box>
+        </Box>
+      )
+    }
+    const helpBox = (key: string, title: string, note: string | undefined, children: JSX.Element[]) => (
+      <Box key={key} borderStyle="round" borderColor={pal.dim} flexDirection="column" paddingX={1}>
+        <Box flexDirection="row" columnGap={2}>
+          <Box flexShrink={0}>
+            <Text color={pal.accent} bold>{title}</Text>
+          </Box>
+          {note ? (
+            <Box flexGrow={1} flexShrink={1}>
+              <Text color={pal.dim} wrap="wrap">{note}</Text>
+            </Box>
+          ) : null}
+        </Box>
+        {children}
+      </Box>
+    )
+    const helpBoxes = () => [
+      <Box key="help-keys" borderStyle="round" borderColor={pal.dim} flexDirection="row" columnGap={2} paddingX={1}>
+        <Box flexShrink={0}>
+          <Text color={pal.accent} bold>패널 키</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          <Text color={pal.text} wrap="wrap">{HELP_KEYS}</Text>
+        </Box>
+      </Box>,
+      ...HELP_SECTIONS.map((s, i) => helpBox(`help-sec-${i}`, s.title, s.note, s.items.map((it, j) => helpItem(it, `help-${i}-${j}`)))),
+    ]
 
     const titleRow = (b: Beat) => {
       const tone = stateTone(b)
@@ -2160,10 +2249,7 @@ export const register: Register = (on, options) => {
               <Text color={pal.text} wrap="truncate-end">스크롤 키와 /board 명령 안내</Text>
             </Box>
           </Box>
-          {help ? <Text key="help-keys" color={pal.text} wrap="truncate-end">PgUp/PgDn 스크롤 · Home 처음 · [자세히 →] 세션 보기</Text> : null}
-          {help
-            ? BOARD_HELP.split('\n').slice(2).map((l, i) => <Text key={`help-${i}`} color={pal.text} wrap="truncate-end">{l || ' '}</Text>)
-            : null}
+          {help ? helpBoxes() : null}
         </Box>
 
         {list.map(b => {
