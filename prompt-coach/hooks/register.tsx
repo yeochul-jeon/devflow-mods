@@ -570,9 +570,13 @@ export const register: Register = on => {
   })
 }
 
-/** 모듈이 내려가 끊긴 뒤의 reject 만 삼킨다. 다른 오류는 그대로 드러낸다. */
+/**
+ * 모듈이 내려가 끊긴 뒤의 reject 만 삼킨다. 다른 오류는 그대로 드러낸다.
+ * 내려간 뒤 제 상태를 읽으면 엔진은 "unloaded" 가 아니라 "no hooks module of that name is loaded" 로 거부한다 (2.1.322).
+ * 이 함수를 붙인 흐름은 제 상태만 읽으므로, 그 문구는 이 모듈이 내려갔다는 뜻이다.
+ */
 function unloaded(err: unknown): void {
-  if (!(err instanceof Error && err.message.includes('unloaded'))) throw err
+  if (!(err instanceof Error && (err.message.includes('unloaded') || err.message.includes('no hooks module of that name is loaded')))) throw err
 }
 
 /** 흐름을 바꾸고, 답을 기다리는 질문을 team-board 가 읽는 곳에 맞춘다. 입력창을 채우기 전에 비워야 보낸 글이 그 질문의 답으로 기록되지 않는다. */

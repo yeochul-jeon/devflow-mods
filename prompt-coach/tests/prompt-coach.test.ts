@@ -606,6 +606,16 @@ describe('prompt-coach 흐름', () => {
     expect(s.toasts.at(-1)).toContain('다시 불러와')
   })
 
+  test('모듈이 내려간 뒤에 돌아온 모델 답은 조용히 버린다 (처리되지 않은 거부를 남기지 않는다)', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    s.hold = true
+    await coach(DRAFT)
+    expect(s.box).toBe('')
+    // 답을 풀어 주고 기다리지 않는다. 이어지는 코드는 이 테스트가 끝나 모듈이 내려간 뒤에 돌아, 제 상태를 읽다가 거부된다.
+    // 그 거부를 삼키지 못하면 파일 끝에서 "a rejection nothing handled" 로 실패한다
+    s.release()
+  })
+
   test('사람이 보낸 다른 명령 뒤에는 띠가 숨는다 (명령은 prompt.submit 을 거치지 않는다). 플러그인이 실행한 명령은 그대로', async ($, on) => {
     const { type, run, shows } = await setup($, on)
     await type(DRAFT)
