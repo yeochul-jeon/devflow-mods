@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { CoachBand, CoachEntry, CoachFlow, Question, Spent } from '../types'
-import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, TEMPLATE, tooShort, wrappedRows } from './refine'
+import { addedHead, type Answer, buildQuestions, buildRewrite, cells, MAX_TOKENS, parseQuestions, parseRewrite, passThrough, rule, shareCells, TEMPLATE, textRows, tooShort, wrappedRows } from './refine'
 
 // $.state 에 두어 핫 리로드에도 유지된다.
 const band = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false } as CoachBand)
@@ -29,10 +29,11 @@ const history = atom({ plugin: 'prompt-coach', key: 'history' } as const, [] as 
 const pick = atom({ plugin: 'prompt-coach', key: 'pick' } as const, 0)
 const tick = atom({ plugin: 'prompt-coach', key: 'tick' } as const, 0)
 
-/** 변환 중 띠의 스피너: 프레임(cli-spinners dots), 주기, 색(질문 번호와 같은 노랑). */
+/** 변환 중 띠의 스피너: 프레임(cli-spinners dots), 주기. */
 const SPIN_FRAMES = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const SPIN_MS = 150
-const SPIN_COLOR = 'yellow'
+/** 변환 중 칩의 배경·패널의 대기 문구 색. 노랑은 답할 차례(질문 번호)에 쓰므로 기다리는 상태는 Claude 스피너와 같은 테마 색을 쓴다. */
+const BUSY_COLOR = 'claude'
 /** 변환 중에만 돈다. 틱 콜백은 겹쳐 돌 수 있어 원자 하나만 쓴다. */
 let spinner: Timer | null = null
 
@@ -48,21 +49,28 @@ const PANE = 'prompt-coach'
 const OPT_MIN = 5
 /** 띠 자리가 1줄일 때 질문에 남기는 최소 칸. */
 const ASK_MIN = 8
+/** 줄이 넉넉할 때 선택지를 질문 글(번호 3칸 + 간격 1칸 뒤) 아래로 들여 쓰는 칸. */
+const OPT_INDENT = 4
 const SKIP_KEY = '0'
 
 /** 질문 단계의 모양과 줄 수(own). 그리는 쪽과 안쪽 mod 에 넘길 줄 계산이 같은 값을 쓴다. */
 function questionShape(q: Question, width: number, maxRows: number) {
   const inner = width - 2
   // 버튼 앞 "1: " 은 엔진이 그려 3칸이 더 든다. 취소는 숫자가 없다
-  const optRows = wrappedRows([...q.options.map(o => cells(o) + 3), cells('건너뛰기') + 3, cells('바로 다듬기') + 3, cells('취소')], inner, 2)
-  // 질문 앞 번호가 4칸을 쓴다. 긴 질문은 접힌다
-  const qRows = Math.ceil((cells(q.q) + 4) / inner)
+  const optWidths = [...q.options.map(o => cells(o) + 3), cells('건너뛰기') + 3, cells('바로 다듬기') + 3, cells('취소')]
+  const optRows = wrappedRows(optWidths, inner, 2)
+  // 질문 앞 번호가 4칸을 쓴다. 긴 질문은 그 뒤 폭에서 낱말 단위로 접힌다. 띠 폭으로 나눠 세면 한 줄 모자라 선택지가 "↓ n more" 아래로 숨는다 (80칸·138칸 질문)
+  const qRows = textRows(q.q, inner - 4)
   // 띠 자리가 다 그릴 줄(빈 줄·머리줄·초안·안내 = 4 + 질문 + 선택지)보다 적으면 질문과 선택지만 그린다. 넘치면 아래가 가려져 안 보이는 선택지를 숫자로 고르게 된다
   const tight = maxRows < 4 + qRows + optRows
   const isCut = maxRows - 1 < optRows
   const isClipped = maxRows - optRows < qRows
-  const own = isCut ? Math.min(maxRows, 2) : tight ? (isClipped ? 1 : qRows) + optRows : (width >= 60 ? 4 : 2) + qRows + optRows
-  return { inner, optRows, qRows, tight, isCut, isClipped, own }
+  // 줄이 남으면 초안과 질문 사이에 빈 줄을 두고 선택지를 질문 글 아래로 들여 쓴다(gaps 1). 한 줄 더 남으면 선택지와 안내 사이도 띄운다(gaps 2). 들여 쓰면 선택지가 더 접힐 수 있어 그 줄 수로 센다.
+  // 들여 쓴 폭보다 긴 선택지가 있으면 들여 쓰지 않는다: 그 선택지가 제 칸 안에서 접혀 센 줄보다 늘어난다
+  const roomyRows = wrappedRows(optWidths, inner - OPT_INDENT, 2)
+  const gaps = width >= 60 && !tight && Math.max(...optWidths) <= inner - OPT_INDENT ? Math.max(0, Math.min(2, maxRows - (4 + qRows + roomyRows))) : 0
+  const own = isCut ? Math.min(maxRows, 2) : tight ? (isClipped ? 1 : qRows) + optRows : gaps > 0 ? 4 + qRows + roomyRows + gaps : (width >= 60 ? 4 : 2) + qRows + optRows
+  return { inner, optRows, qRows, tight, isCut, isClipped, gaps, own }
 }
 const NOW_KEY = '9'
 
@@ -261,7 +269,7 @@ export const register: Register = on => {
 
     const flowPart = () => {
       if (f.stage === 'asking' || f.stage === 'rewriting') {
-        return [card('draft', '초안', f.draft, false), <Text key="wait" color="cyan">{f.stage === 'asking' ? '질문을 만드는 중…' : '다시 쓰는 중…'}</Text>]
+        return [card('draft', '초안', f.draft, false), <Text key="wait" color={BUSY_COLOR}>{f.stage === 'asking' ? '질문을 만드는 중…' : '다시 쓰는 중…'}</Text>]
       }
       if (f.stage !== 'questions') return []
       const current = f.answers.length
@@ -407,49 +415,27 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     // 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
     const isOn = await read($, auto)
-    // spin 이 있으면 상태 앞에 노랑 스피너를 둔다
-    const head = (status = '', spin = '', gap = e.props.maxRows >= 3) => {
-      const tail = spin ? `${spin} ${status}` : status || (isOn ? '자동' : '')
-      const line = rule(width, tail)
-      return (
-        <Box marginTop={gap ? 1 : 0}>
-          {spin ? (
-            <Text color="gray" wrap="truncate-end">
-              {line.slice(0, line.length - tail.length)}
-              <Text color={SPIN_COLOR}>{spin}</Text>
-              {` ${status}`}
-            </Text>
-          ) : (
-            <Text color="gray" wrap="truncate-end">{line}</Text>
-          )}
-        </Box>
-      )
-    }
+    const head = (status = '', gap = e.props.maxRows >= 3) => (
+      <Box marginTop={gap ? 1 : 0}>
+        <Text color="gray" wrap="truncate-end">{rule(width, status || (isOn ? '자동' : ''))}</Text>
+      </Box>
+    )
     const cancelButton = <Button key="coach-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
     const undoButton = before !== '' ? <Button key="coach-undo" label="되돌리기" onPress={() => void undoBox($)} /> : null
 
     if (f.stage === 'asking' || f.stage === 'rewriting') {
       const n = await read($, tick)
       const secs = Math.floor(((await $.clock.now()) - f.since) / 1000)
-      const status = `${f.stage === 'asking' ? '질문 만드는 중' : '다듬는 중'} ${secs}초`
+      // 모델 호출은 두 번이다: 질문 만들기가 1/2, 다시 쓰기가 2/2
+      const status = `${f.stage === 'asking' ? '1/2 질문 만드는 중' : '2/2 다듬는 중'} · ${secs}초`
       const spin = SPIN_FRAMES[n % SPIN_FRAMES.length]
-      if (e.props.maxRows < 2) {
-        return (
-          <Box flexDirection="column">
-            {rest}
-            <Box key="coach-busy-line" flexDirection="row" columnGap={2} paddingX={1}>
-              <Box flexShrink={0}><Text><Text color={SPIN_COLOR}>{spin}</Text>{` ${status}`}</Text></Box>
-              <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
-              {cancelButton}
-            </Box>
-          </Box>
-        )
-      }
+      // 스피너·단계·경과 초는 누른 [다듬기] 자리(왼쪽)에 배경색 칩으로 둔다. 머리줄 오른쪽 끝의 1칸 스피너는 눈에 띄지 않았다. 띠 자리가 1줄이면 머리줄을 뺀다
       return (
         <Box flexDirection="column">
           {rest}
-          {head(status, spin)}
-          <Box flexDirection="row" columnGap={2} paddingX={1}>
+          {e.props.maxRows < 2 ? null : head()}
+          <Box key="coach-busy-line" flexDirection="row" columnGap={2} paddingX={1}>
+            <Box flexShrink={0}><Text backgroundColor={BUSY_COLOR} color="inverseText" bold>{` ${spin} ${status} `}</Text></Box>
             <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
             {cancelButton}
           </Box>
@@ -460,7 +446,7 @@ export const register: Register = on => {
     if (f.stage === 'questions') {
       if (!q || !shape) return rest
       const i = f.answers.length
-      const { inner, optRows, tight } = shape
+      const { inner, optRows, tight, gaps } = shape
       // 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
       if (shape.isCut) {
         const isLine = e.props.maxRows < 2
@@ -472,9 +458,10 @@ export const register: Register = on => {
         const hasAsk = !isLine || askRoom >= ASK_MIN
         const asked = hasAsk ? clip(q.q, isLine ? Math.min(Math.floor(inner / 3), askRoom) : inner - 4) : ''
         const room = free - (isLine && hasAsk ? 3 + cells(asked) : 0)
-        const share = Math.max(OPT_MIN, Math.floor(room / count) - 3)
+        // 짧은 선택지는 그대로 두고 남는 칸을 긴 선택지에 준다. 똑같이 나누면 칸이 남는데도 긴 선택지만 잘린다 (200칸·/board 도크·22줄)
+        const shares = shareCells(q.options.map(o => cells(o)), room - count * 3, OPT_MIN)
         const options = [
-          ...q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={clip(o, share)} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />),
+          ...q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={clip(o, shares[k]!)} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />),
           <Button key="coach-skip" label="건너뜀" hotkey={SKIP_KEY} plain dimColor onPress={() => void answer($, null)} />,
           <Button key="coach-now" label="바로" hotkey={NOW_KEY} plain onPress={() => void rewriteNow($)} />,
           cancelButton,
@@ -504,17 +491,17 @@ export const register: Register = on => {
           {tight ? null : head(`질문 ${i + 1}/${f.questions.length}`)}
           {/* 질문하는 동안 입력창은 비어 있다. 무엇을 다듬는지 한 줄로 보인다. 좁으면 높이를 아끼려고 이 줄과 직접 쓰기 안내를 뺀다 */}
           {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
-          <Box flexDirection="row" columnGap={1} paddingX={1}>
+          <Box flexDirection="row" columnGap={1} paddingX={1} marginTop={gaps > 0 ? 1 : 0}>
             <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
             <Text bold>{shape.isClipped ? clip(q.q, inner - 4) : q.q}</Text>
           </Box>
-          <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingX={1}>
+          <Box flexDirection="row" flexWrap="wrap" columnGap={2} paddingLeft={gaps > 0 ? 1 + OPT_INDENT : 1} paddingRight={1}>
             {q.options.map((o, k) => <Button key={`coach-opt-${k}`} label={o} hotkey={String(k + 1)} plain onPress={() => void answer($, o)} />)}
             <Button key="coach-skip" label="건너뛰기" hotkey={SKIP_KEY} plain dimColor onPress={() => void answer($, null)} />
             <Button key="coach-now" label="바로 다듬기" hotkey={NOW_KEY} plain onPress={() => void rewriteNow($)} />
             {cancelButton}
           </Box>
-          {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
+          {width >= 60 && !tight ? <Box paddingX={1} marginTop={gaps > 1 ? 1 : 0}><Text dimColor wrap="truncate-end">입력창 Enter = 이 질문의 답 · &gt; 로 시작하면 새 요청</Text></Box> : null}
         </Box>
       )
     }
@@ -542,7 +529,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {rest}
-          {head('입력창에 넣음', '', e.props.maxRows >= 4)}
+          {head('입력창에 넣음', e.props.maxRows >= 4)}
           <Box paddingX={1}>{addedLine}</Box>
           <Box flexDirection="row" columnGap={1} paddingX={1}>
             {undoButton}

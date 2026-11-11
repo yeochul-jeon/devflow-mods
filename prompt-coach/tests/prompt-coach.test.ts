@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { addedHead, buildQuestions, buildRewrite, parseQuestions, parseRefined, parseRewrite, passThrough, rule, TEMPLATE, wrappedRows } from '../hooks/refine'
+import { addedHead, buildQuestions, buildRewrite, parseQuestions, parseRefined, parseRewrite, passThrough, rule, shareCells, TEMPLATE, textRows, wrappedRows } from '../hooks/refine'
 
 const USAGE = { input_tokens: 500, output_tokens: 120, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { plugin: 'prompt-coach', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120 } } as any
@@ -38,6 +38,25 @@ describe('줄 계산 (순수 함수)', () => {
     expect(wrappedRows([10, 10], 21, 2)).toBe(2)
     expect(wrappedRows([10, 10, 10], 22, 2)).toBe(2)
     expect(wrappedRows([5, 5, 5], 5, 2)).toBe(3)
+  })
+
+  test('textRows: 낱말 단위로 접히는 줄 수. 폭보다 긴 낱말은 폭에서 끊긴다', async () => {
+    expect(textRows('aaaa bbbb', 9)).toBe(1)
+    expect(textRows('aaaa bbbb', 8)).toBe(2)
+    expect(textRows('aaaa bbbb cccc', 9)).toBe(2)
+    expect(textRows('가'.repeat(40), 69)).toBe(2) // 80칸 한 낱말
+    expect(textRows('가나 ' + '다'.repeat(40), 69)).toBe(2) // 긴 낱말은 앞 낱말 줄에 이어 붙는다
+    expect(textRows('가 ' + '나'.repeat(69), 69)).toBe(4) // 이어 붙이면 더 끊기는 낱말은 새 줄에서 시작하고, 2칸 글자는 한 줄에 68칸까지
+    expect(textRows('a'.repeat(138), 69)).toBe(2) // 1칸 글자는 폭을 다 쓴다
+    expect(textRows('a'.repeat(69) + ' b', 69)).toBe(2) // 꽉 찬 줄 뒤의 공백은 다음 줄로 간다
+  })
+
+  test('shareCells: 짧은 글은 그대로, 남는 칸은 긴 글이 나눠 쓴다. 모자라도 최소 칸은 준다', async () => {
+    expect(shareCells([20, 20, 34], 79, 5)).toEqual([20, 20, 34]) // 다 들어가면 자르지 않는다
+    expect(shareCells([20, 20, 34], 60, 5)).toEqual([20, 20, 20])
+    expect(shareCells([34, 6, 20], 50, 5)).toEqual([24, 6, 20]) // 순서는 그대로
+    expect(shareCells([20, 20, 34], 39, 5)).toEqual([13, 13, 13])
+    expect(shareCells([20, 20], 4, 5)).toEqual([5, 5])
   })
 })
 
@@ -470,12 +489,77 @@ describe('prompt-coach 흐름', () => {
     s.qReply = `<questions>${JSON.stringify([{ q, options: ['a', 'b'] }])}</questions>`
     await coach(DRAFT)
     const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75 } }); await b.unmount(); return s.innerRows }
-    expect(await at(12)).toBe(12 - 7) // 빈 줄·머리줄·초안·안내 4 + 질문 2 + 선택지 1
+    expect(await at(12)).toBe(12 - 9) // 빈 줄·머리줄·초안·안내 4 + 질문 2 + 선택지 1 + 넉넉할 때의 빈 줄 2
+    expect(s.innerCoachRows).toBe(9)
+    expect(await at(8)).toBe(0) // 한 줄만 남으면 질문 위 빈 줄만
+    expect(await at(7)).toBe(0) // 남는 줄이 없으면 빈 줄 없이 7줄
+    expect(s.innerCoachRows).toBe(7)
     expect(await at(6)).toBe(6 - 3) // 질문 2 + 선택지 1
     expect(s.innerCoachRows).toBe(3)
     expect(await at(3)).toBe(0)
     expect(await at(2)).toBe(0) // 질문을 자른 한 줄 + 선택지 1
     expect(await at(1)).toBe(0)
+  })
+
+  test('여러 낱말의 긴 질문: 번호 칸을 뺀 폭에서 낱말 단위로 접히는 줄을 센다 (75칸에서 3줄)', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    // 138칸. 질문 글 폭은 69칸(75 - 양옆 2 - 번호 3 - 간격 1)이라 67·63·6칸 세 줄로 접힌다. 띠 폭으로 나누면 2줄로 잘못 센다
+    const q = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor'
+    s.qReply = `<questions>${JSON.stringify([{ q, options: ['one', 'two'] }])}</questions>`
+    await coach(DRAFT)
+    const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75 } }); await b.unmount(); return s.innerRows }
+    expect(await at(7)).toBe(7 - 4) // 전체 모양은 8줄(4 + 질문 3 + 선택지 1)이라 안 들어간다. 질문 3 + 선택지 1 만
+    expect(await at(8)).toBe(0)
+  })
+
+  test('질문 단계: 줄이 남으면 질문 위에 빈 줄을 두고 선택지를 들여 쓴다. 한 줄 더 남으면 안내 위도 띄운다', async ($, on) => {
+    const { coach } = await setup($, on)
+    await coach(DRAFT) // 질문 1줄 + 선택지 1줄: 전체 모양 6줄
+    const look = async (maxRows: number, bodyColumns = 120) => {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns } })
+      const k = ((await b.find({ type: 'Box' })) as any).children as any[]
+      const has = (re: RegExp) => k.find(c => re.test(JSON.stringify(c)))
+      const r = { ask: has(/어떤 에러인가요/)?.props.marginTop, indent: has(/coach-opt-0/)?.props.paddingLeft, hint: has(/이 질문의 답/)?.props.marginTop }
+      await b.unmount()
+      return r
+    }
+    expect(await look(8)).toEqual({ ask: 1, indent: 5, hint: 1 })
+    expect(await look(7)).toEqual({ ask: 1, indent: 5, hint: 0 })
+    expect(await look(6)).toEqual({ ask: 0, indent: 1, hint: 0 }) // 남는 줄이 없으면 전과 같다
+    expect(await look(5)).toEqual({ ask: 0, indent: 1, hint: undefined }) // 질문과 선택지만
+    expect(await look(8, 40)).toEqual({ ask: 0, indent: 1, hint: undefined }) // 60칸 미만은 초안·안내가 없어 띄울 것이 없다
+  })
+
+  test('질문 단계: 들여 쓴 폭보다 긴 선택지가 있으면 줄이 남아도 띄우거나 들여 쓰지 않는다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    // 선택지 55칸 + 번호 3칸 = 58칸. 띠 62칸이면 안쪽 60칸에는 들어가지만 들여 쓴 56칸에는 안 들어간다
+    s.qReply = `<questions>${JSON.stringify([{ q: '범위는?', options: ['a'.repeat(55), 'b'] }])}</questions>`
+    await coach(DRAFT)
+    const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 12, bodyColumns: 62 } })
+    const k = ((await b.find({ type: 'Box' })) as any).children as any[]
+    const opts = k.find(c => /coach-opt-0/.test(JSON.stringify(c)))
+    await b.unmount()
+    expect(opts.props.paddingLeft).toBe(1)
+    expect(s.innerRows).toBe(12 - 7) // 4 + 질문 1 + 선택지 2
+  })
+
+  test('한 줄 모양의 선택지: 칸이 남으면 긴 선택지를 자르지 않는다', async ($, on) => {
+    const { s, coach } = await setup($, on)
+    const three = ['같은 저장소의 모듈만', '별도 저장소까지 포함', '현재 프로젝트와 직접 의존하는 것만']
+    s.qReply = `<questions>${JSON.stringify([{ q: '연관 프로젝트를 어디까지 검토하면 되나요?', options: three }])}</questions>`
+    await coach(DRAFT)
+    const labels = async (bodyColumns: number) => {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 2, bodyColumns } })
+      const l = [0, 1, 2].map(async k => ((await b.find({ key: `coach-opt-${k}` })) as any).props.label as string)
+      const r = await Promise.all(l)
+      await b.unmount()
+      return r
+    }
+    // 200칸 창에 /board 도크(띠 109칸)·22줄: 똑같이 나누면 8칸이 남는데도 세 번째만 '현재 프로젝트와 직접 의…' 로 잘렸다. 이제 모자란 1칸만큼만 줄인다
+    expect(await labels(109)).toEqual([three[0], three[1], '현재 프로젝트와 직접 의존하는 것…'])
+    expect(await labels(110)).toEqual(three)
+    // 80칸 창: 다 들어가지 않으면 긴 것부터 줄인다
+    expect((await labels(75)).every(l => l.endsWith('…'))).toBe(true)
   })
 
   test('만드는 중: 띠 자리가 1줄이면 스피너·상태·초안·취소를 한 줄에', async ($, on) => {
@@ -485,7 +569,8 @@ describe('prompt-coach 흐름', () => {
     const one = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 1 } })
     expect(await one.find({ type: 'Text', text: /^━━ prompt-coach/ })).toBeUndefined()
     const json = JSON.stringify(await one.find({ key: 'coach-busy-line' }))
-    expect(json).toContain('질문 만드는 중')
+    expect(json).toContain('1/2 질문 만드는 중')
+    expect(json).toContain(`초안  ${DRAFT}`)
     expect(json).toContain('coach-cancel')
     await one.unmount()
   })
@@ -814,28 +899,29 @@ describe('prompt-coach 흐름', () => {
     expect(await peek()).toBeNull()
   })
 
-  // 띠 머리 줄: 회색 가로줄 안에 노랑 스피너 Text 하나, 그 뒤 ' 단계 N초'
+  // 본문 줄 맨 왼쪽의 배경색 칩: ' 스피너 n/2 단계 · N초 '. 머리줄에는 상태가 없다
   const spin = async (band: any) => {
-    const head = (await band.find({ type: 'Text', text: /prompt-coach/ })) as any
-    const kids = head.children as any[]
-    return { frame: kids[1].children[0] as string, color: kids[1].props.color, status: kids[2] as string }
+    const chip = (await band.find({ type: 'Text', text: /\d\/2 .+ · \d+초 $/ })) as any
+    const row = JSON.stringify(await band.find({ key: 'coach-busy-line' }))
+    return { text: chip.children[0] as string, bg: chip.props.backgroundColor, first: row.indexOf('/2 ') < row.indexOf('초안  '), head: ((await band.find({ type: 'Text', text: /^━━ prompt-coach/ })) as any).children[0] as string }
   }
 
-  test('변환 중: 가로줄 끝에 스피너 + 단계 + 경과 초. 틱이 원자를 올려 그려 둔 띠가 다시 그려진다', async ($, on) => {
+  test('변환 중: 본문 줄 왼쪽에 배경색 칩(스피너 + 1/2·2/2 단계 + 경과 초), 초안은 그 오른쪽. 틱이 원자를 올려 그려 둔 띠가 다시 그려진다', async ($, on) => {
     const { s, clock, settle, coach, mount, press } = await setup($, on)
     s.hold = true
     await coach(DRAFT)
     const band = await mount()
     const first = await spin(band)
-    expect(first).toEqual({ frame: '⠋', color: 'yellow', status: ' 질문 만드는 중 0초' })
+    expect(first.text).toBe(' ⠋ 1/2 질문 만드는 중 · 0초 ')
+    expect(first.bg).toBe('claude') // 노랑(답할 차례)과 다른 색
+    expect(first.first).toBe(true)
+    expect(first.head).toMatch(/^━━ prompt-coach ━+$/) // 머리줄 오른쪽 끝에는 상태를 두지 않는다
     await clock.advance(150)
     await settle()
-    const next = await spin(band)
-    expect(next.frame).toBe('⠙') // 같은 띠: 다시 마운트하지 않아도 바뀐다
-    expect(next.status).toBe(' 질문 만드는 중 0초')
+    expect((await spin(band)).text).toBe(' ⠙ 1/2 질문 만드는 중 · 0초 ') // 같은 띠: 다시 마운트하지 않아도 바뀐다
     await clock.advance(1000)
     await settle()
-    expect((await spin(band)).status).toBe(' 질문 만드는 중 1초')
+    expect((await spin(band)).text).toMatch(/1\/2 질문 만드는 중 · 1초 $/)
     await band.unmount()
     // 다듬기 단계는 그 단계 시작부터 센다
     s.hold = false
@@ -848,7 +934,7 @@ describe('prompt-coach 흐름', () => {
     await settle()
     await press('coach-now')
     const again = await mount()
-    expect((await spin(again)).status).toBe(' 다듬는 중 0초')
+    expect((await spin(again)).text).toMatch(/2\/2 다듬는 중 · 0초 $/)
     await again.unmount()
   })
 

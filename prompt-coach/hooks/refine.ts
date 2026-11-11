@@ -143,6 +143,53 @@ export function wrappedRows(widths: readonly number[], width: number, gap: numbe
   return rows
 }
 
+/**
+ * 글이 폭 width 에서 접히면 몇 줄인가. 터미널 Text 의 줄바꿈(wrap-ansi, hard·trim 없음)을 그대로 따라 센다:
+ * 낱말 단위로 접고, 폭보다 긴 낱말은 글자 단위로 끊는다. 어림으로 세면 한 줄 모자라 띠가 넘친다.
+ */
+export function textRows(text: string, width: number): number {
+  let rows = 1
+  let used = 0
+  const wrap = () => {
+    rows++
+    used = 0
+  }
+  text.split(' ').forEach((word, i) => {
+    const w = cells(word)
+    if (i > 0) {
+      // 낱말 사이 공백. 줄이 꽉 찼으면 공백이 다음 줄 첫 칸으로 간다
+      if (used >= width) wrap()
+      used++
+    }
+    if (w > width) {
+      // 지금 줄에 이어 붙이면 새 줄에서 시작할 때보다 더 많이 끊기는 낱말은 새 줄에서 시작한다
+      if (Math.floor((w - 1) / width) < 1 + Math.floor((w - (width - used) - 1) / width)) wrap()
+      // 2칸 글자는 줄 끝 1칸에 걸치지 못하고 다음 줄로 간다
+      for (const ch of word) {
+        const c = cells(ch)
+        if (used + c > width) wrap()
+        used += c
+      }
+      return
+    }
+    if (used > 0 && used + w > width) wrap()
+    used += w
+  })
+  return rows
+}
+
+/** 칸 수 needs 인 글들을 room 칸에 나눠 넣을 때 각자 쓸 칸. 짧은 글은 그대로 두고 남는 칸을 긴 글이 나눠 쓴다. 아무리 모자라도 min 칸은 준다. */
+export function shareCells(needs: readonly number[], room: number, min: number): number[] {
+  const out = needs.map(() => 0)
+  const order = needs.map((_, i) => i).sort((a, b) => needs[a]! - needs[b]!)
+  let left = room
+  order.forEach((i, k) => {
+    out[i] = Math.max(min, Math.min(needs[i]!, Math.floor(left / (order.length - k))))
+    left -= out[i]!
+  })
+  return out
+}
+
 /** 띠의 보탠 것 머리: 답·제안 수. 보탠 것이 없으면 순서만 다듬었다고 한다. */
 export function addedHead(added: readonly Added[]): string {
   const answers = added.filter(a => a.kind === 'answer').length
