@@ -1,6 +1,6 @@
 {
   "name": "image-preview",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Hover a pasted [Image #N] to see the picture: above the prompt while you write, and on the prompts you sent. (devflow-mods fork of midudev/better-claude@5abacf0)",
   "author": {
     "name": "Miguel Ángel Durán (midudev)",
