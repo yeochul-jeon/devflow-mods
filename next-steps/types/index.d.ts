@@ -7,8 +7,8 @@ export type Spent = { calls: number; input: number; output: number }
 declare module 'claude-code' {
   interface PluginState {
     'next-steps': { steps: NextSteps | null; spent: Spent }
-    /** 읽기만 한다. prompt-coach 가 답을 기다리는 질문("prompt-coach: …") 또는 null. prompt-coach/types/index.d.ts 의 pending 과 같다 */
-    'prompt-coach': { pending: string | null }
+    /** 읽기만 한다. pending: prompt-coach 가 답을 기다리는 질문("prompt-coach: …") 또는 null. band: 입력창에 초안이 있는지. flow: 다듬기 단계('idle' 이 쉬는 중). prompt-coach/types/index.d.ts 의 것과 같다 */
+    'prompt-coach': { pending: string | null; band: { hasDraft: boolean }; flow: { stage: string } }
     /** 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호. image-preview 가 없으면 오지 않는다 */
     'image-preview': { draft: number[] }
   }

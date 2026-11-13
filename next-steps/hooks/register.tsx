@@ -14,6 +14,9 @@ const steps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as Next
 const spent = atom({ plugin: 'next-steps', key: 'spent' } as const, { calls: 0, input: 0, output: 0 } as Spent)
 // 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호. image-preview 가 없으면 값이 없다
 const imageDraft = atom({ plugin: 'image-preview', key: 'draft' } as const, [] as number[])
+// 읽기만 한다. prompt-coach 의 입력창 초안 유무와 다듬기 단계. prompt-coach 가 없으면 값이 없다
+const coachBand = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false })
+const coachFlow = atom({ plugin: 'prompt-coach', key: 'flow' } as const, { stage: 'idle' })
 
 let off = false
 /** 제안을 보여도 되는 턴. 전송이나 새 턴이 오면 바뀌어, 늦게 도착한 제안을 버린다. */
@@ -87,19 +90,17 @@ export const register: Register = on => {
     const s = await read($, steps)
     // 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다
     if (e.props.hasSurvey || e.props.isWorking || !s || s.items.length === 0 || e.props.maxRows < 1) return next(e)
-    // 줄이 모자라면 한 줄에 모은다. 펼친 목록은 가로줄 + 제안 + 닫기 줄 = items + 2 줄인데 items + 3 줄을 요구한다.
-    // 이 1줄 여유로 펼쳐도 안쪽 mod 에 1줄이 남는다(딱 맞으면 안쪽이 0줄이 되어 그리지 않는다). 0.1.0 부터 같은 여유 (T56 에서 확인)
-    // image-preview 칩 줄이 안쪽이면 칩 줄과 prompt-coach 다듬기 줄, 2줄을 안쪽에 남긴다. 1줄만 남기면 가장 안쪽인 칩 줄이 0줄을 받아 사라진다 (T60 실측)
-    const chipsInside = (e.props as { imagePreviewRows?: number }).imagePreviewRows === undefined && e.viewport?.isFullscreen !== false && (await read($, imageDraft)).length > 0
-    const spare = chipsInside ? 2 : 1
+    // 줄 수는 받은 maxRows 와 공유 상태만으로 정한다 (docs/band-rows.md). Claude Code 2.1.323 부터 mod 마다 따로 불리고
+    // 모두 띠 전체의 maxRows 를 받아, next 로 줄 수를 넘겨도 다른 mod 에 닿지 않는다. 그래서 next 에는 받은 e 를 그대로 넘긴다.
+    // prompt-coach 가 다듬는 중이면 그 화면이 줄을 쓰고 숫자 키도 쓴다. 같은 숫자를 두 mod 가 그리면 둘 다 눌리지 않으므로 그리지 않는다
+    if ((await read($, coachFlow)).stage !== 'idle') return next(e)
+    // 칩 줄과 다듬기 줄에 1줄씩 남기고도 자리가 되면 펼친다(가로줄 + 제안 + 닫기 줄 = items + 2 줄). 안 되면 한 줄에 모은다.
+    // 가로줄 있는 한 줄 모양(2줄)도 그 줄들을 남길 수 있을 때만. 1줄뿐이면 이 띠가 칩 줄·다듬기 줄보다 먼저 남는다
+    const hasChips = e.viewport?.isFullscreen !== false && (await read($, imageDraft)).length > 0
+    const spare = (hasChips ? 1 : 0) + ((await read($, coachBand)).hasDraft ? 1 : 0)
     const oneRow = e.props.maxRows < s.items.length + 2 + spare
-    // 이 띠의 줄 수(가로줄 + 제안 줄들 + 닫기 줄, 또는 가로줄 + 한 줄)를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다.
-    // 넘치면 엔진이 위부터 보여 줘 맨 아래인 이 띠가 가려진다. 이 mod 가 바깥이면 안쪽 team-board 가 남은 줄에 맞춰 줄어든다.
-    // 3줄도 안 되면 가로줄을 빼 한 줄만 쓴다. 2줄 자리를 다른 mod 와 한 줄씩 나눈다
-    const ruled = e.props.maxRows >= 2 + spare + (chipsInside ? 1 : 0)
-    const own = (ruled ? 1 : 0) + (oneRow ? 1 : s.items.length + 1)
-    // 뗀 줄 수도 알린다. 안쪽 team-board 가 이 띠 자리를 다시 빼 팀 창을 괜히 줄이지 않는다 (T55)
-    const rest = await next({ ...e, props: { ...e.props, maxRows: Math.max(0, e.props.maxRows - own), nextStepsRows: own } as typeof e.props })
+    const ruled = e.props.maxRows >= 2 + spare
+    const rest = await next(e)
     // 같은 숫자는 나중에 그린 이 띠가 이긴다. 위 띠(엔진 Heads up 등)에 숫자 버튼이 있으면 그 숫자를 빼앗지 않도록 클릭만 받는다
     const keys = !hasDigitKey(rest)
 

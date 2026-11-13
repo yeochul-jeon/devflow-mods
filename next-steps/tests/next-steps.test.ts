@@ -104,8 +104,8 @@ describe('next-steps', () => {
     expect((await band.find({ key: 'close' }))?.text).toBe('닫기 ') // 번호 '0: ' 은 엔진이 hotkey 로 그린다
     // 위 대화와 나누는 이름 붙은 가로줄. 띠 폭(bodyColumns 120)을 채운다
     expect(await band.find({ type: 'Text', text: /^── next-steps ─{106}$/ })).toBeDefined()
-    // 다른 mod 띠가 먼저(위), 이 mod 는 그 아래
-    expect(JSON.stringify(((await band.find({ type: 'Box' })) as any).children[0])).toContain('OTHER-MOD-BAND')
+    // next 의 답이 먼저(위), 이 mod 는 그 아래. 이어진 구조(2.1.322 까지)에서는 그 답이 다른 mod 띠이고, 2.1.323 부터는 엔진 것뿐이다(다른 mod 줄은 엔진이 따로 쌓는다)
+    expect(JSON.stringify(((await band.find({ type: 'Box' })) as any).children[0])).toMatch(/OTHER-MOD-BAND|"type":"engine"/)
     // 숫자는 Button hotkey: 엔진이 빈 입력창의 숫자를 화면에 보이는 띠 Button 으로 보낸다. 띠가 가려지면 다른 띠(Heads up 등)의 숫자를 가져가지 않는다
     expect((await band.find({ key: 'step-1' }))?.props).toMatchObject({ hotkey: '1', plain: true })
     expect((await band.find({ key: 'step-2' }))?.props).toMatchObject({ hotkey: '2' })
@@ -204,6 +204,7 @@ describe('next-steps', () => {
     await band.unmount()
   })
 
+  // 다른 mod 의 공유 상태만 세팅하는 대역(상태는 주인만 쓸 수 있어 이름을 그 mod 로 둔다). 줄 수는 받은 maxRows 와 이 상태로 정한다 (docs/band-rows.md)
   const IMAGE_PREVIEW = {
     name: 'image-preview',
     register(on: any) {
@@ -213,73 +214,75 @@ describe('next-steps', () => {
       })
     },
   }
+  const COACH_STATE = {
+    name: 'prompt-coach',
+    register(on: any) {
+      on('tool.call', { tool: 'SetCoach' }, async ($: any, e: any) => {
+        await $.state.set({ plugin: 'prompt-coach', key: 'band' }, { hasDraft: e.hasDraft })
+        await $.state.set({ plugin: 'prompt-coach', key: 'flow' }, { stage: e.stage })
+        return { result: 'ok' }
+      })
+    },
+  }
 
-  test('image-preview 칩 줄이 안쪽이면 칩 줄과 다듬기 줄 2줄을 남긴다: 가로줄은 5줄부터, 펼친 목록은 items + 4 줄부터 (T60)', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
+  test('줄 수는 maxRows 와 공유 상태로 정한다: 칩 줄·다듬기 줄에 1줄씩 남기고 펼치고, 모자라면 한 줄, 1줄뿐이면 이 띠가 남는다. prompt-coach 가 다듬는 중이면 그리지 않는다', { plugins: [IMAGE_PREVIEW, COACH_STATE] }, async ($, on) => {
     mock.store(on)
-    const seen: number[] = []
     on('session.start', ($, e) => ({ cwd: e.cwd }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
     on('agent.list', () => ({ value: [] }))
     on('session.messages', () => ({ value: [] }))
     on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
     on('turn.complete', () => ({ text: '' }))
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { seen.push(e.props.maxRows); return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
-    const rowsAt = async (maxRows: number, props: any = {}) => {
+    // 그린 모양: 펼친 목록(가로줄 + 제안 2 + 닫기 줄 = 4줄), 가로줄 있는 한 줄(2줄), 한 줄(1줄), 없음
+    const shapeAt = async (maxRows: number, props: any = {}) => {
       const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...props } })
+      const has = async (text: RegExp) => (await band.find({ type: 'Text', text })) !== undefined
+      const r = !(await has(/테스트를 다시 돌려 줘/)) ? 'none' : (await has(/빈 입력창에서 숫자|클릭으로 고르기/)) ? 'open' : (await has(/── next-steps/)) ? 'ruled' : 'row'
       await band.unmount()
-      return seen.at(-1)
+      return r
     }
-    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
-    await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
-    await settle()
-    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
-    expect(await rowsAt(10)).toBe(6) // 펼친 목록 4줄, 안쪽 6줄
-    expect(await rowsAt(5)).toBe(3) // 한 줄 모양 + 가로줄 = 2, 안쪽 3줄
-    expect(await rowsAt(4)).toBe(3) // 가로줄을 빼 1줄만 쓴다: 칩·다듬기 2줄이 남는다
-    expect(await rowsAt(3)).toBe(2)
-    // image-preview 가 바깥(imagePreviewRows)이면 제 줄을 이미 뗐다: 예전과 같다
-    expect(await rowsAt(4, { imagePreviewRows: 1 })).toBe(2)
-    await $.tool.call({ tool: 'SetImages', draft: [] } as any)
-    expect(await rowsAt(4)).toBe(2)
-  })
-
-  test('제안 띠 줄 수를 먼저 떼고 남은 줄만 다른 mod 띠에 넘긴다. 제안이 없거나 작업 중이면 그대로 넘긴다', async ($, on) => {
-    mock.store(on)
-    const seen: number[] = []
-    const own: (number | undefined)[] = []
-    on('session.start', ($, e) => ({ cwd: e.cwd }))
-    on('command.register', ($, e: any) => ({ value: { command: e.name } }))
-    on('agent.list', () => ({ value: [] }))
-    on('session.messages', () => ({ value: [] }))
-    on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
-    on('turn.complete', () => ({ text: '' }))
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { seen.push(e.props.maxRows); own.push(e.props.nextStepsRows); return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
-    const rowsAt = async (maxRows: number, props: any = {}) => {
-      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...props } })
-      await band.unmount()
-      return seen.at(-1)
-    }
+    const coach = (hasDraft: boolean, stage = 'idle') => $.tool.call({ tool: 'SetCoach', hasDraft, stage } as any)
 
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
-    expect(await rowsAt(10)).toBe(10) // 제안이 없으면 다 넘긴다
-    expect(own.at(-1)).toBeUndefined()
-
+    expect(await shapeAt(10)).toBe('none') // 제안이 없다
     await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
     await settle()
-    expect(await rowsAt(10)).toBe(6) // 여러 줄: 가로줄 + 제안 2 + 닫기 줄 = 4
-    // 뗀 줄 수를 안쪽 mod 에 알린다. team-board 가 이 줄을 다시 빼지 않는다 (T55)
-    expect(own.at(-1)).toBe(4)
-    expect(await rowsAt(4)).toBe(2) // 한 줄 모양: 가로줄 + 한 줄 = 2
-    expect(await rowsAt(2)).toBe(1) // 3줄도 안 되면 가로줄을 빼 한 줄만 쓴다. 다른 mod 와 한 줄씩 나눈다
-    expect(await rowsAt(1)).toBe(0)
+
+    // 다른 띠가 없으면 받은 줄을 다 쓴다
+    expect(await shapeAt(4)).toBe('open')
+    expect(await shapeAt(3)).toBe('ruled')
+    expect(await shapeAt(2)).toBe('ruled')
+    expect(await shapeAt(1)).toBe('row')
     // 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다
-    expect(await rowsAt(0)).toBe(0)
-    const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 0 } })
-    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
-    await band.unmount()
-    expect(await rowsAt(10, { isWorking: true })).toBe(10)
-    expect(own.at(-1)).toBeUndefined()
-    expect(await rowsAt(10, { hasSurvey: true })).toBe(10)
+    expect(await shapeAt(0)).toBe('none')
+    expect(await shapeAt(10, { isWorking: true })).toBe('none')
+    expect(await shapeAt(10, { hasSurvey: true })).toBe('none')
+
+    // 다듬기 줄(입력창에 초안)에 1줄을 남긴다
+    await coach(true)
+    expect(await shapeAt(5)).toBe('open')
+    expect(await shapeAt(4)).toBe('ruled')
+    expect(await shapeAt(3)).toBe('ruled')
+    expect(await shapeAt(2)).toBe('row')
+    expect(await shapeAt(1)).toBe('row') // 1줄뿐이면 다듬기 줄보다 이 띠가 남는다
+
+    // 칩 줄에도 1줄을 남긴다 (T60)
+    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
+    expect(await shapeAt(6)).toBe('open')
+    expect(await shapeAt(5)).toBe('ruled')
+    expect(await shapeAt(4)).toBe('ruled')
+    expect(await shapeAt(3)).toBe('row')
+    await coach(false)
+    expect(await shapeAt(5)).toBe('open')
+    await $.tool.call({ tool: 'SetImages', draft: [] } as any)
+
+    // prompt-coach 가 다듬는 중이면 그 화면이 줄과 숫자 키를 쓴다
+    for (const stage of ['asking', 'questions', 'rewriting', 'done']) {
+      await coach(false, stage)
+      expect(await shapeAt(10)).toBe('none')
+    }
+    await coach(false)
+    expect(await shapeAt(10)).toBe('open')
   })
 
   test('다른 띠(엔진 Heads up 등)에 숫자 hotkey 가 있으면 숫자를 달지 않고 클릭만 받는다', async ($, on) => {
@@ -292,7 +295,9 @@ describe('next-steps', () => {
     on('model.complete', () => ({ value: { isAnswered: true, text: '테스트를 다시 돌려 줘\nPR 초안을 만들어 줘', usage: USAGE } }))
     on('turn.complete', () => ({ text: '' }))
     // Heads up 처럼 Box 안에 숫자 hotkey Button 을 그리는 띠
+    let chained: boolean | undefined
     on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => {
+      chained = e.plugin === undefined
       const { Box, Text, Button } = $.ui.resolve(e)
       return Box({ flexDirection: 'column', children: [Text({ children: 'HEADS-UP' }), Box({ children: other ? [Button({ key: 'learn', label: 'Learn more', hotkey: '1', plain: true, onPress: () => {} })] : [] })] })
     })
@@ -303,6 +308,8 @@ describe('next-steps', () => {
 
     // 같은 숫자는 나중에 그린 이 띠가 이긴다. 그러면 위 띠의 1·2·0 을 빼앗으므로 양보한다
     let band = await $.ui.mount(BAND)
+    // Claude Code 2.1.323 부터는 mod 마다 따로 불려 다른 띠가 그린 것을 볼 수 없다(e.plugin 이 있다). 이어진 구조(2.1.322 까지)에서만 확인한다
+    if (chained === false) { await band.unmount(); return }
     expect((await band.find({ key: 'step-1' }))?.props.hotkey).toBeUndefined()
     expect((await band.find({ key: 'close' }))?.props.hotkey).toBeUndefined()
     expect(await band.find({ type: 'Text', text: /클릭으로 고르기/ })).toBeDefined()
