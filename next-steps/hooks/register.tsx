@@ -76,17 +76,6 @@ export const register: Register = on => {
     return r
   })
 
-  // prompt-coach 가 질문을 띄우면 숫자는 그 질문의 답이다. 제안을 지우고 만들던 것도 버려 숫자를 넘긴다. 사람이 새 글을 쓰는 중이라 제안은 돌려놓지 않는다.
-  // prompt-coach 가 없으면 오지 않는다. 자동 모드에서는 prompt-coach 가 보내기를 막아 위 prompt.submit 이 오지 않을 수 있다
-  on('state.set', { plugin: 'prompt-coach', key: 'pending' }, async ($, e, next) => {
-    const r = await next(e)
-    if ('value' in r && r.value?.isSet && e.value !== null) {
-      latest = `coach-${++submits}` // 만들고 있던 제안도 버린다
-      if (await read($, steps)) await update($, steps, () => null)
-    }
-    return r
-  }).catch(($, e, next) => next(e)) // 지우지 못해도 prompt-coach 의 기록은 그대로 선다
-
   // 다른 mod 와 Claude Code 가 그린 것은 그대로 두고 그 아래(입력창 바로 위)에 붙인다.
   // 위에 붙이면 이 mod 가 바깥일 때 team-board 띠가 아래로 밀려 잘린다
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -96,6 +85,7 @@ export const register: Register = on => {
     // 줄 수는 받은 maxRows 와 공유 상태만으로 정한다 (docs/band-rows.md). Claude Code 2.1.323 부터 mod 마다 따로 불리고
     // 모두 띠 전체의 maxRows 를 받아, next 로 줄 수를 넘겨도 다른 mod 에 닿지 않는다. 그래서 next 에는 받은 e 를 그대로 넘긴다.
     // prompt-coach 가 다듬는 중이면 그 화면이 줄을 쓰고 숫자 키도 쓴다. 같은 숫자를 두 mod 가 그리면 둘 다 눌리지 않으므로 그리지 않는다
+    // 제안은 지우지 않고 숨기기만 한다: 다듬기를 취소하거나 입력창을 비우면 다시 보이고, 보내면 위 prompt.submit 이 지운다
     if ((await read($, coachFlow)).stage !== 'idle') return next(e)
     // 칩 줄·다듬기 줄·팀 한 줄에 1줄씩 남기고도 자리가 되면 펼친다(가로줄 + 제안 + 닫기 줄 = items + 2 줄). 안 되면 한 줄에 모은다.
     // 가로줄 있는 한 줄 모양(2줄)도 그 줄들을 남길 수 있을 때만. 1줄뿐이면 이 띠가 칩 줄·다듬기 줄·팀 줄보다 먼저 남는다

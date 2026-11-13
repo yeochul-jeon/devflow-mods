@@ -430,15 +430,15 @@ describe('next-steps', () => {
 const PROMPT_COACH = {
   name: 'prompt-coach',
   register(on: any) {
-    on('tool.call', { tool: 'SetPending' }, async ($: any, e: any) => {
-      await $.state.set({ plugin: 'prompt-coach', key: 'pending' }, e.question)
+    on('tool.call', { tool: 'SetStage' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'prompt-coach', key: 'flow' }, { stage: e.stage })
       return { result: 'ok' }
     })
   },
 }
 
 describe('prompt-coach 와 함께', () => {
-  test('prompt-coach 가 질문을 띄우면 제안을 지운다. 숫자는 prompt-coach 의 답으로 남는다', { plugins: [PROMPT_COACH] }, async ($, on) => {
+  test('prompt-coach 가 다듬는 동안 제안을 숨기고 숫자 키를 내준다. 지우지는 않아 쉬는 단계로 돌아오면 다시 보인다', { plugins: [PROMPT_COACH] }, async ($, on) => {
     mock.store(on)
     on('session.start', ($, e) => ({ cwd: e.cwd }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
@@ -454,36 +454,36 @@ describe('prompt-coach 와 함께', () => {
     on('turn.complete', () => ({ text: '' }))
     on('prompt.edit', ($, e: any) => ({ text: e.text + e.inputText, cursor: e.text.length + e.inputText.length }))
     on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
-    const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
-    const key = (inputText: string) => ($ as any).prompt.edit({ origin: { kind: 'composer' }, key: { name: inputText }, text: '', cursor: 0, start: 0, end: 0, inputText } as any)
+    const stage = (name: string) => $.tool.call({ tool: 'SetStage', stage: name } as any)
+    const shown = async (text: RegExp) => {
+      const band = await $.ui.mount(BAND)
+      const r = { text: (await band.find({ type: 'Text', text })) !== undefined, key: (await band.find({ key: 'step-1' }))?.props.hotkey, other: (await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })) !== undefined }
+      await band.unmount()
+      return r
+    }
 
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
     await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't1' } as any)
     await settle()
-    let band = await $.ui.mount(BAND)
-    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeDefined()
-    await band.unmount()
+    expect(await shown(/테스트를 다시 돌려 줘/)).toEqual({ text: true, key: '1', other: true })
 
-    await pending('prompt-coach: 범위는?')
-    band = await $.ui.mount(BAND)
-    expect(await band.find({ type: 'Text', text: /테스트를 다시 돌려 줘/ })).toBeUndefined()
-    expect(await band.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined()
-    await band.unmount()
-    expect((await key('1')).text).toBe('1')
+    // 질문 중에는 숫자 Button 을 그리지 않는다. 같은 숫자를 두 mod 가 그리면 둘 다 눌리지 않는다 (2.1.323)
+    await stage('questions')
+    expect(await shown(/테스트를 다시 돌려 줘/)).toEqual({ text: false, key: undefined, other: true })
 
-    // 질문이 끝나도(null) 지운 제안은 돌아오지 않는다
-    await pending(null)
-    expect((await key('1')).text).toBe('1')
+    // 다듬기를 취소하거나 입력창을 비워 쉬는 단계로 돌아오면 제안이 다시 보인다 (T65 F1). 보내면 prompt.submit 이 지운다
+    await stage('idle')
+    expect(await shown(/테스트를 다시 돌려 줘/)).toEqual({ text: true, key: '1', other: true })
 
-    // 제안을 만드는 동안 질문이 뜨면, 늦게 온 제안은 버린다
+    // 다듬는 동안 도착한 제안도 버리지 않는다. 숨겨 두었다가 쉬는 단계에서 보인다
     hold = true
     await $.turn.complete({ reason: 'answer', answer: LONG_ANSWER, durationMs: 1, isAborted: false, turnId: 't2' } as any)
     await settle()
-    await pending('prompt-coach: 완료 기준은?')
+    await stage('asking')
     release()
     await settle()
-    band = await $.ui.mount(BAND)
-    expect(await band.find({ type: 'Text', text: /늦은 제안/ })).toBeUndefined()
-    await band.unmount()
+    expect((await shown(/늦은 제안/)).text).toBe(false)
+    await stage('idle')
+    expect((await shown(/늦은 제안/)).text).toBe(true)
   })
 })
