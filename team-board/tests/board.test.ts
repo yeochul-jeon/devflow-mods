@@ -1336,10 +1336,6 @@ describe('프롬프트 캐시', () => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     let ttlSetting: string | undefined
     on('settings.read', () => ({ value: ttlSetting ? { promptCacheTtl: ttlSetting } : {} }))
-    // 아래 mod 가 받은 줄 수 (N5): team-board 가 자기 높이를 빼고 넘긴다
-    let belowRows = -1
-    let belowTeamRows: unknown
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; belowTeamRows = e.props.teamRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
     let usage = { ...USAGE }
     on('turn.step', async function* ($, e: any) {
       return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { ...usage, model: 'm' } }
@@ -1376,21 +1372,18 @@ describe('프롬프트 캐시', () => {
     // 세션 하나(solo): 캐시 배지 + 남은 분
     expect((await band.find({ type: 'Text', text: /^ 캐시 $/ }))?.props.backgroundColor).toBe(paletteOf('night').ask)
     expect(await band.find({ type: 'Text', text: /^9분$/ })).toBeDefined()
-    expect(belowRows).toBe(10 - 3) // 혼자 창은 3줄
-    expect(belowTeamRows).toBe(3) // 바깥에서 뗀 줄을 prompt-coach 에 알린다
-    // 이 띠를 다른 mod 띠보다 위에 그린다: 넘치면 엔진이 위부터 보여 주므로 결정·실패가 잘리지 않는다 (N5)
-    const tree = JSON.stringify(await band.find({ type: 'Box' }))
-    expect(tree.indexOf('OTHER-MOD-BAND')).toBeGreaterThan(tree.indexOf('보드 /board'))
+    // 혼자 창(3줄)은 오른쪽에 [보드 /board] 버튼이 있다. 한 줄 모양에는 없다
+    expect(await band.find({ key: 'band-board' })).toBeDefined()
     await band.unmount()
     // 자리가 3줄보다 작으면 혼자여도 한 줄 모양 (창 3줄이 들어가지 않아 아래가 잘렸다)
     const low = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 2, bodyColumns: 160 } } as any)
     expect(await low.find({ type: 'Text', text: /^ TEAM 1 $/ })).toBeDefined()
-    expect(belowRows).toBe(2 - 1)
+    expect(await low.find({ key: 'band-board' })).toBeUndefined()
     await low.unmount()
     await $.command.run({ command: 'board', args: 'band line' } as any)
     const line = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
     expect(await line.find({ type: 'Text', text: /캐시 9분/ })).toBeDefined()
-    expect(belowRows).toBe(10 - 1) // 한 줄 모양
+    expect(await line.find({ key: 'band-board' })).toBeUndefined() // 한 줄 모양
     await line.unmount()
     await $.command.run({ command: 'board', args: 'band hud' } as any)
     await $.command.run({ command: 'board', args: '' } as any)
@@ -3116,6 +3109,8 @@ const PROMPT_COACH = {
   name: 'prompt-coach',
   register(on: any) {
     on('tool.call', { tool: 'SetPending' }, async ($: any, e: any) => {
+      // 실제 prompt-coach 는 질문 단계(flow.stage questions)에서만 pending 을 둔다 (setFlow). 띠는 flow 로 다듬는 중인지 본다
+      await $.state.set({ plugin: 'prompt-coach', key: 'flow' }, { stage: e.question === null ? 'idle' : 'questions' })
       await $.state.set({ plugin: 'prompt-coach', key: 'pending' }, e.question)
       return { result: 'ok' }
     })
@@ -3149,14 +3144,13 @@ describe('prompt-coach 연동', () => {
     on('turn.complete', () => ({ text: '' }))
     const mine = () => JSON.parse(files.get([...files.keys()].find(k => /\/me-[0-9a-f]{8}\.json$/.test(k))!)!)
     const pending = (question: string | null) => $.tool.call({ tool: 'SetPending', question } as any)
-    let belowRows = -1
-    let belowTeamRows: unknown
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; belowTeamRows = e.props.teamRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    // 창 모양은 [보드 /board] 버튼, 한 줄 모양은 " TEAM 1 …" 칩
     const band = async () => {
       const m = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 160 } } as any)
       const line = (await m.find({ type: 'Text', text: /^ TEAM 1/ })) !== undefined
+      const win = (await m.find({ key: 'band-board' })) !== undefined
       await m.unmount()
-      return { line, belowRows }
+      return { line, win }
     }
 
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
@@ -3164,16 +3158,16 @@ describe('prompt-coach 연동', () => {
     await $.turn.complete({ reason: 'answer', answer: '끝났습니다.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
     expect(mine().state).toBe('idle')
 
-    expect(await band()).toEqual({ line: false, belowRows: 10 - 3 })
+    expect(await band()).toEqual({ line: false, win: true })
     await pending('prompt-coach: 범위는?')
     expect(mine()).toMatchObject({ state: 'asking', question: 'prompt-coach: 범위는?' })
     // 질문 중에는 팀 창이 한 줄로 줄어 아래 질문·선택지에 줄을 양보한다 (T53)
-    expect(await band()).toEqual({ line: true, belowRows: 10 - 1 })
+    expect(await band()).toEqual({ line: true, win: false })
     await pending('prompt-coach: 완료 기준은?')
     expect(mine()).toMatchObject({ state: 'asking', question: 'prompt-coach: 완료 기준은?' })
     await pending(null)
     expect(mine()).toMatchObject({ state: 'idle', question: '' })
-    expect(await band()).toEqual({ line: false, belowRows: 10 - 3 })
+    expect(await band()).toEqual({ line: false, win: true })
 
     // Claude 의 질문을 기다리던 중이면 끝난 뒤 그 질문으로 돌아간다
     await $.prompt.submit({ text: '다음 요청', origin: { kind: 'composer' } } as any)
@@ -3292,15 +3286,6 @@ describe('자기 세션 표시', () => {
     expect(await bandHas(/결정 1/, 2)).toBe(false)
     expect(await bandHas(/OTHER-MOD-BAND/, 2)).toBe(true)
     expect(await bandHas(/결정 1/, 3)).toBe(true)
-    // prompt-coach 가 바깥이면 제 줄을 이미 떼고 coachRows 로 알려 온다: 받은 줄이 1줄이라도 한 줄 모양을 그린다
-    const inside = async (maxRows: number) => {
-      const b = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 160, coachRows: 6 } } as any)
-      const shown = (await b.find({ type: 'Text', text: /결정 1/ })) !== undefined
-      await b.unmount()
-      return shown
-    }
-    expect(await inside(1)).toBe(true)
-    expect(await inside(0)).toBe(false)
     await $.command.run({ command: 'board', args: '' } as any)
     const pane = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'Pane', requestId: 'team-board', props: { bodyColumns: 90 } } as any)
     expect(await pane.find({ type: 'Text', text: /prompt-coach: 범위는/ })).toBeDefined()
@@ -3333,7 +3318,7 @@ const NEXT_STEPS = {
 }
 
 describe('next-steps 연동', () => {
-  test('안쪽 next-steps 제안에 1줄 이상 남긴다: 창 모양이 다 쓰면 한 줄 모양, 그래도 안 남으면 그리지 않는다. 바깥 next-steps 에는 양보하지 않는다 (T55)', { plugins: [NEXT_STEPS] }, async ($, on) => {
+  test('next-steps 제안이 쓸 줄(docs/band-rows.md 2-2)을 남긴다: 창 모양이 못 남기면 한 줄 모양, 그래도 안 남으면 그리지 않는다 (T55)', { plugins: [NEXT_STEPS] }, async ($, on) => {
     const files = new Map<string, string>()
     const clock = mock.clock(on, { now: NOW })
     mock.store(on)
@@ -3373,16 +3358,23 @@ describe('next-steps 연동', () => {
     expect(await shape(5)).toBe('window')
 
     await setSteps({ turnId: 't1', items: ['하나', '둘', '셋'] })
-    // 창 모양이 1줄이라도 남기면 창 모양 (실화면 30줄 창의 띠 자리 6줄). 다 쓰면 한 줄 모양
-    expect(await shape(6)).toBe('window')
+    // next-steps 는 팀 한 줄을 남기고 펼친다: 제안 3개를 펼치면 5줄(가로줄 + 제안 3 + 닫기 줄)이라 6줄부터.
+    // 남은 줄이 창 모양(5줄)이면 창 모양, 모자라면 한 줄 모양 (실화면 30줄 창의 띠 자리 6줄: 5줄을 펼치고 1줄)
+    expect(await shape(10)).toBe('window')
+    expect(await shape(9)).toBe('line')
+    expect(await shape(6)).toBe('line')
+    // 펼치지 못하면 가로줄 있는 한 줄(2줄, 3줄부터) 또는 한 줄(1줄): 남은 줄에 한 줄 모양
     expect(await shape(5)).toBe('line')
+    expect(await shape(3)).toBe('line')
     expect(await shape(2)).toBe('line')
-    // 한 줄 모양도 1줄을 남기지 못하면 그리지 않는다 (20줄 창의 띠 자리 1줄)
+    // 1줄이면 한 줄 모양 제안이 먼저 남는다 (20줄 창의 띠 자리 1줄)
     expect(await shape(1)).toBe('none')
+    // 높이를 늘리면 팀 띠는 없음 → 한 줄 → 창 모양으로만 바뀌고, 사라졌다 다시 나타나지 않는다
+    const shapes: string[] = []
+    for (let rows = 1; rows <= 12; rows++) shapes.push(await shape(rows))
+    expect(shapes).toEqual(['none', ...Array(8).fill('line'), 'window', 'window', 'window'])
     // 작업 중에는 next-steps 가 목록을 그리지 않는다
     expect(await shape(5, { isWorking: true })).toBe('window')
-    // next-steps 가 바깥이면 제 줄을 이미 떼고 넘긴다. 다시 빼지 않는다
-    expect(await shape(5, { nextStepsRows: 5 })).toBe('window')
     // 0 으로 닫거나 /next off 면 값이 비고 창 모양으로 돌아온다
     await setSteps(null)
     expect(await shape(5)).toBe('window')
@@ -3395,6 +3387,10 @@ const IMAGE_DRAFT = {
   register(on: any) {
     on('tool.call', { tool: 'SetImages' }, async ($: any, e: any) => {
       await $.state.set({ plugin: 'image-preview', key: 'draft' }, e.ids)
+      return { result: 'ok' }
+    })
+    on('tool.call', { tool: 'SetCard' }, async ($: any, e: any) => {
+      await $.state.set({ plugin: 'image-preview', key: 'cardRows' }, e.rows)
       return { result: 'ok' }
     })
   },
@@ -3411,7 +3407,7 @@ const COACH_BAND = {
 }
 
 describe('image-preview 연동', () => {
-  test('안쪽 image-preview 칩 줄(과 prompt-coach 다듬기 줄)에 줄을 남긴다: 창 모양이 못 남기면 한 줄 모양, 그래도 안 남으면 그리지 않는다. 바깥 image-preview 에는 양보하지 않는다', { plugins: [IMAGE_DRAFT, COACH_BAND] }, async ($, on) => {
+  test('image-preview 칩 줄·prompt-coach 다듬기 줄·구분 줄·next-steps 제안이 쓸 줄(docs/band-rows.md)을 남긴다: 창 모양이 못 남기면 한 줄 모양, 그래도 안 남으면 그리지 않는다', { plugins: [IMAGE_DRAFT, COACH_BAND, NEXT_STEPS] }, async ($, on) => {
     const files = new Map<string, string>()
     const clock = mock.clock(on, { now: NOW })
     mock.store(on)
@@ -3429,71 +3425,122 @@ describe('image-preview 연동', () => {
     on('fs.read', ($, e: any) => ({ value: files.get(e.path) ?? '' }))
     on('process.run', () => ({ value: { stdout: '', stderr: '', exitCode: 1, isStdoutTruncated: false, isStderrTruncated: false } }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
-    // 안쪽 mod 가 받은 줄 수
-    let belowRows = -1
-    let belowTeamRows: unknown
-    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => { belowRows = e.props.maxRows; belowTeamRows = e.props.teamRows; return $.ui.resolve(e).Text({ children: 'INNER' }) })
+    // 다른 띠. 2.1.322 까지는 team-board 아래에, 2.1.323 부터는 따로 쌓인다. 어느 쪽이든 team-board 가 그리지 않을 때도 그려져야 한다
+    on('ui.render', { component: 'AbovePrompt' }, ($, e: any) => $.ui.resolve(e).Text({ children: 'INNER' }))
     const setDraft = async (ids: number[], hasDraft = true, stage = 'idle') => {
       await $.tool.call({ tool: 'SetImages', ids } as any)
       await $.tool.call({ tool: 'SetCoach', hasDraft, stage } as any)
     }
-    // 세션 하나: 창 모양(혼자 창 3줄)은 오른쪽 버튼 "보드 /board", 한 줄 모양은 " TEAM 1 ". inner 는 안쪽 mod 가 받은 maxRows/teamRows
+    const setSteps = (steps: unknown) => $.tool.call({ tool: 'SetSteps', steps } as any)
+    // 세션 하나: 창 모양(혼자 창 3줄)은 오른쪽 버튼 "보드 /board", 한 줄 모양은 " TEAM 1 "
     const shape = async (maxRows: number, props: any = {}, viewport?: any) => {
-      belowRows = -1
-      belowTeamRows = undefined
       const band = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 160, ...props }, viewport } as any)
       const win = (JSON.stringify(await band.find({ type: 'Box' })) ?? '').includes('보드 /board')
       const line = await band.find({ type: 'Text', text: /^ TEAM 1 $/ })
       const inner = await band.find({ type: 'Text', text: /^INNER$/ })
       await band.unmount()
       expect(inner).toBeDefined()
-      return `${win ? 'window' : line ? 'line' : 'none'} INNER ${belowRows}/${belowTeamRows}`
+      return win ? 'window' : line ? 'line' : 'none'
     }
 
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
     await clock.advance(3_000)
-    // 이미지가 없으면 그대로: 혼자 창은 3줄 (160칸). 3줄이 안 되면 한 줄 모양
-    expect(await shape(4)).toBe('window INNER 1/3')
-    expect(await shape(2)).toBe('line INNER 1/1')
-    // 세션 하나에 /board band solo off, /board band off: 그리지 않고 안쪽에 teamRows 0 을 알린다
+    // 이미지도 초안도 없으면 혼자 창은 3줄 (160칸). 3줄이 안 되면 한 줄 모양
+    expect(await shape(4)).toBe('window')
+    expect(await shape(2)).toBe('line')
+    // 세션 하나에 /board band solo off, /board band off: 그리지 않는다
     await $.command.run({ command: 'board', args: 'band solo off' } as any)
-    expect(await shape(4)).toBe('none INNER 4/0')
+    expect(await shape(4)).toBe('none')
     await $.command.run({ command: 'board', args: 'band solo on' } as any)
     await $.command.run({ command: 'board', args: 'band off' } as any)
-    expect(await shape(4)).toBe('none INNER 4/0')
+    expect(await shape(4)).toBe('none')
     await $.command.run({ command: 'board', args: 'band on' } as any)
-    expect(await shape(4)).toBe('window INNER 1/3')
-    // 초안이 비면 다듬기 줄도 없으니 이미지 칩 줄이 없는 것과 같다
-    await setDraft([], true)
-    expect(await shape(4)).toBe('window INNER 1/3')
+    expect(await shape(4)).toBe('window')
 
-    // 칩 줄 1 + 다듬기 줄 1 = 2줄을 남긴다
-    await setDraft([1])
-    // 2: 2 - keep 2 < 1 이라 그리지 않는다. 안쪽에는 받은 2줄 그대로, 팀 줄은 0줄이라고 알린다(prompt-coach 가 팀 줄 몫을 남기지 않게)
-    expect(await shape(2)).toBe('none INNER 2/0')
-    // 4: 창 모양이 3줄을 쓰면 1줄 남아 keep 2 에 모자라니 한 줄 모양
-    expect(await shape(4)).toBe('line INNER 3/1')
-    // 5: 창 모양을 쓰고 2줄이 남는다
-    expect(await shape(5)).toBe('window INNER 2/3')
-    expect(await shape(6)).toBe('window INNER 3/3')
-    // 다듬기 줄이 안 그려지면(초안 없음·작업 중·단계가 idle 아님) 칩 줄 1줄만 남긴다
-    await setDraft([1], false)
-    expect(await shape(4)).toBe('window INNER 1/3')
-    await setDraft([1], true, 'questions')
-    expect(await shape(4)).toBe('window INNER 1/3')
-    await setDraft([1], true)
-    expect(await shape(4, { isWorking: true })).toBe('window INNER 1/3')
-    // image-preview 가 바깥이면 제 줄을 이미 떼고 imagePreviewRows 로 알려 온다: 양보하지 않는다
-    expect(await shape(4, { imagePreviewRows: 1 })).toBe('window INNER 1/3')
-    // 그래도 다듬기 줄 1줄은 남긴다: 칩이 1줄을 먼저 뗀 3줄에서 창 모양(3줄)을 쓰면 다듬기 줄이 빠진다 (T60 순서 O 실측)
-    expect(await shape(3, { imagePreviewRows: 1 })).toBe('line INNER 2/1')
-    expect(await shape(1, { imagePreviewRows: 1 })).toBe('none INNER 1/0')
-    // 전체화면이 아니면 image-preview 가 칩 줄을 그리지 않는다
-    expect(await shape(4, {}, { columns: 160, rows: 40, isFullscreen: false })).toBe('window INNER 1/3')
-    // survey 중에도 그리지 않는다 (맨 앞에서 줄을 떼지 않고 넘긴다)
-    expect(await shape(4, { hasSurvey: true })).toBe('none INNER 4/0')
+    // 초안만 있으면(이미지 없음) 다듬기 줄 1 + 그 위 가로줄 1 (팀 한 줄을 남기고도 자리가 될 때) = 2줄을 남긴다
     await setDraft([], true)
-    expect(await shape(4)).toBe('window INNER 1/3')
+    expect(await shape(5)).toBe('window')
+    expect(await shape(4)).toBe('line')
+    // 3: 다듬기 줄·가로줄·팀 한 줄. 2: 가로줄은 팀 한 줄에 양보한다. 1: 다듬기 줄이 먼저 남는다
+    expect(await shape(3)).toBe('line')
+    expect(await shape(2)).toBe('line')
+    expect(await shape(1)).toBe('none')
+
+    // 칩 줄 1 + 다듬기 줄 1, 자리가 되면 가로줄 1 과 칩 줄 위 구분 줄 1
+    await setDraft([1])
+    // 2: 표 1단계에서 칩 줄과 다듬기 줄이 먼저 남아 팀 띠는 그리지 않는다
+    expect(await shape(2)).toBe('none')
+    // 3: 1줄 남아 한 줄 모양. 4: 가로줄이 생겨 1줄. 5: 구분 줄도 생겨 1줄. 6: 2줄 남아 창 모양(3줄)에 모자란다
+    expect(await shape(3)).toBe('line')
+    expect(await shape(4)).toBe('line')
+    expect(await shape(5)).toBe('line')
+    expect(await shape(6)).toBe('line')
+    // 7: 4줄을 남기고 3줄이라 창 모양
+    expect(await shape(7)).toBe('window')
+    // 다듬기 줄이 안 그려지면(초안 없음·작업 중) 칩 줄과 그 위 구분 줄만 남긴다
+    await setDraft([1], false)
+    expect(await shape(5)).toBe('window')
+    expect(await shape(4)).toBe('line')
+    // image-preview 가 띠 안에 연 카드(cardRows)의 줄도 남긴다: 칩 줄 + 구분 줄 + 카드 4줄
+    const setCard = (rows: number) => $.tool.call({ tool: 'SetCard', rows } as any)
+    await setCard(4)
+    // 8: 6줄을 남기고 2줄이라 창 모양(3줄)에 모자라 한 줄 모양. 9: 3줄이라 창 모양
+    expect(await shape(8)).toBe('line')
+    expect(await shape(9)).toBe('window')
+    // 카드가 남은 줄을 다 쓸 만큼이어도 팀은 한 줄을 지킨다 (값이 늦게 써져 옛 높이의 값이어도)
+    expect(await shape(5)).toBe('line')
+    expect(await shape(3)).toBe('line')
+    expect(await shape(2)).toBe('line')
+    expect(await shape(1)).toBe('none')
+    // 지킨 한 줄에 세션 칩이 다 들어간다 (끝이 "+k 더" 가 아니라 "/board")
+    const kept = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 5, bodyColumns: 160 } } as any)
+    expect(await kept.find({ type: 'Text', text: /^\/board$/ })).toBeDefined()
+    await kept.unmount()
+    await setCard(0)
+    expect(await shape(8)).toBe('window')
+    expect(await shape(5)).toBe('window')
+    await setDraft([1], true)
+    expect(await shape(5, { isWorking: true })).toBe('window')
+    expect(await shape(4, { isWorking: true })).toBe('line')
+    // 전체화면이 아니면 image-preview 가 칩 줄을 그리지 않는다: 다듬기 줄과 가로줄만
+    expect(await shape(5, {}, { columns: 160, rows: 40, isFullscreen: false })).toBe('window')
+    expect(await shape(4, {}, { columns: 160, rows: 40, isFullscreen: false })).toBe('line')
+    // survey 중에는 그리지 않는다 (다른 띠는 그대로)
+    expect(await shape(4, { hasSurvey: true })).toBe('none')
+
+    // prompt-coach 가 다듬는 중(질문 만들기·질문·다시 쓰기·넣음)이면 한 줄 모양만. 띠 자리가 3줄도 안 되면 그리지 않는다 (T53, T54)
+    for (const stage of ['asking', 'questions', 'rewriting', 'done']) {
+      await setDraft([1], true, stage)
+      expect(await shape(10)).toBe('line')
+      expect(await shape(3)).toBe('line')
+      expect(await shape(2)).toBe('none')
+    }
+    // 다듬는 중에는 좁은 폭에서도 1줄에 맞춘다: 칩이 다음 줄로 넘치면 줄을 늘리지 않고 +k 로 줄인다
+    const narrow = await $.ui.mount({ plugin: 'team-board', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 20 } } as any)
+    expect(await narrow.find({ type: 'Text', text: /^\+1 더 · \/board$/ })).toBeDefined()
+    await narrow.unmount()
+
+    // 제안 3개 + 칩 줄 + 다듬기 줄 + 팀 (표 1단계 예: 2줄이면 제안 한 줄과 칩 줄만)
+    await setDraft([1], true)
+    await setSteps({ turnId: 't1', items: ['하나', '둘', '셋'] })
+    expect(await shape(2)).toBe('none')
+    expect(await shape(3)).toBe('none')
+    // 4: 제안 한 줄·칩 줄·다듬기 줄을 남기고 1줄. 5~7: 제안이 가로줄 있는 한 줄(2줄)이 되고 가로줄·구분 줄이 생겨도 팀 한 줄은 남는다
+    expect(await shape(4)).toBe('line')
+    expect(await shape(5)).toBe('line')
+    expect(await shape(7)).toBe('line')
+    // 8: 제안을 펼쳐(5줄) 칩 줄·다듬기 줄과 7줄, 팀 1줄. 10: 가로줄과 구분 줄도 생겨 9줄을 남기고 1줄. 12: 3줄이라 창 모양
+    expect(await shape(8)).toBe('line')
+    expect(await shape(10)).toBe('line')
+    expect(await shape(11)).toBe('line')
+    expect(await shape(12)).toBe('window')
+    // 높이를 늘리면 없음 → 한 줄 → 창 모양으로만 바뀐다
+    const shapes: string[] = []
+    for (let rows = 1; rows <= 14; rows++) shapes.push(await shape(rows))
+    expect(shapes).toEqual([...Array(3).fill('none'), ...Array(8).fill('line'), 'window', 'window', 'window'])
+    await setSteps(null)
+    await setDraft([], false)
+    expect(await shape(4)).toBe('window')
   })
 })
 

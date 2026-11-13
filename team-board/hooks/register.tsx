@@ -37,7 +37,6 @@ import {
   cacheTtl,
   observeTtl,
   hudRows,
-  lineRows,
   nextObserved,
   cacheMinutes,
   cacheText,
@@ -128,12 +127,12 @@ const bandSoloOff = atom({ plugin: 'team-board', key: 'bandSoloOff' } as const, 
 const look = atom({ plugin: 'team-board', key: 'look' } as const, 'blob' as Look)
 // 읽기만 한다. work-plan 이 없으면 값이 없다
 const workPlan = atom({ plugin: 'work-plan', key: 'plan' } as const, null as WorkPlan | null)
-// 읽기만 한다. prompt-coach 가 답을 기다리는 질문 글. prompt-coach 가 없으면 값이 없다
-const coachQuestion = atom({ plugin: 'prompt-coach', key: 'pending' } as const, null as string | null)
 // 읽기만 한다. next-steps 가 띄운 다음 요청 제안. 0 으로 닫거나 /next off 면 null. next-steps 가 없으면 값이 없다
 const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { turnId: string; items: string[] } | null)
 // 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호들. 없으면 빈 목록. image-preview 가 없으면 값이 없다
 const imageDraft = atom({ plugin: 'image-preview', key: 'draft' } as const, [] as number[])
+// 읽기만 한다. image-preview 가 띠 안에 열어 둔 이미지 카드의 줄 수(테두리·설명 포함). 카드가 없거나 띠 밖이면 0. image-preview 가 없으면 값이 없다
+const imageCard = atom({ plugin: 'image-preview', key: 'cardRows' } as const, 0)
 // 읽기만 한다. prompt-coach 의 입력창 글 유무와 다듬기 단계. prompt-coach 가 없으면 값이 없다
 const coachBand = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false })
 const coachFlow = atom({ plugin: 'prompt-coach', key: 'flow' } as const, { stage: 'idle' } as { stage: string })
@@ -1278,17 +1277,19 @@ export const register: Register = (on, options) => {
   })
 
   // 입력창 위 띠: 다른 mod 의 띠 아래에 붙인다 (가리지 않음).
+  // 줄 수는 받은 maxRows(띠 전체)와 공유 상태만으로 정한다 (docs/band-rows.md). Claude Code 2.1.323 부터 mod 마다 따로 불리고
+  // 모두 띠 전체의 maxRows 를 받아, next 로 줄 수를 넘겨도 다른 mod 에 닿지 않는다. 2.1.322 이하의 이어진 구조에서도 같은 계산이 맞도록 next 에는 받은 e 를 그대로 넘긴다
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    // 바깥 mod 가 줄을 다 써 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 바깥 띠까지 가려진다 (T54)
-    // teamRows: 이 띠가 바깥에서 뗀 줄 수. 그리지 않을 때도 0 으로 알린다. 안 알리면 prompt-coach 가 팀 줄이 안쪽에 있다고 보고 1줄을 남겨 둔다
-    const nextWith = (h: number) => next({ ...e, props: { ...e.props, maxRows: Math.max(0, (e.props.maxRows ?? 10) - h), teamRows: h } as typeof e.props })
-    if (e.props.hasSurvey || (e.props.maxRows ?? 10) < 1 || (await read($, bandOff))) return nextWith(0)
+    // 받은 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 다른 띠까지 가려진다 (T54)
+    if (e.props.hasSurvey || (e.props.maxRows ?? 10) < 1 || (await read($, bandOff))) return next(e)
     const now = await $.clock.now()
-    const list = visible(withMe(await read($, beats), await read($, me)), now)
+    const mine = await read($, me)
+    // 다른 mod 는 me 가 있을 때만 팀 한 줄을 남긴다 (docs/band-rows.md 의 T). 첫 저장 전에 다른 세션 목록만으로 그리면 그 줄이 남지 않아 넘친다
+    if (!mine) return next(e)
+    const list = visible(withMe(await read($, beats), mine), now)
     // 세션 하나: /board band solo off 면 숨김 (기본은 보임)
-    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return nextWith(0)
-    // 아래 mod(next-steps·prompt-coach 등)에는 이 띠가 쓰고 남은 줄만 넘기고, 이 띠는 그들보다 위에 그린다 (N5).
-    // 넘치면 엔진이 위부터 보여 주므로, 줄 수를 줄이지 않는 띠(prompt-coach, 엔진 Heads up)가 있어도 결정·실패가 가려지지 않는다
+    if (!list.length || (list.length < 2 && (await read($, bandSoloOff)))) return next(e)
+    // 이 띠는 next 결과보다 위에 그린다 (N5). 2.1.322 이하에서 넘치면 엔진이 위부터 보여 주므로 결정·실패가 가려지지 않는다
 
     const { Box, Text, Button } = $.ui.resolve(e)
     const asking = list.filter(b => b.state === 'asking' && !isStale(b, now)).length
@@ -1317,28 +1318,34 @@ export const register: Register = (on, options) => {
     const head = headLines(headChips.map(c => c.text), columns, widthOf('보드 /board') + 4)
 
     // 한 줄 모양 (예전 띠): /board band line. 창 모양이 테두리 2줄 + 머리줄 + 칸 1줄도 안 들어가는 낮은 창에서도 이 모양 (혼자 창 3줄도 안 들어가면 이 모양, N5)
-    // prompt-coach 가 질문 중이어도 이 모양: 아래 질문·선택지에 줄을 양보한다. 안 보이는 선택지를 숫자로 고르게 된다 (T53)
-    const coachAsking = !!(await read($, coachQuestion))
-    // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54).
-    // prompt-coach 가 바깥이면 제 줄을 이미 떼고 coachRows 로 알려 오니 받은 줄이 1줄이라도 그린다
-    const outerCoach = (e.props as { coachRows?: number }).coachRows !== undefined
-    if (coachAsking && maxRows < (outerCoach ? 1 : 3)) return nextWith(0)
-    // 안쪽 next-steps 제안에 1줄 이상 남긴다: 창 모양이 다 쓰면 한 줄 모양, 그래도 안 남으면 그리지 않는다 (T55).
-    // next-steps 가 바깥이면 제 줄을 이미 떼고 nextStepsRows 로 알려 오니 양보하지 않는다. 작업 중에는 목록을 그리지 않는다
-    const outerSteps = (e.props as { nextStepsRows?: number }).nextStepsRows !== undefined
-    const steps = e.props.isWorking || outerSteps ? null : await read($, nextSteps)
-    // image-preview 가 안쪽이면 이미지 칩 줄(1줄)이 이 띠 아래에 그려진다. 바깥이면 제 줄을 이미 떼고 imagePreviewRows 로 알려 온다.
-    // 같은 안쪽에서 prompt-coach 의 [ 다듬기 ] 줄도 그려지면(초안이 있고 idle, 작업 중 아님) 1줄을 더 남긴다.
-    // prompt-coach 가 실제로는 바깥이면 이중으로 세어 박스 대신 한 줄 모양이 될 수 있다: 넘치는 것보다 낫다
-    // image-preview 가 바깥이어도 다듬기 줄 1줄은 남긴다. 안 남기면 칩 줄이 1줄을 먼저 떼어 24·20줄에서 다듬기 줄이 빠진다 (T60 실측, prependPlugins 가 안 먹는 Team·Enterprise 로그인에서 생기는 순서)
-    const chipsOuter = ((e.props as { imagePreviewRows?: number }).imagePreviewRows ?? 0) > 0
-    const chipsInside = (e.props as { imagePreviewRows?: number }).imagePreviewRows === undefined && e.viewport?.isFullscreen !== false && !e.props.hasSurvey && (await read($, imageDraft)).length > 0
-    const coachLine = (chipsInside || chipsOuter) && (await read($, coachBand)).hasDraft && (await read($, coachFlow)).stage === 'idle' && !e.props.isWorking
-    const keep = (steps?.items.length ? 1 : 0) + (chipsInside ? 1 : 0) + (coachLine ? 1 : 0)
-    if (keep && maxRows - keep < 1) return nextWith(0)
+    // prompt-coach 가 다듬는 중(질문 만들기·질문·다시 쓰기·넣음)이어도 이 모양 1줄만 쓴다. 그 화면이 칩 줄과 팀 한 줄을 뺀 나머지를 쓰기 때문이다 (docs/band-rows.md 2-1).
+    // 질문 중에 창 모양이면 아래 선택지가 가려져 안 보이는 선택지를 숫자로 고르게 된다 (T53)
+    const coachBusy = (await read($, coachFlow)).stage !== 'idle'
+    // 띠 자리가 3줄도 안 되면(20줄 창) 한 줄도 내주지 않는다. 질문·선택지 두 줄이 다 보여야 한다. 질문 글은 /board 에 있다 (T54)
+    if (coachBusy && maxRows < 3) return next(e)
+    // 다른 띠가 쓸 줄을 docs/band-rows.md 의 표대로 세어 남긴다. 다른 mod 도 같은 상태에서 같은 표를 따르므로 합이 maxRows 를 넘지 않는다.
+    // next-steps 제안: 작업 중이거나 prompt-coach 가 다듬는 중이면 그리지 않는다
+    const n = e.props.isWorking || coachBusy ? 0 : ((await read($, nextSteps))?.items.length ?? 0)
+    // image-preview 칩 줄: 전체 화면일 때만 그린다
+    const chip = e.viewport?.isFullscreen !== false && (await read($, imageDraft)).length > 0 ? 1 : 0
+    // prompt-coach 다듬기 줄: 초안이 있고 idle 이며 작업 중이 아닐 때 (C대기)
+    const refine = !e.props.isWorking && !coachBusy && (await read($, coachBand)).hasDraft ? 1 : 0
+    // 표 1단계에서 팀 한 줄은 맨 끝 순위라, 팀이 남으면 앞의 제안·칩 줄·다듬기 줄도 모두 남는다. 팀이 못 남는 높이는 아래 maxRows - keep < 1 에서 걸린다.
+    // next-steps 줄 수(표 2-2): 펼친 목록(가로줄 + 제안 n + 닫기 줄), 가로줄 있는 한 줄(2줄), 한 줄(1줄) 중 칩 줄·다듬기 줄·팀 한 줄(1)을 남기고 들어가는 것.
+    // 팀 한 줄을 남기지 않으면 높이를 늘릴 때 목록이 펼쳐지며 팀 띠가 사라졌다 다시 나타난다
+    const stepsRows = !n ? 0 : maxRows >= n + 2 + chip + refine + 1 ? n + 2 : maxRows >= 2 + chip + refine + 1 ? 2 : 1
+    // 구분 줄(표 2-3, 2-4): 다듬기 줄 위 가로줄, 칩 줄 위 구분 줄. 팀 한 줄(1)을 남기고도 자리가 될 때만 그려진다
+    const coachRule = refine && maxRows >= stepsRows + chip + refine + 1 + 1 ? 1 : 0
+    const chipRule = chip && maxRows >= stepsRows + chip + refine + coachRule + 1 + 1 ? 1 : 0
+    // 팀 창은 남은 줄 전부(표 2-5). 1줄 미만이면 그리지 않는다
+    const others = stepsRows + chip + refine + coachRule + chipRule
+    if (maxRows - others < 1) return next(e)
+    // image-preview 가 띠 안에 연 카드 줄도 남긴다. image-preview 는 팀 한 줄을 남기고 카드를 재므로 1단계에서 남은 팀은 1줄을 지킨다.
+    // 값은 그리기 밖에서 써져 높이가 바뀐 직후에는 옛 값일 수 있다. 그래도 팀이 사라지지 않게 1줄을 남기고 자른다
+    const keep = others + Math.max(0, Math.min(await read($, imageCard), maxRows - others - 1))
     const layout = bandLayout(list.length, columns, maxRows, head)
     const stepsCramped = keep > 0 && maxRows - hudRows(layout, list.length - layout.shown, columns, head) < keep
-    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachAsking || stepsCramped) {
+    if ((await read($, bandMode)) === 'line' || (list.length > 1 && maxRows < 3 + head) || maxRows < 3 || coachBusy || stepsCramped) {
       // 칩 글자. 그리는 것과 줄 수 세기(lineShown)가 같은 글자를 쓴다
       const partsOf = (b: Beat) => {
         const stale = isStale(b, now)
@@ -1367,13 +1374,14 @@ export const register: Register = (on, options) => {
       const failChip = ` ⚠ 실패 ${fails} `
       const lead = fails ? [team, failChip] : [team]
       // 높이에 다 안 들어가면 중요한 세션부터 보이고 나머지는 +k (창 모양과 같은 순서)
-      // 제안에 남길 줄은 빼고 센다. 칩이 여러 줄로 넘어 제안 자리를 먹지 않게
-      const lineMax = maxRows - keep
+      // 제안에 남길 줄은 빼고 센다. 칩이 여러 줄로 넘어 제안 자리를 먹지 않게.
+      // prompt-coach 가 다듬는 중이면 그 화면이 팀 한 줄(1줄)만 남겨 두므로 1줄에 맞춘다
+      const lineMax = coachBusy ? 1 : maxRows - keep
       const fitsAll = lineShown(lead, list.map(textOf), columns, lineMax) === list.length
       const pick = fitsAll ? list : bandOrder(list, now, self.beat?.id)
       const lineShownN = fitsAll ? list.length : lineShown(lead, pick.map(textOf), columns, lineMax)
       const lineHidden = pick.length - lineShownN
-      const below = await nextWith(lineRows(lead, pick.map(textOf), lineShownN, columns))
+      const below = await next(e)
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" columnGap={2} paddingX={1} flexWrap="wrap">
@@ -1496,7 +1504,7 @@ export const register: Register = (on, options) => {
     // 혼자: 머리줄 한 줄에 내 상태를 바로 (창 높이 3줄)
     if (layout.mode === 'solo') {
       const b = list[0]!
-      const below = await nextWith(3)
+      const below = await next(e)
       const { hot, bad, cool } = stateOf(b)
       return (
         <Box flexDirection="column">
@@ -1518,7 +1526,7 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const below = await nextWith(hudRows(layout, hidden, columns, head))
+    const below = await next(e)
     return (
       <Box flexDirection="column">
         {hud}

@@ -169,7 +169,7 @@ declare module 'claude-code' {
     'prompt-coach': { pending: string | null; band: { hasDraft: boolean }; flow: { stage: string } }
     /** 읽기만 한다. next-steps 가 띄운 다음 요청 제안 또는 null(닫음·꺼짐). next-steps/types/index.d.ts 의 steps 와 같다 */
     'next-steps': { steps: { turnId: string; items: string[] } | null }
-    /** 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호들. image-preview/types/index.d.ts 의 draft 와 같다 */
-    'image-preview': { draft: number[] }
+    /** 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호들, 띠 안에 연 카드의 줄 수(없으면 0). image-preview/types/index.d.ts 의 draft·cardRows 와 같다 */
+    'image-preview': { draft: number[]; cardRows: number }
   }
 }
