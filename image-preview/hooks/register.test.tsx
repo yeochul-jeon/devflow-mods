@@ -1,6 +1,6 @@
 // Mod tests, run against the engine itself: `claude plugin test .`
 import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, Plugin } from 'claude-code/testing'
 import type { On, RenderElement } from 'claude-code'
 
 import { fit, parseBmp, toCells } from './pixels'
@@ -124,7 +124,7 @@ function keyed (tree: RenderElement, key: string): Drawn | undefined {
 // The cards drawn in the terminal, not in a window of their own.
 const cells = { options: { window: false } }
 
-const BAND = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 80, scroll: { offset: 0, bodyRows: 20 }, view: {} }
+const BAND = { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 20, bodyColumns: 80, scroll: { offset: 0, bodyRows: 20 }, view: {} }
 const SCREEN = { columns: 120, rows: 40, isFullscreen: true }
 type Shown = { first: number; last: number; of: number } | null
 
@@ -398,56 +398,253 @@ test('on a screen too short to float a card over the transcript, the band holds 
   expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster' })
 })
 
-test('the chip row takes its row off the band slot before the inner mods draw, and says so', cells, async ($, on) => {
-  const w = world(on, { draft: '[Image #1]' })
+/**
+ * Stand-ins for the mods sharing the band, each writing what it holds as the mod does, read from the
+ * test's STAND_IN variable. (An inline plugin is loaded apart from this file: it may use none of it.)
+ */
+const sharers: Plugin[] = [
+  {
+    name: 'next-steps',
+    register: on => {
+      on('session.start', async ($, e, next) => {
+        const result = await next(e)
+        const held = JSON.parse((await $.env.get('STAND_IN')) ?? '{}')
+        if (held.steps !== undefined) await $.state.set({ plugin: 'next-steps', key: 'steps' }, { items: Array.from({ length: held.steps }, (_, i) => `step ${i + 1}`) })
+        return result
+      })
+    }
+  },
+  {
+    name: 'prompt-coach',
+    register: on => {
+      on('session.start', async ($, e, next) => {
+        const result = await next(e)
+        const held = JSON.parse((await $.env.get('STAND_IN')) ?? '{}')
+        if (held.coachDraft !== undefined) await $.state.set({ plugin: 'prompt-coach', key: 'band' }, { hasDraft: held.coachDraft })
+        if (held.coachStage !== undefined) await $.state.set({ plugin: 'prompt-coach', key: 'flow' }, { stage: held.coachStage })
+        return result
+      })
+    }
+  },
+  {
+    name: 'team-board',
+    register: on => {
+      on('session.start', async ($, e, next) => {
+        const result = await next(e)
+        const held = JSON.parse((await $.env.get('STAND_IN')) ?? '{}')
+        if (held.team !== undefined) await $.state.set({ plugin: 'team-board', key: 'me' }, { state: 'idle', question: '' })
+        if (held.team === 'off') await $.state.set({ plugin: 'team-board', key: 'bandOff' }, true)
+        return result
+      })
+    }
+  }
+]
+type Held = { steps?: number; coachDraft?: boolean; coachStage?: string; team?: 'on' | 'off' }
+
+/** A session with `[Image #1]` in the box, the other mods holding `held`. */
+async function sharing ($: Engine, on: On, held: Held) {
+  const w = world(on, { draft: '[Image #1]', env: { STAND_IN: JSON.stringify(held) } })
   await startSession($)
   await w.clock.settle()
-  const ui = await band($, { ...BAND, maxRows: 4 })
-  expect(w.inner.at(-1)).toMatchObject({ maxRows: 3, imagePreviewRows: 1 })
-  expect(await ui.find({ key: 'chip:1' })).toBeDefined()
+  return w
+}
+
+/** What this mod drew in the band at each of `heights`: c the chip row, r the rule over it, i the card. */
+async function drawnAt ($: Engine, heights: number[], props: Partial<typeof BAND> = {}) {
+  const drawn: Record<number, string> = {}
+  for (const maxRows of heights) {
+    const ui = await band($, { ...BAND, ...props, maxRows })
+    const [chip, rule, image] = await Promise.all([ui.find({ key: 'chip:1' }), ui.find({ type: 'Text', text: /^── image-preview ─*$/ }), ui.find({ key: 'image-1' })])
+    drawn[maxRows] = `${chip ? 'c' : ''}${rule ? 'r' : ''}${image ? 'i' : ''}`
+    await ui.unmount()
+  }
+  return drawn
+}
+
+// The rows come from the band's maxRows and what the other mods hold, by the table in docs/band-rows.md.
+test('a band with no row draws nothing and hands the props down as it got them', { ...cells, plugins: sharers }, async ($, on) => {
+  const w = await sharing($, on, {})
+  expect(await drawnAt($, [0])).toEqual({ 0: '' })
+  expect(w.inner.at(-1)).toEqual({ ...BAND, maxRows: 0 })
 })
 
-test('a band slot with no row left draws nothing and hands the props down unchanged', cells, async ($, on) => {
+test('alone in the band the chip row takes a row and no rule, the props handed down as they came', { ...cells, plugins: sharers }, async ($, on) => {
+  const w = await sharing($, on, {})
+  expect(await drawnAt($, [1, 4, 20])).toEqual({ 1: 'c', 4: 'c', 20: 'c' })
+  expect(w.inner.at(-1)).toEqual({ ...BAND, maxRows: 20 })
+})
+
+test('next-steps keeps its row before the chips; the rule shows where its list or its line leaves one', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { steps: 3 })
+  // 2: the one line; 3-5: the line under its rule; 6 on: the list of 3, its rule and its close row.
+  expect(await drawnAt($, [1, 2, 3, 4, 5, 6, 7])).toEqual({ 1: '', 2: 'c', 3: 'c', 4: 'cr', 5: 'cr', 6: 'c', 7: 'cr' })
+})
+
+test('with the team there too, next-steps keeps a row for its line before it opens its list', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { steps: 3, team: 'on' })
+  // 2-3: the one line; 4-6: the line under its rule; 7 on: the list. The chips' rule where a row is
+  // left over the team's line: 5, 6 and 8.
+  expect(await drawnAt($, [1, 2, 3, 4, 5, 6, 7, 8])).toEqual({ 1: '', 2: 'c', 3: 'c', 4: 'c', 5: 'cr', 6: 'cr', 7: 'c', 8: 'cr' })
+})
+
+test('while Claude works next-steps shows nothing, and the chips keep their row', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { steps: 3 })
+  expect(await drawnAt($, [1, 4], { isWorking: true })).toEqual({ 1: 'c', 4: 'c' })
+})
+
+test('the coach\'s line gives the chips their row first; its rule comes before the chips\' rule', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { coachDraft: true, coachStage: 'idle' })
+  expect(await drawnAt($, [1, 2, 3, 4])).toEqual({ 1: 'c', 2: 'c', 3: 'c', 4: 'cr' })
+  // Working, the coach draws no line: the chips are alone.
+  expect(await drawnAt($, [4], { isWorking: true })).toEqual({ 4: 'c' })
+})
+
+test('the coach at work keeps its row before the chips, working or not, and leaves no row for a rule', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { coachStage: 'questions' })
+  expect(await drawnAt($, [1, 2, 20])).toEqual({ 1: '', 2: 'c', 20: 'c' })
+  expect(await drawnAt($, [1], { isWorking: true })).toEqual({ 1: '' })
+})
+
+test('while the coach is at work next-steps shows nothing, so the chips get the second row', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { steps: 3, coachStage: 'questions' })
+  expect(await drawnAt($, [1, 2])).toEqual({ 1: '', 2: 'c' })
+})
+
+test('the team gives the chips their row first, and the rule shows once its own line is left', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { team: 'on' })
+  expect(await drawnAt($, [1, 2, 3])).toEqual({ 1: 'c', 2: 'c', 3: 'cr' })
+})
+
+test('a team band turned off takes no row, and leaves the card its rows', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { team: 'off' })
+  await holding($)
+  expect(await drawnAt($, [3, 20])).toEqual({ 3: 'c', 20: 'ci' })
+})
+
+test('with next-steps, the coach\'s line and the team all there, the chips keep the second row and get their rule last', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { steps: 3, coachDraft: true, coachStage: 'idle', team: 'on' })
+  // 2: next-steps' line and the chips (the table's own example). 7: the line under next-steps' rule
+  // (2), the chips, the coach's line and its rule, the chips' rule and the team's line. 8-9: the list
+  // of 3 (5) leaves no row for the chips' rule, 10 does.
+  expect(await drawnAt($, [1, 2, 7, 8, 9, 10])).toEqual({ 1: '', 2: 'c', 7: 'cr', 8: 'c', 9: 'c', 10: 'cr' })
+})
+
+/** The band holding the card a chip opened: a screen too short to float it over the transcript. */
+async function holding ($: Engine) {
+  await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
+  const ui = await band($)
+  await point(ui, 'chip:1')
+  await ui.unmount()
+}
+
+test('a card the band holds is drawn where the rows left fit it, the chip row still where not', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, {})
+  await holding($)
+  // The 2x2 picture is one row of cells; with its border and caption, 4 rows in the 6 a card needs.
+  expect(await drawnAt($, [6, 7, 20])).toEqual({ 6: 'c', 7: 'ci', 20: 'ci' })
+})
+
+test('a card the band holds fits in what next-steps, the chips and the rule leave', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { steps: 3 })
+  await holding($)
+  // The list's 5 rows, the rule and the chips: 7, and the 6 the card needs.
+  expect(await drawnAt($, [12, 13])).toEqual({ 12: 'cr', 13: 'cri' })
+})
+
+test('beside the team the card fits in what the chips, the rule and the team\'s line leave', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { team: 'on' })
+  await holding($)
+  expect(await drawnAt($, [8, 9])).toEqual({ 8: 'cr', 9: 'cri' })
+})
+
+test('the coach at work may take every row but the chips\', so the band holds no card beside it', { ...cells, plugins: sharers }, async ($, on) => {
+  await sharing($, on, { coachStage: 'rewriting' })
+  await holding($)
+  expect(await drawnAt($, [20])).toEqual({ 20: 'c' })
+})
+
+/** The values the mod writes to `image-preview/cardRows`, for team-board: `now()` the last, 0 before any. */
+function cardRowsOf (on: On) {
+  const written: unknown[] = []
+  on('state.set', { plugin: 'image-preview', key: 'cardRows' }, ($, e, next) => {
+    written.push(e.value)
+    return next(e)
+  })
+  return { now: () => written.at(-1) ?? 0 }
+}
+
+test('the rows of the card the band holds are written for team-board as it opens, and 0 as it closes', { ...cells, plugins: sharers }, async ($, on) => {
+  const card = cardRowsOf(on)
+  await sharing($, on, { team: 'on' })
+  await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
+  const ui = await band($)
+  expect(card.now()).toBe(0)
+  await point(ui, 'chip:1')
+  expect(card.now()).toBe(4)
+  expect(await ui.find({ key: 'image-1' })).toBeDefined()
+  await point(ui, 'chip:1', 'leave')
+  expect(card.now()).toBe(0)
+  await point(ui, 'chip:1')
+  await $.prompt.submit({ text: '[Image #1]', wait: false, origin: { kind: 'composer' } })
+  expect(card.now()).toBe(0)
+})
+
+test('a card floating over the transcript takes none of the band\'s rows', cells, async ($, on) => {
   const w = world(on, { draft: '[Image #1]' })
+  const card = cardRowsOf(on)
   await startSession($)
   await w.clock.settle()
-  const ui = await band($, { ...BAND, maxRows: 0 })
-  expect(w.inner.at(-1)).toMatchObject({ maxRows: 0 })
-  expect(w.inner.at(-1)).not.toHaveProperty('imagePreviewRows')
-  expect(await ui.find({ key: 'chip:1' })).toBeUndefined()
+  await sent($, 'hello', { first: 0, last: 19, of: 20 })
+  const last = await reply($, 'a-1', { first: 0, last: 3, of: 4 })
+  await point(await band($), 'chip:1')
+  expect(await last.find({ key: 'float-1' })).toBeDefined()
+  expect(card.now()).toBe(0)
 })
 
-test('with no chip and no card the props go down unchanged', cells, async ($, on) => {
-  const w = world(on, { draft: 'just words' })
-  await startSession($)
-  await w.clock.settle()
-  await band($, { ...BAND, maxRows: 4 })
-  expect(w.inner.at(-1)).toMatchObject({ maxRows: 4 })
-  expect(w.inner.at(-1)).not.toHaveProperty('imagePreviewRows')
-})
-
-test('a card the band holds takes its rows too: the chip row and the card come off the slot', cells, async ($, on) => {
+test('the rows written follow the band while the card is open: none where it no longer fits, back where it does', cells, async ($, on) => {
   const w = world(on, { draft: '[Image #1]' })
+  const card = cardRowsOf(on)
   await startSession($)
   await w.clock.settle()
   await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
-  const ui = await band($, { ...BAND, maxRows: 20 })
-  await point(ui, 'chip:1')
-  // The 2x2 picture is one row of cells: a row, and its border and caption.
-  expect(await ui.find({ key: 'image-1' })).toMatchObject({ type: 'Raster', props: { rows: 1 } })
-  expect(w.inner.at(-1)).toMatchObject({ maxRows: 20 - 1 - 4, imagePreviewRows: 1 + 4 })
+  await point(await band($), 'chip:1')
+  expect(card.now()).toBe(4)
+  const short = await band($, { ...BAND, maxRows: 6 })
+  await w.clock.advance(500)
+  expect(card.now()).toBe(0)
+  expect(await short.find({ key: 'image-1' })).toBeUndefined()
+  await short.unmount()
+  const tall = await band($)
+  await w.clock.advance(500)
+  expect(card.now()).toBe(4)
+  expect(await tall.find({ key: 'image-1' })).toBeDefined()
 })
 
-test('a card that does not fit the rows the chips leave is not drawn, the chip row still is', cells, async ($, on) => {
+test('a card opened before its picture is read is written as its one line, then as the card once read', cells, async ($, on) => {
+  // The engine has not written the image's file yet: the mod waits for it.
+  const files: Record<string, number> = {}
+  const w = world(on, { files, draft: '[Image #1]' })
+  const card = cardRowsOf(on)
+  await startSession($)
+  await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
+  const ui = await band($)
+  await point(ui, 'chip:1')
+  const opened = card.now()
+  files['1.png'] = 300 * 1024
+  await w.clock.advance(1000)
+  expect([opened, card.now()]).toEqual([1, 4])
+  expect(await ui.find({ key: 'image-1' })).toBeDefined()
+})
+
+test('a card in a window of its own takes none of the band\'s rows', async ($, on) => {
   const w = world(on, { draft: '[Image #1]' })
+  const card = cardRowsOf(on)
   await startSession($)
   await w.clock.settle()
-  await reply($, 'a-1', { first: 0, last: 1, of: 2 }, { ...SCREEN, rows: 20 })
-  const ui = await band($, { ...BAND, maxRows: 5 })
-  await point(ui, 'chip:1')
-  expect(await ui.find({ key: 'image-1' })).toBeUndefined()
-  expect(await ui.find({ key: 'chip:1' })).toBeDefined()
-  expect(w.inner.at(-1)).toMatchObject({ maxRows: 4, imagePreviewRows: 1 })
+  await point(await band($), 'chip:1')
+  await w.clock.advance(100)
+  expect(w.windows).toHaveLength(1)
+  expect(card.now()).toBe(0)
 })
 
 test('a card writes every cell it covers, caption and all, so the transcript under it does not show through', cells, async ($, on) => {

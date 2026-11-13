@@ -22,6 +22,16 @@ declare module 'claude-code' {
       shown: Shown | null
       /** Whether a transcript row, by its `requestId`, holds the card: so only the rows it leaves and joins draw again. */
       hosting: StateFamily<boolean>
+      /**
+       * The band's rows the card it holds takes (border and caption included), 0 while it holds none:
+       * team-board draws in what the card leaves. Written when a card opens, moves or closes, and every
+       * half second while one is open; the band draws its card only within these rows.
+       */
+      cardRows: number
     }
+    /** Read only, to count the band's rows the other mods take: the fields read. Absent when the mod is not installed. */
+    'next-steps': { steps: { items: string[] } | null }
+    'prompt-coach': { band: { hasDraft: boolean }; flow: { stage: string } }
+    'team-board': { me: { state: string; question: string } | null; bandOff: boolean }
   }
 }

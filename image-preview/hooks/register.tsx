@@ -19,6 +19,17 @@ const draft = atom({ plugin: 'image-preview', key: 'draft' } as const, [] as num
 const pictures = atom({ plugin: 'image-preview', key: 'pictures' } as const, {} as Record<string, Picture>)
 const shown = atom({ plugin: 'image-preview', key: 'shown' } as const, null as Shown | null)
 const hosting = atom({ plugin: 'image-preview', key: 'hosting' } as const, false)
+// The band's rows the card it holds takes, 0 while it holds none: team-board draws in what the card
+// leaves. A value is written only off the drawing (a draw may not write), where the card opens,
+// closes or is looked at again; the band draws a card only within the rows written.
+const cardRows = atom({ plugin: 'image-preview', key: 'cardRows' } as const, 0)
+// Read only: what the other mods sharing the band hold, the rows they take counted from it (none of
+// them is installed: its default, nothing to count).
+const nextSteps = atom({ plugin: 'next-steps', key: 'steps' } as const, null as { items: string[] } | null)
+const coachBand = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false })
+const coachFlow = atom({ plugin: 'prompt-coach', key: 'flow' } as const, { stage: 'idle' } as { stage: string })
+const teamMe = atom({ plugin: 'team-board', key: 'me' } as const, null as { state: string; question: string } | null)
+const teamBandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
 
 const TOKEN = /\[Image #(\d+)\]/g
 const NOT_STORED = 'not stored in this session'
@@ -53,6 +64,46 @@ const WINDOW_LIFE = 120
 
 /** The ids of the `[Image #N]` placeholders in a text, each once, in order. */
 export const idsIn = (text: string) => [...new Set([...text.matchAll(TOKEN)].map(match => Number(match[1])))]
+
+/** What the other mods sharing the band hold: next-steps' suggestions, the coach's draft and stage, the team's beat. */
+type Sharers = { isWorking: boolean; steps: number; hasCoachDraft: boolean; isCoaching: boolean; hasTeam: boolean }
+
+/**
+ * The band's rows this mod takes, by the table every mod sharing it follows (docs/band-rows.md).
+ * From 2.1.323 each mod is asked for its row on its own, each with the whole band's maxRows: none
+ * hears what another took, so each counts the others' rows from what they hold, the same way.
+ */
+function bandRows (rows: number, hasChips: boolean, s: Sharers) {
+  // Working, next-steps shows no suggestion and the coach no line to refine with; while the coach
+  // is at work next-steps shows none either.
+  const isWaiting = s.hasCoachDraft && !s.isCoaching && !s.isWorking
+  const hasSteps = s.steps > 0 && !s.isWorking && !s.isCoaching
+  const has = { chips: hasChips ? 1 : 0, waiting: isWaiting ? 1 : 0, team: s.hasTeam ? 1 : 0 }
+  // With few rows, a row each in this order: the coach at work, next-steps, the chips, the coach's
+  // line, the team. One whose place in it is past the rows draws nothing.
+  let count = 0
+  const [coach, steps, chips, waiting, team] = [s.isCoaching, hasSteps, hasChips, isWaiting, s.hasTeam].map(is => (is && ++count <= rows ? 1 : 0)) as [number, number, number, number, number]
+  // The rows left, in order, each keeping a row for the chips, the coach's line and the team's line
+  // where they are there. The coach at work takes all but the chips and the team's line: its height
+  // is not shared, so all it may take is counted. next-steps its list where it fits, else the one
+  // line under its rule, else the one line. The rule over the coach's line, then this one over the
+  // chips. The team the rest.
+  const coaching = coach ? rows - chips - (team && rows >= 3 ? 1 : 0) : 0
+  const keep = has.chips + has.waiting + has.team
+  const list = !steps ? 0 : rows >= s.steps + 2 + keep ? s.steps + 2 : rows >= 2 + keep ? 2 : 1
+  const coachRule = waiting && (hasSteps || hasChips || s.hasTeam) && rows >= list + keep + 1 ? 1 : 0
+  const taken = coaching + list + chips + waiting + coachRule
+  const rule = chips && (s.isCoaching || hasSteps || isWaiting || s.hasTeam) && rows >= taken + 1 + has.team ? 1 : 0
+  // A card the band holds comes before the team, which keeps its one line and takes what the card
+  // leaves (it reads the card's rows from `cardRows`).
+  return { hasChips: chips === 1, hasRule: rule === 1, cardRows: Math.max(0, rows - taken - rule - has.team) }
+}
+
+/** What the other mods sharing the band hold now. */
+async function sharersOf ($: Engine, isWorking: boolean): Promise<Sharers> {
+  const [steps, coachDraft, flow, team, teamOff] = await Promise.all([read($, nextSteps), read($, coachBand), read($, coachFlow), read($, teamMe), read($, teamBandOff)])
+  return { isWorking, steps: steps?.items.length ?? 0, hasCoachDraft: coachDraft.hasDraft, isCoaching: flow.stage !== 'idle', hasTeam: team !== null && !teamOff }
+}
 
 const sameIds = (a: readonly number[], b: readonly number[] = []) => a.length === b.length && a.every((id, i) => id === b[i])
 
@@ -104,6 +155,8 @@ let seenAtLastLook = 0
 let moves = 0
 let movesShown = 0
 let screenRows = 40
+// The band as last drawn: what a card it is to hold is sized by where the card opens, off the drawing.
+let bandAt: { maxRows: number; bodyColumns: number; isWorking: boolean } | undefined
 let draftIds: number[] = []
 let hasShown = false
 let poll: { cancel: () => void } | undefined
@@ -389,6 +442,33 @@ function cardSize (all: Record<string, Picture>, id: number, bounds: Bounds) {
 }
 
 /**
+ * The card of image `id` the band can hold in the `room` rows the others leave: its bounds and the
+ * rows it takes, or none where it does not fit (a picture is worth at least MIN_CARD_ROWS).
+ */
+function bandCard (all: Record<string, Picture>, id: number, bodyColumns: number, room: number) {
+  const bounds = { columns: Math.max(8, Math.min(MAX_COLUMNS, bodyColumns)), rows: Math.min(MAX_ROWS, room) }
+  const size = cardSize(all, id, bounds)
+  return size.height <= bounds.rows && (size.rows === 0 || bounds.rows >= MIN_CARD_ROWS) ? { bounds, height: size.height } : undefined
+}
+
+/** Writes the band's rows the card `now` takes, sized by the band as last drawn: 0 where the band holds none. */
+async function recordCard ($: Engine, now: Shown | null) {
+  let height = 0
+  if (now && now.host === null && now.edge !== 'window' && bandAt) {
+    const room = bandRows(bandAt.maxRows, (await read($, draft)).length > 0, await sharersOf($, bandAt.isWorking))
+    height = bandCard(await read($, pictures), now.id, bandAt.bodyColumns, room.cardRows)?.height ?? 0
+  }
+  if ((await read($, cardRows)) !== height) await update($, cardRows, () => height)
+}
+
+/** Sizes the card the band holds again: the band, the others, or its picture once read, may change its rows. */
+function resizeCard ($: Engine) {
+  const run = changing.then(async () => recordCard($, await read($, shown)))
+  changing = run.catch(() => undefined)
+  return run
+}
+
+/**
  * The picture of image `id` in a bordered card, as large as the bounds allow, its caption under it.
  * It floats over the transcript, which shows through any cell it leaves unwritten: every line is
  * written to the card's width, spaces and all.
@@ -442,6 +522,7 @@ function change ($: Engine, next: (now: Shown | null) => Shown | null) {
   const run = changing.then(async () => {
     const last = await read($, shown)
     const to = next(last)
+    await recordCard($, to)
     movesShown = moves
     hasShown = to !== null
     if (sameShown(last, to)) return
@@ -659,7 +740,7 @@ export const register: Register = (on, options) => {
     if (e.isInteractive) {
       // A look that fails (the module unloading under it) waits for the next.
       poll = $.clock.every(POLL_MS, () => {
-        void $.prompt.read().then(box => track($, box.text)).then(() => settle($)).catch(() => undefined)
+        void $.prompt.read().then(box => track($, box.text)).then(() => settle($)).then(() => hasShown ? resizeCard($) : undefined).catch(() => undefined)
       })
     }
     return result
@@ -761,32 +842,35 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Off fullscreen the terminal reports no pointer: nothing could be hovered.
     if (e.surface !== 'terminal' || e.props.hasSurvey || e.viewport?.isFullscreen === false) return next(e)
+    bandAt = { maxRows: e.props.maxRows, bodyColumns: e.props.bodyColumns, isWorking: e.props.isWorking }
     const [ids, now] = await Promise.all([read($, draft), read($, shown)])
     const inBand = now && now.host === null && now.edge !== 'window' ? now.id : undefined
     if (ids.length === 0 && inBand === undefined) return next(e)
     if (e.viewport) screenRows = e.viewport.rows
     if (e.props.maxRows < 1) return next(e)
 
-    // The rows this band takes come off the slot before the mods inside it draw: the chip row, and
-    // the card where it fits what the chips leave (a picture is worth at least MIN_CARD_ROWS).
+    // The rows this band takes are counted from maxRows and what the other mods hold, never handed
+    // down: on 2.1.323 a handed-down prop reaches no one, and on 2.1.322 the mods inside count the
+    // same way from the same maxRows. The chip row, the rule over it, and the card where it fits the
+    // rows the others leave and the rows written for team-board in `cardRows` (till they are written
+    // again the card waits, rather than overrun the team).
+    const room = bandRows(e.props.maxRows, ids.length > 0, await sharersOf($, e.props.isWorking))
     const ui = $.ui.resolve(e)
     const { Box, Client, Text } = ui
-    const chipRows = ids.length > 0 ? 1 : 0
-    const bounds = {
-      columns: Math.max(8, Math.min(MAX_COLUMNS, e.props.bodyColumns)),
-      rows: Math.min(MAX_ROWS, e.props.maxRows - chipRows)
-    }
-    const all = inBand !== undefined ? await read($, pictures) : {}
-    const size = inBand !== undefined ? cardSize(all, inBand, bounds) : undefined
-    const hasCard = size !== undefined && size.height <= bounds.rows && (size.rows === 0 || bounds.rows >= MIN_CARD_ROWS)
-    const own = chipRows + (hasCard ? size.height : 0)
-    if (own === 0) return next(e)
-    const below: RenderElement = await next({ ...e, props: { ...e.props, maxRows: e.props.maxRows - own, imagePreviewRows: own } as typeof e.props })
+    const [all, written]: [Record<string, Picture>, number] = inBand !== undefined ? await Promise.all([read($, pictures), read($, cardRows)]) : [{}, 0]
+    const held = inBand !== undefined ? bandCard(all, inBand, e.props.bodyColumns, room.cardRows) : undefined
+    const hasCard = held !== undefined && held.height <= written
+    if (!room.hasChips && !hasCard) return next(e)
+    // On 2.1.322 what is below is the mods inside this one; on 2.1.323 it is the engine's own for this row.
+    const below: RenderElement = await next(e)
+    // Named as next-steps and prompt-coach name theirs.
+    const head = '── image-preview '
     return (
       <Box flexDirection="column">
         {below}
-        {hasCard && card(ui, all, inBand!, bounds)}
-        {ids.length > 0 && (
+        {room.hasRule && <Text dimColor wrap="truncate-end">{head + '─'.repeat(Math.max(0, e.props.bodyColumns - head.length))}</Text>}
+        {hasCard && card(ui, all, inBand!, held!.bounds)}
+        {room.hasChips && (
           <Box flexDirection="row" columnGap={1} height={1} overflow="hidden" paddingX={1}>
             {ids.map(id => <Client key={`chip:${id}`} module="./chip.tsx" props={{ label: `[Image #${id}]` }} />)}
             <Text dimColor wrap="truncate-end">hover to preview · click to open</Text>
