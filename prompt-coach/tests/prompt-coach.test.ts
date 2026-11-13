@@ -294,6 +294,21 @@ describe('prompt-coach 흐름', () => {
     await full.unmount()
   })
 
+  // 엔진(2.1.322·2.1.323)은 붙여넣은 [Image #N] 뒤 '다음 키 앞 띄어쓰기' 를 기억하고, 플러그인이 입력창을 비워도 지우지 않는다.
+  // 그래서 질문 중 처음 친 숫자가 ' 1' 로 온다. 엔진의 기억과 숫자 → 단추 누르기는 테스트 킷에 없어, 들어오는 edit 와 남는 글만 본다
+  test('질문 중 빈 입력창에 붙어 온 공백(이미지 붙여넣기 뒤 엔진이 붙임)을 떼어 숫자 한 글자로 남긴다. 다른 때는 그대로', async ($, on) => {
+    const { s, type, press } = await setup($, on)
+    const edit = (text: string, inputText: string) => ($ as any).prompt.edit({ origin: { kind: 'composer' }, text, cursor: text.length, start: text.length, end: text.length, inputText })
+    await type(DRAFT + ' [Image #1]')
+    expect((await edit('', ' 1')).text).toBe(' 1') // 쉬는 동안은 그대로
+    await press('coach-refine')
+    expect(s.box).toBe('')
+    expect((await edit('', ' 1')).text).toBe('1')
+    expect((await edit('', ' >새 요청')).text).toBe('>새 요청')
+    expect((await edit('', ' ')).text).toBe(' ') // 공백만 친 것은 그대로
+    expect((await edit('a', ' 1')).text).toBe('a 1') // 글이 있으면 그대로
+  })
+
   test('선택지가 남은 줄에 접혀 넘치면 한 줄로 자르고, 띠 자리가 1줄이면 질문까지 한 줄, 0줄이면 그리지 않는다', async ($, on) => {
     const { s, coach } = await setup($, on)
     const long = ['로그인 페이지의 모든 오류', '비밀번호 관련 오류만', '계정·인증 관련 오류만']

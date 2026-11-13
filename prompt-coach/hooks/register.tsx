@@ -134,6 +134,12 @@ export const register: Register = on => {
 
   // 초안이 있는지만 따라간다. 바뀔 때만 써서 띠를 다시 그리게 한다.
   on('prompt.edit', async ($, e, next) => {
+    // 엔진 우회 (2.1.322·2.1.323 실측): 붙여넣은 [Image #N] 으로 끝난 초안이면 엔진이 '다음 키 앞에 띄어쓰기' 를 기억한다.
+    // 그 기억은 키를 칠 때만 지워지고 $.prompt.fill 로 비울 때는 남아서, 질문 중 처음 친 숫자가 ' 1' 로 들어온다.
+    // 엔진은 빈 입력창에 숫자 한 글자가 들어왔을 때만 띠 단추를 누르므로 숫자가 글로 남는다. 그 붙은 공백만 뗀다
+    if (e.text === '' && /^ \S/.test(e.inputText) && (await read($, flow)).stage === 'questions') {
+      e = { ...e, inputText: e.inputText.slice(1) }
+    }
     const r = await next(e)
     const hasDraft = r.text.trim() !== ''
     if ((await read($, band)).hasDraft !== hasDraft) await update($, band, b => ({ ...b, hasDraft }))
