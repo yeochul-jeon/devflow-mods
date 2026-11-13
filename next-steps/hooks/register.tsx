@@ -17,6 +17,9 @@ const imageDraft = atom({ plugin: 'image-preview', key: 'draft' } as const, [] a
 // 읽기만 한다. prompt-coach 의 입력창 초안 유무와 다듬기 단계. prompt-coach 가 없으면 값이 없다
 const coachBand = atom({ plugin: 'prompt-coach', key: 'band' } as const, { hasDraft: false })
 const coachFlow = atom({ plugin: 'prompt-coach', key: 'flow' } as const, { stage: 'idle' })
+// 읽기만 한다. team-board 가 팀 창을 그릴 수 있는지: 이 세션이 팀에 올라 있고(me) /board band off 가 아님. team-board 가 없으면 값이 없다
+const teamMe = atom({ plugin: 'team-board', key: 'me' } as const, null as object | null)
+const teamBandOff = atom({ plugin: 'team-board', key: 'bandOff' } as const, false)
 
 let off = false
 /** 제안을 보여도 되는 턴. 전송이나 새 턴이 오면 바뀌어, 늦게 도착한 제안을 버린다. */
@@ -94,10 +97,11 @@ export const register: Register = on => {
     // 모두 띠 전체의 maxRows 를 받아, next 로 줄 수를 넘겨도 다른 mod 에 닿지 않는다. 그래서 next 에는 받은 e 를 그대로 넘긴다.
     // prompt-coach 가 다듬는 중이면 그 화면이 줄을 쓰고 숫자 키도 쓴다. 같은 숫자를 두 mod 가 그리면 둘 다 눌리지 않으므로 그리지 않는다
     if ((await read($, coachFlow)).stage !== 'idle') return next(e)
-    // 칩 줄과 다듬기 줄에 1줄씩 남기고도 자리가 되면 펼친다(가로줄 + 제안 + 닫기 줄 = items + 2 줄). 안 되면 한 줄에 모은다.
-    // 가로줄 있는 한 줄 모양(2줄)도 그 줄들을 남길 수 있을 때만. 1줄뿐이면 이 띠가 칩 줄·다듬기 줄보다 먼저 남는다
+    // 칩 줄·다듬기 줄·팀 한 줄에 1줄씩 남기고도 자리가 되면 펼친다(가로줄 + 제안 + 닫기 줄 = items + 2 줄). 안 되면 한 줄에 모은다.
+    // 가로줄 있는 한 줄 모양(2줄)도 그 줄들을 남길 수 있을 때만. 1줄뿐이면 이 띠가 칩 줄·다듬기 줄·팀 줄보다 먼저 남는다
     const hasChips = e.viewport?.isFullscreen !== false && (await read($, imageDraft)).length > 0
-    const spare = (hasChips ? 1 : 0) + ((await read($, coachBand)).hasDraft ? 1 : 0)
+    const hasTeam = !!(await read($, teamMe)) && !(await read($, teamBandOff))
+    const spare = (hasChips ? 1 : 0) + ((await read($, coachBand)).hasDraft ? 1 : 0) + (hasTeam ? 1 : 0)
     const oneRow = e.props.maxRows < s.items.length + 2 + spare
     const ruled = e.props.maxRows >= 2 + spare
     const rest = await next(e)

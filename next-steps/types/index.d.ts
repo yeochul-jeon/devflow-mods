@@ -11,5 +11,7 @@ declare module 'claude-code' {
     'prompt-coach': { pending: string | null; band: { hasDraft: boolean }; flow: { stage: string } }
     /** 읽기만 한다. image-preview 가 입력창에 붙은 이미지 번호. image-preview 가 없으면 오지 않는다 */
     'image-preview': { draft: number[] }
+    /** 읽기만 한다. me: 이 세션이 팀에 올라 있으면 값이 있다. bandOff: /board band off. team-board 가 없으면 오지 않는다 */
+    'team-board': { me: object | null; bandOff: boolean }
   }
 }

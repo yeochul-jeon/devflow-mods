@@ -214,6 +214,16 @@ describe('next-steps', () => {
       })
     },
   }
+  const TEAM_BOARD = {
+    name: 'team-board',
+    register(on: any) {
+      on('tool.call', { tool: 'SetTeam' }, async ($: any, e: any) => {
+        await $.state.set({ plugin: 'team-board', key: 'me' }, e.me)
+        await $.state.set({ plugin: 'team-board', key: 'bandOff' }, e.bandOff)
+        return { result: 'ok' }
+      })
+    },
+  }
   const COACH_STATE = {
     name: 'prompt-coach',
     register(on: any) {
@@ -225,7 +235,7 @@ describe('next-steps', () => {
     },
   }
 
-  test('줄 수는 maxRows 와 공유 상태로 정한다: 칩 줄·다듬기 줄에 1줄씩 남기고 펼치고, 모자라면 한 줄, 1줄뿐이면 이 띠가 남는다. prompt-coach 가 다듬는 중이면 그리지 않는다', { plugins: [IMAGE_PREVIEW, COACH_STATE] }, async ($, on) => {
+  test('줄 수는 maxRows 와 공유 상태로 정한다: 칩 줄·다듬기 줄·팀 한 줄에 1줄씩 남기고 펼치고, 모자라면 한 줄, 1줄뿐이면 이 띠가 남는다. prompt-coach 가 다듬는 중이면 그리지 않는다', { plugins: [IMAGE_PREVIEW, COACH_STATE, TEAM_BOARD] }, async ($, on) => {
     mock.store(on)
     on('session.start', ($, e) => ({ cwd: e.cwd }))
     on('command.register', ($, e: any) => ({ value: { command: e.name } }))
@@ -275,6 +285,17 @@ describe('next-steps', () => {
     await coach(false)
     expect(await shapeAt(5)).toBe('open')
     await $.tool.call({ tool: 'SetImages', draft: [] } as any)
+
+    // 팀 창에도 한 줄을 남긴다. /board band off 면 팀 창이 없다
+    await $.tool.call({ tool: 'SetTeam', me: { state: 'idle', question: '' }, bandOff: false } as any)
+    expect(await shapeAt(5)).toBe('open')
+    expect(await shapeAt(4)).toBe('ruled')
+    expect(await shapeAt(3)).toBe('ruled')
+    expect(await shapeAt(2)).toBe('row')
+    await $.tool.call({ tool: 'SetTeam', me: { state: 'idle', question: '' }, bandOff: true } as any)
+    expect(await shapeAt(4)).toBe('open')
+    await $.tool.call({ tool: 'SetTeam', me: null, bandOff: false } as any)
+    expect(await shapeAt(4)).toBe('open')
 
     // prompt-coach 가 다듬는 중이면 그 화면이 줄과 숫자 키를 쓴다
     for (const stage of ['asking', 'questions', 'rewriting', 'done']) {
