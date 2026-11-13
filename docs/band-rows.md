@@ -40,7 +40,7 @@ team-board, next-steps, prompt-coach, image-preview 가 입력창 위 띠를 함
 
 | 순서 | 쓰는 것 | 줄 수 | 조건 |
 |---|---|---|---|
-| 1 | prompt-coach 진행 중 화면 | 모양에 따라(질문 모양은 `questionShape`) | B 에서 칩 줄(I)과 팀 한 줄(T, B ≥ 3 일 때)을 뺀 줄 안에서 |
+| 1 | prompt-coach 진행 중 화면 | 모양에 따라(질문 모양은 `questionShape`) | B 에서 칩 줄(I, B ≥ 2 일 때)과 팀 한 줄(T, B ≥ 3 일 때)을 뺀 줄 안에서 |
 | 2 | next-steps 펼친 목록 | n + 2 (가로줄 + 제안 n + 닫기 줄) | B ≥ (n + 2) + 칩 줄 + 다듬기 줄 + 팀 한 줄. 아니면 가로줄 있는 한 줄(2줄, B ≥ 2 + 칩 줄 + 다듬기 줄 + 팀 한 줄) 또는 한 줄(1줄) |
 | 3 | prompt-coach 다듬기 줄 위 가로줄 | 1 | 다른 참여자(S, I, T)가 있고, B ≥ next-steps 줄 + 칩 줄 + 다듬기 줄 + 1 + 팀 한 줄 |
 | 4 | image-preview 칩 줄 위 구분 줄 | 1 | 다른 참여자가 있고, B ≥ 위 3번까지의 합 + 1 + 팀 한 줄 |

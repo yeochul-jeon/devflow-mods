@@ -391,35 +391,32 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const f = await read($, flow)
     const b = await read($, band)
-    // 쉬는 줄을 그리면 그 1줄을 떼고 안쪽 mod 에 넘긴다. 안 떼면 이 mod 가 바깥일 때 안쪽 띠와 합쳐 넘친다.
-    // next-steps 가 안쪽에 있고 자리가 4줄(가로줄·제안 한 줄·팀 한 줄·쉬는 줄)보다 적으면 쉬는 줄을 빼 제안을 남긴다. next-steps 가 바깥이면 제 줄을 이미 뗐다
-    const stepItems = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined ? ((await read($, nextSteps))?.items.length ?? 0) : 0
-    const stepsInside = stepItems > 0
-    const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepsInside ? 4 : 1)
-    const q = !e.props.hasSurvey && f.stage === 'questions' && e.props.maxRows >= 1 ? f.questions[f.answers.length] : undefined
-    // team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 안 남기면 질문이 줄을 다 쓰는 높이에서만 팀 줄이 사라진다. 바깥이면 teamRows 로 알려 오고 이미 뗐다. 3줄보다 적으면 team-board 가 양보한다. /board band off 면 그릴 팀 줄이 없다
-    const teamInside = (e.props as { teamRows?: number }).teamRows === undefined && e.props.maxRows >= 3 && !!(await read($, teamMe)) && !(await read($, teamBandOff))
-    const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows - (teamInside ? 1 : 0)) : null
-    // 질문도 그릴 줄을 떼고 넘긴다. 이 mod 가 바깥이면 안쪽 team-board 한 줄만큼 넘쳐 선택지가 "↓ n more" 아래로 숨는다. team-board 는 coachRows 를 보고 받은 줄 안에서 그린다
-    // image-preview 칩 줄과 쉬는 줄이 붙어 구분이 안 된다. 칩이 바깥이면 이 mod 출력 바로 아래라 쉬는 줄 아래에 빈 줄 1줄을 둔다. 안쪽 팀 줄이 먼저 자리를 받고도 한 줄이 남을 때만 둔다
-    const imageRows = (e.props as { imagePreviewRows?: number }).imagePreviewRows
-    const chipsInside = imageRows === undefined && e.viewport?.isFullscreen !== false && !e.props.hasSurvey && (await read($, imageDraft)).length > 0
-    const chipsOuter = (imageRows ?? 0) > 0
-    // 안쪽 띠(next-steps 목록, 칩 줄)는 쉬는 줄 바로 위에 온다. 줄이 남으면 그 사이에 가로줄 1줄을 둔다. next-steps 가 펼친 목록(가로줄 + 제안 + 닫기 줄 + 여유 1줄 = 제안 수 + 3)을 지킬 때만 둔다. 모자라면 목록이 한 줄로 접힌다
-    const ruleAbove = isIdleLine && (stepsInside || chipsInside) && e.props.maxRows - 2 >= (stepsInside ? stepItems + 3 : 0) + (chipsInside ? 1 : 0) + (teamInside ? 1 : 0)
-    // 구분에 쓰는 줄은 1줄까지다. 가로줄을 두면 바깥 칩 줄과의 빈 줄은 뺀다
-    const gap = isIdleLine && !ruleAbove && chipsOuter && e.props.maxRows - 2 >= (teamInside ? 1 : 0)
-    const inward = isIdleLine ? { maxRows: e.props.maxRows - (ruleAbove || gap ? 2 : 1) } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
-    const rest = await next(inward ? { ...e, props: { ...e.props, ...inward } as typeof e.props } : e)
+    // 줄 수는 받은 maxRows 와 공유 상태만으로 정한다 (docs/band-rows.md). Claude Code 2.1.323 부터 mod 마다 따로 불리고
+    // 모두 띠 전체의 maxRows 를 받아, next 로 줄 수를 넘겨도 다른 mod 에 닿지 않는다. 그래서 next 에는 받은 e 를 그대로 넘긴다.
+    // 다른 띠: next-steps 제안(작업 중에는 없다), image-preview 칩 줄(전체 화면에서만), team-board 팀 창(/board band off 면 없다)
+    const stepItems = e.props.isWorking ? 0 : ((await read($, nextSteps))?.items.length ?? 0)
+    const chips = e.viewport?.isFullscreen !== false && (await read($, imageDraft)).length > 0 ? 1 : 0
+    const hasTeam = !!(await read($, teamMe)) && !(await read($, teamBandOff))
+    // 쉬는 줄: 줄이 모자라면 next-steps 한 줄과 칩 줄이 먼저 남는다. 그 줄들을 세고도 1줄이 있을 때만 그린다
+    const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepItems > 0 ? 1 : 0) + chips + 1
+    // next-steps 가 같은 입력으로 고르는 줄 수: 칩 줄·쉬는 줄·팀 한 줄을 남기고 펼친 목록(제안 수 + 2), 가로줄 있는 한 줄(2), 한 줄(1)
+    const stepRows = stepItems === 0 ? 0 : e.props.maxRows >= stepItems + 2 + chips + 1 + (hasTeam ? 1 : 0) ? stepItems + 2 : e.props.maxRows >= 2 + chips + 1 + (hasTeam ? 1 : 0) ? 2 : 1
+    // 쉬는 줄 위 가로줄: 다른 띠가 있고, 그 띠들(팀 창은 한 줄)과 쉬는 줄을 세고도 1줄이 남을 때. next-steps 가 목록을 펼칠지 먼저 정하고 남은 줄로만 둔다
+    const ruleAbove = isIdleLine && (stepItems > 0 || chips > 0 || hasTeam) && e.props.maxRows >= stepRows + chips + 1 + 1 + (hasTeam ? 1 : 0)
+    // 다듬는 중(질문 만들기·질문·다시 쓰기·넣음)에는 칩 줄과 팀 한 줄을 남기고 나머지를 쓴다. 1줄뿐이면 이 화면이 칩 줄보다 먼저 남고, 3줄보다 적으면 team-board 가 양보한다
+    const rows = Math.max(0, e.props.maxRows - (e.props.maxRows >= 2 ? chips : 0) - (hasTeam && e.props.maxRows >= 3 ? 1 : 0))
+    const q = !e.props.hasSurvey && f.stage === 'questions' && rows >= 1 ? f.questions[f.answers.length] : undefined
+    const shape = q ? questionShape(q, e.props.bodyColumns, rows) : null
+    const rest = await next(e)
     if (e.props.hasSurvey) return rest
-    // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
-    if (e.props.maxRows < 1) return rest
+    // 쓸 줄이 없으면 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
+    if (rows < 1) return rest
     const before = await read($, original)
     const width = e.props.bodyColumns
     const { Box, Text, Button } = $.ui.resolve(e)
     // 바로 위 대화 기록이나 다른 mod 띠와 나눈다. 빈 줄 하나와 굵은 회색 줄로 위 메시지와 띄운다 (줄이 모자라면 빈 줄은 뺀다). 오른쪽 끝은 지금 단계
     const isOn = await read($, auto)
-    const head = (status = '', gap = e.props.maxRows >= 3) => (
+    const head = (status = '', gap = rows >= 3) => (
       <Box marginTop={gap ? 1 : 0}>
         <Text color="gray" wrap="truncate-end">{rule(width, status || (isOn ? '자동' : ''))}</Text>
       </Box>
@@ -442,7 +439,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {rest}
-          {e.props.maxRows < 2 ? null : head()}
+          {rows < 2 ? null : head()}
           <Box key="coach-busy-line" flexDirection="row" columnGap={2} paddingX={1}>
             <Box flexShrink={0}><Text backgroundColor={BUSY_COLOR} color="inverseText" bold>{` ${spin} ${status} `}</Text></Box>
             <Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text>
@@ -458,7 +455,7 @@ export const register: Register = on => {
       const { inner, optRows, tight, gaps } = shape
       // 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
       if (shape.isCut) {
-        const isLine = e.props.maxRows < 2
+        const isLine = rows < 2
         const chip = <Text backgroundColor="yellow" color="black" bold>{` ${i + 1} `}</Text>
         const count = q.options.length
         const free = inner - (cells('건너뜀') + 3 + cells('바로') + 3 + cells('취소')) - (count + 2 + (isLine ? 2 : 0))
@@ -523,11 +520,11 @@ export const register: Register = on => {
         </Text>
       )
       // 3줄을 못 받으면 안내를 빼고 되돌리기와 보탠 것을 한 줄에 둔다. 1줄이면 머리줄도 뺀다
-      if (e.props.maxRows < 3) {
+      if (rows < 3) {
         return (
           <Box flexDirection="column">
             {rest}
-            {e.props.maxRows < 2 ? null : head('입력창에 넣음')}
+            {rows < 2 ? null : head('입력창에 넣음')}
             <Box flexDirection="row" columnGap={1} paddingX={1}>
               {undoButton}
               {addedLine}
@@ -538,7 +535,7 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column">
           {rest}
-          {head('입력창에 넣음', e.props.maxRows >= 4)}
+          {head('입력창에 넣음', rows >= 4)}
           <Box paddingX={1}>{addedLine}</Box>
           <Box flexDirection="row" columnGap={1} paddingX={1}>
             {undoButton}
@@ -565,7 +562,7 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {rest}
         {ruleAbove ? head('', false) : null}
-        {gap ? <Box flexDirection="column" marginBottom={1}>{idleLine}</Box> : idleLine}
+        {idleLine}
       </Box>
     )
   })

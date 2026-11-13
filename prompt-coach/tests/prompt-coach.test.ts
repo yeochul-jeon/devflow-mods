@@ -151,7 +151,7 @@ describe('prompt-coach 흐름', () => {
   const setup = async ($: any, on: any) => {
     mock.store(on)
     const clock = mock.clock(on, { now: 1_800_000_000_000 })
-    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], innerRows: -1, innerCoachRows: undefined as number | undefined, qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
+    const s = { box: '', fills: [] as string[], toasts: [] as string[], asked: [] as any[], qReply: Q_REPLY as any, rReply: R_REPLY as any, hold: false, release: () => {} }
     on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
     on('command.register', ($: any, e: any) => ({ value: { command: e.name } }))
     on('model.complete', ($: any, e: any) => {
@@ -168,7 +168,7 @@ describe('prompt-coach 흐름', () => {
     on('prompt.change', ($: any, e: any) => ({ text: e.text }))
     on('prompt.submit', ($: any, e: any) => ({ text: e.text }))
     on('ui.toast', ($: any, e: any) => { s.toasts.push(e.text); return { value: undefined } })
-    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => { s.innerRows = e.props.maxRows; s.innerCoachRows = e.props.coachRows; return $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }) })
+    on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'OTHER-MOD-BAND' }))
     on('command.run', () => ({ text: 'core' })) // /help 같은 다른 명령
     on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
     on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -183,7 +183,35 @@ describe('prompt-coach 흐름', () => {
     const press = async (key: string) => { const band = await mount(); await band.press({ key }); await band.unmount(); await settle() }
     const shows = async (key: string) => { const band = await mount(); const found = await band.find({ key }); await band.unmount(); return found !== undefined }
     const text = async (re: RegExp, cols = 120) => { const band = await mount(cols); const found = await band.find({ type: 'Text', text: re }); await band.unmount(); return found !== undefined }
-    return { s, clock, settle, type, run, coach, press, shows, text, mount }
+    // prompt-coach 가 그린 Box 의 자식. 첫째는 늘 next 의 답이다. 2.1.322 까지는 이 Box 가 맨 바깥이고 첫째가 다른 mod 띠(OTHER-MOD-BAND),
+    // 2.1.323 부터는 엔진이 mod 마다 따로 그려 part 로 묶어 쌓아 그 안에 있고 첫째는 엔진 것({"type":"engine"})이다. 아무것도 안 그리면 []
+    const own = async (maxRows: number, props: any = {}, viewport?: any) => {
+      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...props }, viewport } as any)
+      const root = (await band.find({ type: 'Box' })) as any
+      await band.unmount()
+      const box = root?.children.find((c: any) => c.part?.plugin === 'prompt-coach') ?? (root?.children[0]?.part?.plugin === 'test' ? root : undefined)
+      return (box?.type === 'Box' ? box.children : []) as any[]
+    }
+    // 쉬는 동안 그린 것: 쉬는 줄, 그 위 가로줄, 쓴 줄 수(쉬는 줄과 가로줄은 1줄씩이라 자식 수 + 빈 줄)
+    const idleAt = async (maxRows: number, viewport?: any) => {
+      const k = (await own(maxRows, {}, viewport)).slice(1)
+      const rows = k.reduce((n, c) => n + 1 + (c.props?.marginTop ?? 0) + (c.props?.marginBottom ?? 0), 0)
+      return { line: k.some(c => JSON.stringify(c).includes('coach-refine')), rule: k.some(c => JSON.stringify(c).includes('━━ prompt-coach')), rows }
+    }
+    // 질문 단계 모양: line(질문까지 한 줄) · cut(선택지를 한 줄로 자름) · clipped(머리줄 없이 질문을 한 줄로 자름) · tight(질문과 선택지만)
+    // · full(빈 줄·머리줄·초안·안내까지) · full+1·full+2(질문 위, 안내 위에 빈 줄을 더 둔다) · none
+    const askAt = async (maxRows: number, props: any = {}) => {
+      const k = (await own(maxRows, props)).slice(1)
+      const has = (re: RegExp) => k.find(c => re.test(JSON.stringify(c)))
+      if (k.length === 0) return 'none'
+      if (has(/coach-line/)) return 'line'
+      if (has(/"label":"건너뜀"/)) return 'cut'
+      const ask = has(/"children":\[" \d+ "\]/)
+      if (!has(/━━ prompt-coach/)) return /…"\]/.test(JSON.stringify(ask)) ? 'clipped' : 'tight'
+      const gaps = (ask.props.marginTop ?? 0) + (has(/이 질문의 답/)?.props.marginTop ?? 0)
+      return gaps === 0 ? 'full' : `full+${gaps}`
+    }
+    return { s, clock, settle, type, run, coach, press, shows, text, mount, own, idleAt, askAt }
   }
 
   test('/coach <초안>: 질문 → 하나 답하고 하나 건너뛰면, 답한 것만 넘겨 다듬고 보탠 것 줄을 보인다', async ($, on) => {
@@ -209,27 +237,23 @@ describe('prompt-coach 흐름', () => {
     expect(status.text).toContain('1,000')
   })
   test('[다듬기]: 입력창의 초안을 가져가 입력창을 비우고, [바로 다듬기]는 남은 질문을 건너뛴다. 다른 mod 의 띠는 그대로', async ($, on) => {
-    const { s, type, press, shows, text, mount } = await setup($, on)
+    const { s, type, press, shows, text, own } = await setup($, on)
     expect(await shows('coach-refine')).toBe(false) // 빈 입력창: 버튼 없음
     await type(DRAFT)
     expect(await text(/OTHER-MOD-BAND/)).toBe(true)
-    // 다른 mod 띠가 먼저(위), 이 mod 는 그 아래. 쉬는 동안은 머리줄 없이 한 줄
-    const kids = async (maxRows = 10) => {
-      const band = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
-      const k = ((await band.find({ type: 'Box' })) as any).children
-      await band.unmount()
-      return k
-    }
+    // next 의 답이 먼저(위), 이 mod 는 그 아래. 쉬는 동안은 머리줄 없이 한 줄
+    // next 의 답은 2.1.322 까지 다른 mod 띠, 2.1.323 부터는 엔진 것이다(다른 mod 띠는 엔진이 따로 쌓는다)
+    const kids = (maxRows = 10) => own(maxRows)
     const idle = await kids()
     expect(idle.length).toBe(2)
-    expect(JSON.stringify(idle[0])).toContain('OTHER-MOD-BAND')
+    expect(JSON.stringify(idle[0])).toMatch(/OTHER-MOD-BAND|"type":"engine"/)
     expect(idle[1].props.height).toBe(1)
     expect(await text(/^━━ prompt-coach/)).toBe(false)
     expect(await text(/─{120}/)).toBe(false) // 끝줄 없음
     // 단계 안: 다른 mod 띠 → 머리줄(위 띠와 띄우는 빈 줄, 줄이 모자라면 뺀다) → 내용. 끝줄 없음
     const order = async (maxRows: number) => {
       const k = await kids(maxRows)
-      return { restFirst: JSON.stringify(k[0]).includes('OTHER-MOD-BAND'), gap: k[1].props.marginTop, foot: JSON.stringify(k).includes('─'.repeat(120)) }
+      return { restFirst: /OTHER-MOD-BAND|"type":"engine"/.test(JSON.stringify(k[0])), gap: k[1].props.marginTop, foot: JSON.stringify(k).includes('─'.repeat(120)) }
     }
     await press('coach-refine')
     expect(s.box).toBe('') // 숫자 키로 답하도록 비운다
@@ -327,15 +351,13 @@ describe('prompt-coach 흐름', () => {
     expect(await zero()).toBeUndefined()
   })
 
-  test('쉬는 줄: 그릴 때 1줄을 떼고 안쪽 mod 에 넘긴다. 초안이 없으면 그대로', async ($, on) => {
-    const { s, type, mount } = await setup($, on)
-    const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } }); const shown = (await b.find({ key: 'coach-refine' })) !== undefined; await b.unmount(); return { shown, inner: s.innerRows } }
-    expect(await at(5)).toEqual({ shown: false, inner: 5 })
+  test('쉬는 줄: 초안이 있으면 띠 자리가 1줄이어도 한 줄만 그리고, 0줄이거나 초안이 없으면 그리지 않는다', async ($, on) => {
+    const { type, idleAt } = await setup($, on)
+    expect(await idleAt(5)).toEqual({ line: false, rule: false, rows: 0 })
     await type(DRAFT)
-    expect(await at(5)).toEqual({ shown: true, inner: 4 })
-    expect(await at(1)).toEqual({ shown: true, inner: 0 })
-    expect(await at(0)).toEqual({ shown: false, inner: 0 })
-    await (await mount()).unmount()
+    expect(await idleAt(5)).toEqual({ line: true, rule: false, rows: 1 }) // 다른 띠가 없으면 가로줄도 없다
+    expect(await idleAt(1)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(0)).toEqual({ line: false, rule: false, rows: 0 })
   })
 
   const NEXT_STEPS = {
@@ -348,31 +370,32 @@ describe('prompt-coach 흐름', () => {
     },
   }
 
-  test('제안 목록이 안쪽에 있고 자리가 4줄보다 적으면 [다듬기]를 빼 제안을 남긴다. next-steps 가 바깥이면 뺄 필요 없다', { plugins: [NEXT_STEPS] }, async ($, on) => {
-    const { s, type } = await setup($, on)
+  test('제안이 있으면 next-steps 한 줄이 먼저 남는다: 2줄부터 [다듬기]를 그리고 1줄이면 뺀다. 제안이 없으면 1줄이어도 그린다', { plugins: [NEXT_STEPS] }, async ($, on) => {
+    const { type, idleAt } = await setup($, on)
     await type(DRAFT)
     await $.tool.call({ tool: 'SetSteps', steps: { turnId: 't', items: ['a', 'b'] } } as any)
-    const at = async (maxRows: number, extra = {}) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } }); const shown = (await b.find({ key: 'coach-refine' })) !== undefined; await b.unmount(); return { shown, inner: s.innerRows } }
-    expect(await at(3)).toEqual({ shown: false, inner: 3 })
-    expect(await at(1)).toEqual({ shown: false, inner: 1 })
-    expect(await at(4)).toEqual({ shown: true, inner: 3 })
-    expect(await at(1, { nextStepsRows: 3 })).toEqual({ shown: true, inner: 0 })
+    expect((await idleAt(2)).line).toBe(true)
+    expect((await idleAt(1)).line).toBe(false)
     await $.tool.call({ tool: 'SetSteps', steps: { turnId: 't', items: [] } } as any)
-    expect(await at(1)).toEqual({ shown: true, inner: 0 })
+    expect((await idleAt(1)).line).toBe(true)
   })
 
-  test('질문 단계: team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 바깥이면(teamRows) 다시 빼지 않는다', { plugins: [TEAM_BOARD] }, async ($, on) => {
-    const { s, coach } = await setup($, on)
+  test('질문 단계: 팀 창이 있으면 띠 자리 3줄부터 팀 한 줄을 남긴 줄로 모양을 고른다. /board band off 면 다 쓴다', { plugins: [TEAM_BOARD] }, async ($, on) => {
+    const { s, coach, askAt } = await setup($, on)
     s.qReply = `<questions>${JSON.stringify([{ q: '가'.repeat(40), options: ['a', 'b'] }])}</questions>`
     await coach(DRAFT)
+    const at = (maxRows: number) => askAt(maxRows, { bodyColumns: 75 })
+    expect(await at(7)).toBe('full') // 팀 창이 없으면 7줄(빈 줄·머리줄·초안·안내 4 + 질문 2 + 선택지 1)을 다 쓴다
     await $.tool.call({ tool: 'SetMe', me: { state: 'idle', question: '' } } as any)
-    const at = async (maxRows: number, extra = {}) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75, ...extra } }); await b.unmount(); return s.innerRows }
-    expect(await at(7)).toBe(7 - 3) // 다 그리면 7줄이라 팀 줄이 사라지는 높이: 질문 2 + 선택지 1
-    expect(await at(3)).toBe(3 - 2) // 질문을 자른 한 줄 + 선택지 1
-    expect(await at(2)).toBe(0) // team-board 가 양보한다
-    expect(await at(7, { teamRows: 1 })).toBe(0)
+    expect(await at(9)).toBe('full+1') // 팀 한 줄을 빼고 8줄: 남는 1줄로 질문 위를 띄운다
+    expect(await at(8)).toBe('full')
+    expect(await at(7)).toBe('tight') // 다 그리면 팀 줄이 사라지는 높이: 질문 2 + 선택지 1
+    expect(await at(4)).toBe('tight')
+    expect(await at(3)).toBe('clipped') // 질문을 자른 한 줄 + 선택지 1
+    expect(await at(2)).toBe('clipped') // 3줄보다 적으면 team-board 가 양보해 2줄을 다 쓴다. 팀 한 줄을 빼면 질문까지 한 줄(line)이 된다
     await $.tool.call({ tool: 'SetBandOff', off: true } as any)
-    expect(await at(7)).toBe(0) // /board band off: 그릴 팀 줄이 없어 7줄을 다 쓴다
+    expect(await at(7)).toBe('full') // /board band off: 그릴 팀 줄이 없어 7줄을 다 쓴다
+    expect(await at(3)).toBe('tight')
   })
 
   const IMAGE_PREVIEW = {
@@ -385,103 +408,131 @@ describe('prompt-coach 흐름', () => {
     },
   }
 
-  test('쉬는 줄: image-preview 칩이 안쪽이면 받은 줄이 3 이상일 때 칩과 쉬는 줄 사이 가로줄 1줄을 위해 2줄을 떼고, 모자라면 1줄만 뗀다. 바깥이면 쉬는 줄 아래 빈 줄', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
-    const { s, type } = await setup($, on)
+  test('쉬는 줄: image-preview 칩 줄(전체 화면에서 이미지가 있을 때)이 먼저 남아 2줄부터 그리고, 3줄부터 그 사이에 가로줄 1줄을 둔다. 쉬는 줄 아래 빈 줄은 없다', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
+    const { type, idleAt } = await setup($, on)
     await type(DRAFT)
     await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
-    const at = async (maxRows: number, extra = {}) => {
-      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } })
-      const kids = ((await b.find({ type: 'Box' })) as any).children
-      await b.unmount()
-      return { inner: s.innerRows, wrap: JSON.stringify(kids[1]) }
-    }
-    const r3 = await at(3)
-    expect(r3.inner).toBe(1)
-    expect(r3.wrap).toContain('━━ prompt-coach') // 칩(rest) 아래, 쉬는 줄 위. 빈 줄 없이 가로줄만
-    expect(r3.wrap).toContain('"marginTop":0')
-    expect((await at(2)).inner).toBe(1)
-    expect((await at(2)).wrap).not.toContain('━━')
-    expect((await at(1)).inner).toBe(0)
-    expect((await at(1)).wrap).not.toContain('━━')
-    // 칩이 바깥이면(imagePreviewRows) 쉬는 줄 아래에 둔다
-    const outer = await at(3, { imagePreviewRows: 1 })
-    expect(outer.inner).toBe(1)
-    expect(outer.wrap).toContain('"marginBottom":1')
-    expect(outer.wrap).not.toContain('━━')
-    // 바깥 칩은 안쪽에 줄을 쓰지 않아 2줄이면 쉬는 줄 + 빈 줄이 딱 맞다. 1줄이면 빈 줄이 없다
-    const outer2 = await at(2, { imagePreviewRows: 1 })
-    expect(outer2.inner).toBe(0)
-    expect(outer2.wrap).toContain('"marginBottom":1')
-    const outer1 = await at(1, { imagePreviewRows: 1 })
-    expect(outer1.inner).toBe(0)
-    expect(outer1.wrap).not.toContain('"marginBottom":1')
-    // 바깥 칩이 있으면 입력창 이미지 목록이 비어도 같다. 안쪽 칩 줄은 계산하지 않는다
+    expect(await idleAt(3)).toEqual({ line: true, rule: true, rows: 2 }) // 칩 줄 + 가로줄 + 쉬는 줄. 가로줄 위아래에 빈 줄이 없다
+    expect(await idleAt(2)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(1)).toEqual({ line: false, rule: false, rows: 0 }) // 칩 줄이 남는다
+    // 전체 화면이 아니면 image-preview 가 칩 줄을 그리지 않아 세지 않는다
+    const windowed = { columns: 120, rows: 40, isFullscreen: false }
+    expect(await idleAt(1, windowed)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(3, windowed)).toEqual({ line: true, rule: false, rows: 1 }) // 다른 띠가 없으니 가로줄도 없다
     await $.tool.call({ tool: 'SetImages', draft: [] } as any)
-    expect((await at(3, { imagePreviewRows: 1 })).inner).toBe(1)
-    // 이미지가 없으면 그대로 1줄만 뗀다
-    const none = await at(3)
-    expect(none.inner).toBe(2)
-    expect(none.wrap).not.toContain('margin')
+    expect(await idleAt(1)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(3)).toEqual({ line: true, rule: false, rows: 1 })
   })
 
   test('쉬는 줄: 맨 앞에 색 표시(▎)를 두고 [다듬기]를 배경색 칩으로 그린다. 줄이 1줄뿐이어도 같다', async ($, on) => {
-    const { type } = await setup($, on)
+    const { type, own } = await setup($, on)
     await type(DRAFT)
     for (const maxRows of [1, 10]) {
-      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
-      const line = ((await b.find({ type: 'Box' })) as any).children[1]
-      await b.unmount()
+      const line = (await own(maxRows))[1]
       expect(line.children[0]).toEqual({ type: 'Text', props: { color: 'claude' }, children: ['▎'] })
       expect(line.children[1].props).toEqual({ key: 'coach-refine', label: '다듬기', plain: true })
       expect(line.children[1].children).toEqual([{ type: 'Text', props: { backgroundColor: 'claude', color: 'inverseText', bold: true }, children: [' 다듬기 '] }])
     }
   })
 
-  test('쉬는 줄: next-steps 목록이 안쪽이면 펼친 목록(제안 수 + 3줄)을 지킬 수 있을 때만 그 사이에 가로줄 1줄을 둔다. 구분 줄은 1줄까지', { plugins: [NEXT_STEPS, IMAGE_PREVIEW] }, async ($, on) => {
-    const { s, type } = await setup($, on)
+  test('쉬는 줄 위 가로줄: next-steps 가 같은 입력으로 고르는 줄(펼친 목록 = 제안 수 + 2, 접으면 2·1)과 칩 줄·팀 한 줄을 세고 1줄이 남을 때만 둔다. 쉬는 줄 아래 빈 줄은 없다', { plugins: [NEXT_STEPS, IMAGE_PREVIEW, TEAM_BOARD] }, async ($, on) => {
+    const { type, idleAt } = await setup($, on)
     await type(DRAFT)
     await $.tool.call({ tool: 'SetSteps', steps: { turnId: 't', items: ['a', 'b'] } } as any)
-    const at = async (maxRows: number, extra = {}) => {
-      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } })
-      const all = JSON.stringify(((await b.find({ type: 'Box' })) as any).children.slice(1))
-      await b.unmount()
-      return { inner: s.innerRows, rule: all.includes('━━ prompt-coach'), blank: all.includes('"marginBottom":1') }
-    }
-    // 제안 2개: 안쪽에 5줄이 남아야 한다. 7줄부터 가로줄, 6줄이면 가로줄 없이 5줄을 넘긴다
-    expect(await at(7)).toEqual({ inner: 5, rule: true, blank: false })
-    expect(await at(6)).toEqual({ inner: 5, rule: false, blank: false })
-    // 바깥 칩 줄도 붙어 있으면 가로줄만 두고 아래 빈 줄은 뺀다. 가로줄을 못 두는 높이에서는 전처럼 빈 줄
-    expect(await at(7, { imagePreviewRows: 1 })).toEqual({ inner: 5, rule: true, blank: false })
-    expect(await at(6, { imagePreviewRows: 1 })).toEqual({ inner: 4, rule: false, blank: true })
-    // 안쪽 칩 줄이 있으면 그 1줄을 더 남긴다
+    // 제안 2개: 6줄이면 펼친 목록 4 + 가로줄 + 쉬는 줄, 5줄이면 펼친 목록과 쉬는 줄만
+    expect(await idleAt(6)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(5)).toEqual({ line: true, rule: false, rows: 1 })
+    // 4줄이면 목록이 가로줄 있는 한 줄(2줄)로 접혀 가로줄 자리가 남는다. 가로줄 때문에 목록이 접히지는 않는다
+    expect(await idleAt(4)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(3)).toEqual({ line: true, rule: false, rows: 1 })
+    // 칩 줄이 있으면 그 1줄을 더 센다. 쉬는 줄은 next-steps 한 줄과 칩 줄을 남기고 3줄부터
     await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
-    expect(await at(8)).toEqual({ inner: 6, rule: true, blank: false })
-    expect(await at(7)).toEqual({ inner: 6, rule: false, blank: false })
-    // next-steps 가 바깥이면(nextStepsRows) 제 가로줄이 이미 나눈다. 칩 줄만 센다
-    expect(await at(3, { nextStepsRows: 3 })).toEqual({ inner: 1, rule: true, blank: false })
-  })
-
-  test('쉬는 줄: 쉬는 단계가 아니면(질문 중) 이미지가 있어도 빈 줄을 두지 않는다. 팀 줄이 안쪽이면 그 줄까지 센다', { plugins: [IMAGE_PREVIEW, TEAM_BOARD] }, async ($, on) => {
-    const { s, type, coach } = await setup($, on)
-    await type(DRAFT)
-    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
-    const at = async (maxRows: number, extra = {}) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } }); await b.unmount(); return s.innerRows }
+    expect(await idleAt(7)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(6)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(5)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(4)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(3)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(2)).toEqual({ line: false, rule: false, rows: 0 })
+    // 팀 창이 있으면 next-steps 도 팀 한 줄을 남기고 목록을 고른다: 5줄이면 가로줄 있는 한 줄(2)로 접혀 가로줄 자리가 남는다
+    await $.tool.call({ tool: 'SetImages', draft: [] } as any)
     await $.tool.call({ tool: 'SetMe', me: { state: 'idle', question: '' } } as any)
-    expect(await at(4)).toBe(2) // 칩 1 + 팀 1 + 빈 줄 + 쉬는 줄 = 4
-    expect(await at(3)).toBe(2) // 칩과 팀 줄에 2줄이 필요해 빈 줄은 없다
-    await $.tool.call({ tool: 'SetMe', me: null } as any)
-    await coach(DRAFT)
-    expect(await at(3)).toBe(3 - 2) // 질문 단계: 질문 몫(질문·선택지)만 뗀다, 빈 줄 몫이 아니다
+    expect(await idleAt(7)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(6)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(5)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(4)).toEqual({ line: true, rule: false, rows: 1 })
   })
 
-  test('입력창이 prompt.change 로 비면(Ctrl+C, Esc 두 번) [다듬기]를 그리지 않고 줄도 떼지 않는다', async ($, on) => {
+  test('팀 창도 다른 띠로 센다: 쉬는 줄 위 가로줄은 팀 한 줄까지 남을 때만. 다듬는 중에는 칩 줄과 팀 한 줄(띠 자리 3줄부터)을 뺀 줄로 모양을 고르고, 1줄뿐이면 칩 줄보다 먼저 남는다', { plugins: [IMAGE_PREVIEW, TEAM_BOARD] }, async ($, on) => {
+    const { s, type, coach, settle, press, own, idleAt, askAt } = await setup($, on)
+    await type(DRAFT)
+    await $.tool.call({ tool: 'SetMe', me: { state: 'idle', question: '' } } as any)
+    // 팀 창만: 가로줄 + 쉬는 줄 + 팀 한 줄
+    expect(await idleAt(3)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(2)).toEqual({ line: true, rule: false, rows: 1 })
+    expect(await idleAt(1)).toEqual({ line: true, rule: false, rows: 1 }) // 팀 창은 쉬는 줄보다 뒤 순위라 줄이 모자라도 쉬는 줄을 빼지 않는다
+    // 칩 줄도 있으면 4줄부터
+    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
+    expect(await idleAt(4)).toEqual({ line: true, rule: true, rows: 2 })
+    expect(await idleAt(3)).toEqual({ line: true, rule: false, rows: 1 })
+    await $.tool.call({ tool: 'SetBandOff', off: true } as any)
+    expect(await idleAt(3)).toEqual({ line: true, rule: true, rows: 2 }) // /board band off: 팀 줄을 세지 않는다
+    await $.tool.call({ tool: 'SetBandOff', off: false } as any)
+
+    // 질문 만드는 중 (칩 + 팀): 쓸 줄 = 띠 자리 - 2. 3줄부터 빈 줄 + 머리줄, 2줄이면 머리줄만, 1줄이면 진행 줄만
+    s.hold = true
+    await coach(DRAFT)
+    const busy = async (maxRows: number) => {
+      const k = (await own(maxRows)).slice(1)
+      return { head: k.find(c => JSON.stringify(c).includes('━━ prompt-coach'))?.props.marginTop ?? null, busy: k.some(c => JSON.stringify(c).includes('coach-busy-line')) }
+    }
+    expect(await busy(5)).toEqual({ head: 1, busy: true })
+    expect(await busy(4)).toEqual({ head: 0, busy: true })
+    expect(await busy(3)).toEqual({ head: null, busy: true })
+    expect(await busy(2)).toEqual({ head: null, busy: true }) // 3줄보다 적으면 팀 창이 양보해 칩 줄만 뺀다
+    expect(await busy(1)).toEqual({ head: null, busy: true }) // 1줄뿐이면 칩 줄보다 이 화면이 남는다
+    s.release()
+    await settle()
+    s.hold = false
+
+    // 질문 단계 (질문 1줄 + 선택지 1줄: 다 그리면 6줄)
+    expect(await askAt(8)).toBe('full')
+    expect(await askAt(7)).toBe('tight')
+    expect(await askAt(4)).toBe('tight')
+    expect(await askAt(3)).toBe('line') // 팀 한 줄까지 빼 1줄
+    expect(await askAt(2)).toBe('line')
+    expect(await askAt(1)).toBe('line') // 1줄뿐이면 칩 줄보다 이 화면이 남는다
+    // 칩 줄만
+    await $.tool.call({ tool: 'SetMe', me: null } as any)
+    expect(await askAt(7)).toBe('full')
+    expect(await askAt(6)).toBe('tight')
+    expect(await askAt(1)).toBe('line')
+    const one = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 1 } })
+    expect(await one.find({ type: 'Text', text: /OTHER-MOD-BAND/ })).toBeDefined() // 다른 mod 의 띠는 그대로
+    await one.unmount()
+
+    // 입력창에 넣음 (칩 + 팀)
+    await press('coach-now')
+    expect(s.box).toBe(REFINED)
+    await $.tool.call({ tool: 'SetMe', me: { state: 'idle', question: '' } } as any)
+    const done = async (maxRows: number) => {
+      const k = (await own(maxRows)).slice(1)
+      const has = (re: RegExp) => k.find(c => re.test(JSON.stringify(c)))
+      return { head: has(/━━ prompt-coach/)?.props.marginTop ?? null, hint: has(/고치거나 그대로 보내세요/) !== undefined, undo: has(/coach-undo/) !== undefined }
+    }
+    expect(await done(6)).toEqual({ head: 1, hint: true, undo: true })
+    expect(await done(5)).toEqual({ head: 0, hint: true, undo: true })
+    expect(await done(4)).toEqual({ head: 0, hint: false, undo: true })
+    expect(await done(3)).toEqual({ head: null, hint: false, undo: true })
+    expect(await done(1)).toEqual({ head: null, hint: false, undo: true })
+  })
+
+  test('입력창이 prompt.change 로 비면(Ctrl+C, Esc 두 번) [다듬기]를 그리지 않는다', async ($, on) => {
     const { s, type, shows } = await setup($, on)
     await type(DRAFT)
     expect(await shows('coach-refine')).toBe(true)
     s.box = ''
     await ($ as any).prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } })
     expect(await shows('coach-refine')).toBe(false)
-    expect(s.innerRows).toBe(10)
     await type(DRAFT)
     expect(await shows('coach-refine')).toBe(true)
   })
@@ -520,45 +571,43 @@ describe('prompt-coach 흐름', () => {
     await narrow.unmount()
   })
 
-  test('질문 단계: 그리는 줄을 떼고 안쪽 mod 에 넘기고, 그 줄 수를 coachRows 로 알린다', async ($, on) => {
-    const { s, coach } = await setup($, on)
+  test('질문 단계: 띠 자리로 모양을 고른다. 넉넉하면 질문 위·안내 위에 빈 줄을 차례로 두고, 모자라면 질문과 선택지만, 더 모자라면 질문을 자르고, 1줄이면 한 줄에 (질문 2줄)', async ($, on) => {
+    const { s, coach, askAt } = await setup($, on)
     const q = '가'.repeat(40)
     s.qReply = `<questions>${JSON.stringify([{ q, options: ['a', 'b'] }])}</questions>`
     await coach(DRAFT)
-    const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75 } }); await b.unmount(); return s.innerRows }
-    expect(await at(12)).toBe(12 - 9) // 빈 줄·머리줄·초안·안내 4 + 질문 2 + 선택지 1 + 넉넉할 때의 빈 줄 2
-    expect(s.innerCoachRows).toBe(9)
-    expect(await at(8)).toBe(0) // 한 줄만 남으면 질문 위 빈 줄만
-    expect(await at(7)).toBe(0) // 남는 줄이 없으면 빈 줄 없이 7줄
-    expect(s.innerCoachRows).toBe(7)
-    expect(await at(6)).toBe(6 - 3) // 질문 2 + 선택지 1
-    expect(s.innerCoachRows).toBe(3)
-    expect(await at(3)).toBe(0)
-    expect(await at(2)).toBe(0) // 질문을 자른 한 줄 + 선택지 1
-    expect(await at(1)).toBe(0)
+    const at = (maxRows: number) => askAt(maxRows, { bodyColumns: 75 })
+    expect(await at(12)).toBe('full+2') // 빈 줄은 2줄까지
+    expect(await at(9)).toBe('full+2') // 빈 줄·머리줄·초안·안내 4 + 질문 2 + 선택지 1 + 빈 줄 2
+    expect(await at(8)).toBe('full+1') // 한 줄만 남으면 질문 위 빈 줄만
+    expect(await at(7)).toBe('full') // 남는 줄이 없으면 빈 줄 없이 7줄
+    expect(await at(6)).toBe('tight') // 질문 2 + 선택지 1
+    expect(await at(3)).toBe('tight')
+    expect(await at(2)).toBe('clipped') // 질문을 자른 한 줄 + 선택지 1
+    expect(await at(1)).toBe('line')
+    expect(await at(0)).toBe('none')
   })
 
   test('여러 낱말의 긴 질문: 번호 칸을 뺀 폭에서 낱말 단위로 접히는 줄을 센다 (75칸에서 3줄)', async ($, on) => {
-    const { s, coach } = await setup($, on)
+    const { s, coach, askAt } = await setup($, on)
     // 138칸. 질문 글 폭은 69칸(75 - 양옆 2 - 번호 3 - 간격 1)이라 67·63·6칸 세 줄로 접힌다. 띠 폭으로 나누면 2줄로 잘못 센다
     const q = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar papa quebec romeo sierra tango uniform victor'
     s.qReply = `<questions>${JSON.stringify([{ q, options: ['one', 'two'] }])}</questions>`
     await coach(DRAFT)
-    const at = async (maxRows: number) => { const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns: 75 } }); await b.unmount(); return s.innerRows }
-    expect(await at(7)).toBe(7 - 4) // 전체 모양은 8줄(4 + 질문 3 + 선택지 1)이라 안 들어간다. 질문 3 + 선택지 1 만
-    expect(await at(8)).toBe(0)
+    const at = (maxRows: number) => askAt(maxRows, { bodyColumns: 75 })
+    expect(await at(8)).toBe('full') // 4 + 질문 3 + 선택지 1
+    expect(await at(7)).toBe('tight') // 2줄로 세면 여기서 다 그려 선택지가 "↓ n more" 아래로 숨는다. 질문 3 + 선택지 1 만
+    expect(await at(4)).toBe('tight')
+    expect(await at(3)).toBe('clipped')
   })
 
   test('질문 단계: 줄이 남으면 질문 위에 빈 줄을 두고 선택지를 들여 쓴다. 한 줄 더 남으면 안내 위도 띄운다', async ($, on) => {
-    const { coach } = await setup($, on)
+    const { coach, own } = await setup($, on)
     await coach(DRAFT) // 질문 1줄 + 선택지 1줄: 전체 모양 6줄
     const look = async (maxRows: number, bodyColumns = 120) => {
-      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, bodyColumns } })
-      const k = ((await b.find({ type: 'Box' })) as any).children as any[]
+      const k = await own(maxRows, { bodyColumns })
       const has = (re: RegExp) => k.find(c => re.test(JSON.stringify(c)))
-      const r = { ask: has(/어떤 에러인가요/)?.props.marginTop, indent: has(/coach-opt-0/)?.props.paddingLeft, hint: has(/이 질문의 답/)?.props.marginTop }
-      await b.unmount()
-      return r
+      return { ask: has(/어떤 에러인가요/)?.props.marginTop, indent: has(/coach-opt-0/)?.props.paddingLeft, hint: has(/이 질문의 답/)?.props.marginTop }
     }
     expect(await look(8)).toEqual({ ask: 1, indent: 5, hint: 1 })
     expect(await look(7)).toEqual({ ask: 1, indent: 5, hint: 0 })
@@ -568,16 +617,19 @@ describe('prompt-coach 흐름', () => {
   })
 
   test('질문 단계: 들여 쓴 폭보다 긴 선택지가 있으면 줄이 남아도 띄우거나 들여 쓰지 않는다', async ($, on) => {
-    const { s, coach } = await setup($, on)
+    const { s, coach, own, askAt } = await setup($, on)
     // 선택지 55칸 + 번호 3칸 = 58칸. 띠 62칸이면 안쪽 60칸에는 들어가지만 들여 쓴 56칸에는 안 들어간다
     s.qReply = `<questions>${JSON.stringify([{ q: '범위는?', options: ['a'.repeat(55), 'b'] }])}</questions>`
     await coach(DRAFT)
-    const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 12, bodyColumns: 62 } })
-    const k = ((await b.find({ type: 'Box' })) as any).children as any[]
+    const k = await own(12, { bodyColumns: 62 })
     const opts = k.find(c => /coach-opt-0/.test(JSON.stringify(c)))
-    await b.unmount()
     expect(opts.props.paddingLeft).toBe(1)
-    expect(s.innerRows).toBe(12 - 7) // 4 + 질문 1 + 선택지 2
+    expect(await askAt(12, { bodyColumns: 62 })).toBe('full') // 띄우지도 않는다
+    // 4 + 질문 1 + 선택지 2 = 7줄. 선택지를 들여 쓰지 않은 폭에서 2줄로 센다
+    expect(await askAt(7, { bodyColumns: 62 })).toBe('full')
+    expect(await askAt(6, { bodyColumns: 62 })).toBe('tight')
+    expect(await askAt(3, { bodyColumns: 62 })).toBe('tight') // 질문 1 + 선택지 2
+    expect(await askAt(2, { bodyColumns: 62 })).toBe('cut') // 선택지 2줄이 안 들어가 한 줄로 자른다
   })
 
   test('한 줄 모양의 선택지: 칸이 남으면 긴 선택지를 자르지 않는다', async ($, on) => {
