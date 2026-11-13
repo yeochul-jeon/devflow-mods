@@ -92,7 +92,7 @@ export const register: Register = on => {
     if (arg === '') {
       const s = await read($, spent)
       return {
-        text: `쓰는 법: /coach <초안> · /coach view · /coach template · 입력창 위 [다듬기]·[되돌리기] · /coach undo · /coach cancel · /coach auto on|off\n이번 세션 ${s.calls}회, Haiku 입력 ${s.input.toLocaleString('en-US')} · 출력 ${s.output.toLocaleString('en-US')} 토큰`,
+        text: `쓰는 법: /coach <초안> · /coach view · /coach template · 입력창 위 다듬기·되돌리기 버튼 · /coach undo · /coach cancel · /coach auto on|off\n이번 세션 ${s.calls}회, Haiku 입력 ${s.input.toLocaleString('en-US')} · 출력 ${s.output.toLocaleString('en-US')} 토큰`,
       }
     }
     // 명령을 보냈으니 입력창은 비어 있다. 그대로 채운다.
@@ -101,7 +101,7 @@ export const register: Register = on => {
       if (!filled.isFilled) return { text: `입력창에 넣지 못했어요 (${filled.refusal ?? '알 수 없음'})` }
       // 새 초안을 시작했으니 이전에 다듬은 원문은 되돌릴 대상이 아니다.
       if (await read($, original)) await forget($)
-      return { text: '틀을 입력창에 넣었어요. 채운 뒤 [다듬기]를 누르거나 그대로 보내세요.' }
+      return { text: '틀을 입력창에 넣었어요. 채운 뒤 다듬기 버튼을 누르거나 그대로 보내세요.' }
     }
     // 입력창이 비어 있어야 명령을 칠 수 있으므로 덮어쓸 것을 확인하지 않는다.
     if (arg === 'undo') {
@@ -112,7 +112,7 @@ export const register: Register = on => {
     }
     if (arg === 'auto' || arg === 'auto on' || arg === 'auto off') {
       if (arg !== 'auto') await setAuto($, arg === 'auto on')
-      return { text: (await isAuto($)) ? AUTO_ON : '자동 모드 꺼짐: [다듬기]·/coach 로만 다듬어요. (/coach auto on)' }
+      return { text: (await isAuto($)) ? AUTO_ON : '자동 모드 꺼짐: 다듬기 버튼·/coach 로만 다듬어요. (/coach auto on)' }
     }
     if (arg === 'view') {
       await loadHistory($)
@@ -380,7 +380,7 @@ export const register: Register = on => {
         </Box>
         {...flowPart()}
         {...reviewPart()}
-        {f.stage === 'idle' && list.length === 0 ? <Text dimColor>아직 다듬은 기록이 없어요. 입력창 위 [다듬기]나 /coach &lt;초안&gt; 으로 시작하세요.</Text> : null}
+        {f.stage === 'idle' && list.length === 0 ? <Text dimColor>아직 다듬은 기록이 없어요. 입력창 위 다듬기 버튼이나 /coach &lt;초안&gt; 으로 시작하세요.</Text> : null}
         {...historyPart()}
       </Box>
     )
@@ -393,19 +393,23 @@ export const register: Register = on => {
     const b = await read($, band)
     // 쉬는 줄을 그리면 그 1줄을 떼고 안쪽 mod 에 넘긴다. 안 떼면 이 mod 가 바깥일 때 안쪽 띠와 합쳐 넘친다.
     // next-steps 가 안쪽에 있고 자리가 4줄(가로줄·제안 한 줄·팀 한 줄·쉬는 줄)보다 적으면 쉬는 줄을 빼 제안을 남긴다. next-steps 가 바깥이면 제 줄을 이미 뗐다
-    const stepsInside = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined && ((await read($, nextSteps))?.items.length ?? 0) > 0
+    const stepItems = (e.props as { nextStepsRows?: number }).nextStepsRows === undefined ? ((await read($, nextSteps))?.items.length ?? 0) : 0
+    const stepsInside = stepItems > 0
     const isIdleLine = !e.props.hasSurvey && f.stage === 'idle' && !e.props.isWorking && b.hasDraft && e.props.maxRows >= (stepsInside ? 4 : 1)
     const q = !e.props.hasSurvey && f.stage === 'questions' && e.props.maxRows >= 1 ? f.questions[f.answers.length] : undefined
     // team-board 가 안쪽이면 팀 줄 1줄을 남기고 모양을 고른다. 안 남기면 질문이 줄을 다 쓰는 높이에서만 팀 줄이 사라진다. 바깥이면 teamRows 로 알려 오고 이미 뗐다. 3줄보다 적으면 team-board 가 양보한다. /board band off 면 그릴 팀 줄이 없다
     const teamInside = (e.props as { teamRows?: number }).teamRows === undefined && e.props.maxRows >= 3 && !!(await read($, teamMe)) && !(await read($, teamBandOff))
     const shape = q ? questionShape(q, e.props.bodyColumns, e.props.maxRows - (teamInside ? 1 : 0)) : null
     // 질문도 그릴 줄을 떼고 넘긴다. 이 mod 가 바깥이면 안쪽 team-board 한 줄만큼 넘쳐 선택지가 "↓ n more" 아래로 숨는다. team-board 는 coachRows 를 보고 받은 줄 안에서 그린다
-    // image-preview 칩 줄과 쉬는 줄이 붙어 구분이 안 된다. 칩이 안쪽이면 rest 의 마지막 줄이라 쉬는 줄 위에, 바깥이면 이 mod 출력 바로 아래라 쉬는 줄 아래에 빈 줄 1줄을 둔다. 안쪽 칩·팀 줄이 먼저 자리를 받고도 한 줄이 남을 때만 둔다
+    // image-preview 칩 줄과 쉬는 줄이 붙어 구분이 안 된다. 칩이 바깥이면 이 mod 출력 바로 아래라 쉬는 줄 아래에 빈 줄 1줄을 둔다. 안쪽 팀 줄이 먼저 자리를 받고도 한 줄이 남을 때만 둔다
     const imageRows = (e.props as { imagePreviewRows?: number }).imagePreviewRows
     const chipsInside = imageRows === undefined && e.viewport?.isFullscreen !== false && !e.props.hasSurvey && (await read($, imageDraft)).length > 0
     const chipsOuter = (imageRows ?? 0) > 0
-    const gap = isIdleLine && (chipsInside || chipsOuter) && e.props.maxRows - 2 >= (chipsInside ? 1 : 0) + (teamInside ? 1 : 0)
-    const inward = isIdleLine ? { maxRows: e.props.maxRows - (gap ? 2 : 1) } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
+    // 안쪽 띠(next-steps 목록, 칩 줄)는 쉬는 줄 바로 위에 온다. 줄이 남으면 그 사이에 가로줄 1줄을 둔다. next-steps 가 펼친 목록(가로줄 + 제안 + 닫기 줄 + 여유 1줄 = 제안 수 + 3)을 지킬 때만 둔다. 모자라면 목록이 한 줄로 접힌다
+    const ruleAbove = isIdleLine && (stepsInside || chipsInside) && e.props.maxRows - 2 >= (stepsInside ? stepItems + 3 : 0) + (chipsInside ? 1 : 0) + (teamInside ? 1 : 0)
+    // 구분에 쓰는 줄은 1줄까지다. 가로줄을 두면 바깥 칩 줄과의 빈 줄은 뺀다
+    const gap = isIdleLine && !ruleAbove && chipsOuter && e.props.maxRows - 2 >= (teamInside ? 1 : 0)
+    const inward = isIdleLine ? { maxRows: e.props.maxRows - (ruleAbove || gap ? 2 : 1) } : shape ? { maxRows: e.props.maxRows - shape.own, coachRows: shape.own } : null
     const rest = await next(inward ? { ...e, props: { ...e.props, ...inward } as typeof e.props } : e)
     if (e.props.hasSurvey) return rest
     // 받은 줄이 없으면(위 mod 가 다 씀) 그리지 않는다. 그려서 넘치면 엔진이 "↓ n more" 에 한 줄을 더 써 위 띠까지 가려진다 (T54)
@@ -421,7 +425,12 @@ export const register: Register = on => {
       </Box>
     )
     const cancelButton = <Button key="coach-cancel" label="취소" plain dimColor onPress={() => void cancel($)} />
-    const undoButton = before !== '' ? <Button key="coach-undo" label="되돌리기" onPress={() => void undoBox($)} /> : null
+    // 다듬기 칩과 같은 모양, 회색 배경으로 둘째 버튼임을 나타낸다
+    const undoButton = before !== '' ? (
+      <Button key="coach-undo" label="되돌리기" plain onPress={() => void undoBox($)}>
+        <Text backgroundColor="gray" color="inverseText" bold>{' 되돌리기 '}</Text>
+      </Button>
+    ) : null
 
     if (f.stage === 'asking' || f.stage === 'rewriting') {
       const n = await read($, tick)
@@ -540,10 +549,14 @@ export const register: Register = on => {
     }
 
     if (!isIdleLine) return rest
-    // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다
+    // 쉬는 동안은 한 줄만 쓴다. 머리줄·빈 줄을 빼 다른 mod 띠에 줄을 남긴다.
+    // 줄을 쓰지 않고도 위아래 띠와 나뉘게 맨 앞에 색 표시를 두고 버튼을 배경색 칩으로 그린다. 색은 누른 뒤 같은 자리에 오는 진행 칩과 같다
     const idleLine = (
       <Box flexDirection="row" columnGap={1} paddingX={1} height={1} overflow="hidden">
-        <Button key="coach-refine" label="다듬기" onPress={() => void refineBox($)} />
+        <Text key="coach-mark" color={BUSY_COLOR}>▎</Text>
+        <Button key="coach-refine" label="다듬기" plain onPress={() => void refineBox($)}>
+          <Text backgroundColor={BUSY_COLOR} color="inverseText" bold>{' 다듬기 '}</Text>
+        </Button>
         {undoButton}
         <Text dimColor wrap="truncate-end">{`빈 곳을 몇 개 묻고 다듬어요 (Haiku)${isOn ? ' · 자동' : ''}`}</Text>
       </Box>
@@ -551,7 +564,8 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {rest}
-        {gap ? <Box flexDirection="column" marginTop={chipsInside ? 1 : 0} marginBottom={chipsOuter ? 1 : 0}>{idleLine}</Box> : idleLine}
+        {ruleAbove ? head('', false) : null}
+        {gap ? <Box flexDirection="column" marginBottom={1}>{idleLine}</Box> : idleLine}
       </Box>
     )
   })

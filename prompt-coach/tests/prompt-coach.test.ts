@@ -385,7 +385,7 @@ describe('prompt-coach 흐름', () => {
     },
   }
 
-  test('쉬는 줄: image-preview 칩이 안쪽이면 받은 줄이 3 이상일 때 칩과 쉬는 줄 사이 빈 줄 1줄을 위해 2줄을 떼고, 모자라면 1줄만 뗀다', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
+  test('쉬는 줄: image-preview 칩이 안쪽이면 받은 줄이 3 이상일 때 칩과 쉬는 줄 사이 가로줄 1줄을 위해 2줄을 떼고, 모자라면 1줄만 뗀다. 바깥이면 쉬는 줄 아래 빈 줄', { plugins: [IMAGE_PREVIEW] }, async ($, on) => {
     const { s, type } = await setup($, on)
     await type(DRAFT)
     await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
@@ -397,17 +397,17 @@ describe('prompt-coach 흐름', () => {
     }
     const r3 = await at(3)
     expect(r3.inner).toBe(1)
-    expect(r3.wrap).toContain('"marginTop":1') // 칩(rest) 아래, 쉬는 줄 위
-    expect(r3.wrap).not.toContain('"marginBottom":1')
+    expect(r3.wrap).toContain('━━ prompt-coach') // 칩(rest) 아래, 쉬는 줄 위. 빈 줄 없이 가로줄만
+    expect(r3.wrap).toContain('"marginTop":0')
     expect((await at(2)).inner).toBe(1)
-    expect((await at(2)).wrap).not.toContain('marginTop')
+    expect((await at(2)).wrap).not.toContain('━━')
     expect((await at(1)).inner).toBe(0)
-    expect((await at(1)).wrap).not.toContain('marginTop')
+    expect((await at(1)).wrap).not.toContain('━━')
     // 칩이 바깥이면(imagePreviewRows) 쉬는 줄 아래에 둔다
     const outer = await at(3, { imagePreviewRows: 1 })
     expect(outer.inner).toBe(1)
     expect(outer.wrap).toContain('"marginBottom":1')
-    expect(outer.wrap).not.toContain('"marginTop":1')
+    expect(outer.wrap).not.toContain('━━')
     // 바깥 칩은 안쪽에 줄을 쓰지 않아 2줄이면 쉬는 줄 + 빈 줄이 딱 맞다. 1줄이면 빈 줄이 없다
     const outer2 = await at(2, { imagePreviewRows: 1 })
     expect(outer2.inner).toBe(0)
@@ -422,6 +422,43 @@ describe('prompt-coach 흐름', () => {
     const none = await at(3)
     expect(none.inner).toBe(2)
     expect(none.wrap).not.toContain('margin')
+  })
+
+  test('쉬는 줄: 맨 앞에 색 표시(▎)를 두고 [다듬기]를 배경색 칩으로 그린다. 줄이 1줄뿐이어도 같다', async ($, on) => {
+    const { type } = await setup($, on)
+    await type(DRAFT)
+    for (const maxRows of [1, 10]) {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows } })
+      const line = ((await b.find({ type: 'Box' })) as any).children[1]
+      await b.unmount()
+      expect(line.children[0]).toEqual({ type: 'Text', props: { color: 'claude' }, children: ['▎'] })
+      expect(line.children[1].props).toEqual({ key: 'coach-refine', label: '다듬기', plain: true })
+      expect(line.children[1].children).toEqual([{ type: 'Text', props: { backgroundColor: 'claude', color: 'inverseText', bold: true }, children: [' 다듬기 '] }])
+    }
+  })
+
+  test('쉬는 줄: next-steps 목록이 안쪽이면 펼친 목록(제안 수 + 3줄)을 지킬 수 있을 때만 그 사이에 가로줄 1줄을 둔다. 구분 줄은 1줄까지', { plugins: [NEXT_STEPS, IMAGE_PREVIEW] }, async ($, on) => {
+    const { s, type } = await setup($, on)
+    await type(DRAFT)
+    await $.tool.call({ tool: 'SetSteps', steps: { turnId: 't', items: ['a', 'b'] } } as any)
+    const at = async (maxRows: number, extra = {}) => {
+      const b = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows, ...extra } })
+      const all = JSON.stringify(((await b.find({ type: 'Box' })) as any).children.slice(1))
+      await b.unmount()
+      return { inner: s.innerRows, rule: all.includes('━━ prompt-coach'), blank: all.includes('"marginBottom":1') }
+    }
+    // 제안 2개: 안쪽에 5줄이 남아야 한다. 7줄부터 가로줄, 6줄이면 가로줄 없이 5줄을 넘긴다
+    expect(await at(7)).toEqual({ inner: 5, rule: true, blank: false })
+    expect(await at(6)).toEqual({ inner: 5, rule: false, blank: false })
+    // 바깥 칩 줄도 붙어 있으면 가로줄만 두고 아래 빈 줄은 뺀다. 가로줄을 못 두는 높이에서는 전처럼 빈 줄
+    expect(await at(7, { imagePreviewRows: 1 })).toEqual({ inner: 5, rule: true, blank: false })
+    expect(await at(6, { imagePreviewRows: 1 })).toEqual({ inner: 4, rule: false, blank: true })
+    // 안쪽 칩 줄이 있으면 그 1줄을 더 남긴다
+    await $.tool.call({ tool: 'SetImages', draft: [1] } as any)
+    expect(await at(8)).toEqual({ inner: 6, rule: true, blank: false })
+    expect(await at(7)).toEqual({ inner: 6, rule: false, blank: false })
+    // next-steps 가 바깥이면(nextStepsRows) 제 가로줄이 이미 나눈다. 칩 줄만 센다
+    expect(await at(3, { nextStepsRows: 3 })).toEqual({ inner: 1, rule: true, blank: false })
   })
 
   test('쉬는 줄: 쉬는 단계가 아니면(질문 중) 이미지가 있어도 빈 줄을 두지 않는다. 팀 줄이 안쪽이면 그 줄까지 센다', { plugins: [IMAGE_PREVIEW, TEAM_BOARD] }, async ($, on) => {
