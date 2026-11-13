@@ -38,7 +38,7 @@ const Chip: ClientModule<Props, { isOver: boolean; isPressed?: boolean }> = (pro
   })
   const { Box, Text } = surface.elements
   if (label === undefined) return <Box />
-  return <Text color="claude" inverse={surface.state?.isOver === true}>{label}</Text>
+  return <Text color="suggestion" inverse={surface.state?.isOver === true}>{label}</Text>
 }
 
 export default Chip
