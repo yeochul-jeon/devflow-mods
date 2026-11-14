@@ -79,6 +79,9 @@ export const register: Register = on => {
     const r = await next(e)
     await $.command.register({ name: 'coach', description: '초안의 빈 곳을 묻고 다듬어 입력창에', argumentHint: '<초안> | view | template | undo | cancel | auto on|off' })
     await isAuto($)
+    // 입력창이 보인 직후 친 글은 이 모듈이 뜨기 전이라 prompt.edit 가 오지 않는다. 여기서 한 번 읽어 다듬기 줄을 맞춘다 (F3, 2.1.323 실측: 0.06초에 친 초안)
+    const hasDraft = (await $.prompt.read()).text.trim() !== ''
+    if ((await read($, band)).hasDraft !== hasDraft) await update($, band, b => ({ ...b, hasDraft }))
     // 모듈을 다시 불러 모델 호출이 끊겼으면 초안을 돌려준다. 질문 단계는 답을 기다리는 중이라 그대로 둔다
     const f = await read($, flow)
     if (f.stage === 'asking' || f.stage === 'rewriting') await fail($, f.draft, '다시 불러와 멈췄어요.')
@@ -459,6 +462,8 @@ export const register: Register = on => {
       if (!q || !shape) return rest
       const i = f.answers.length
       const { inner, optRows, tight, gaps } = shape
+      // 질문과 선택지만 그리는 모양에서도 줄이 남으면 위 띠와 가로줄로 나누고, 한 줄 더 남으면 그 위를 띄운다 (F5, 80칸·30줄). 질문을 자른 모양은 줄이 모자란 때라 두지 않는다
+      const tightRule = tight && !shape.isClipped && rows > shape.own
       // 선택지가 남은 줄에 접혀 넘치면 한 줄로 자른다 (창 80칸·20줄). 띠 자리가 1줄이면 질문까지 그 줄에 넣는다
       if (shape.isCut) {
         const isLine = rows < 2
@@ -501,6 +506,7 @@ export const register: Register = on => {
         <Box flexDirection="column">
           {rest}
           {tight ? null : head(`질문 ${i + 1}/${f.questions.length}`)}
+          {tightRule ? <Box key="coach-tight-rule">{head(`질문 ${i + 1}/${f.questions.length}`, rows > shape.own + 1)}</Box> : null}
           {/* 질문하는 동안 입력창은 비어 있다. 무엇을 다듬는지 한 줄로 보인다. 좁으면 높이를 아끼려고 이 줄과 직접 쓰기 안내를 뺀다 */}
           {width >= 60 && !tight ? <Box paddingX={1}><Text dimColor wrap="truncate-end">{`초안  ${oneLine(f.draft)}`}</Text></Box> : null}
           <Box flexDirection="row" columnGap={1} paddingX={1} marginTop={gaps > 0 ? 1 : 0}>
