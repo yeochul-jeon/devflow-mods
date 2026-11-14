@@ -15,7 +15,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | :---: | --- | --- | --- |
 | 🧭 | [**team-board**](#-team-board-팀-상황판) | 같은 저장소의 여러 세션을 한 화면에 보여 줍니다. 진행 현황, 결정 기록, 결정 대기 알림, 숨은 실패, 같은 파일 겹침, 프롬프트 캐시 남은 시간을 표시합니다. | `/board` |
 | 📋 | [**work-plan**](#-work-plan-작업-계획-보고) | Claude가 여러 단계 작업의 계획과 진행을 보고합니다. team-board의 진행 막대가 이 보고로 채워집니다. | 없음 (도구 `plan_update`) |
-| 🔤 | [**plain-terms**](#-plain-terms-용어-풀이) | Claude가 약어, 작업 번호, 코드 이름을 처음 쓸 때 괄호로 풀어 씁니다. | 없음 (규칙만) |
+| 🔤 | [**plain-terms**](#-plain-terms-용어-풀이) | Claude가 작업 번호, 코드 이름, 약어를 대화에서 처음 쓸 때 한 번 풀어 씁니다. 30분 넘게 비웠다 돌아오면 다시 풉니다. | 없음 (규칙만) |
 | 📐 | [**draw**](#-draw-흐름-그림) | 직전 답변의 흐름을 원문 낱말 그대로 옆 패널에 그림으로 보여 줍니다. | `/draw [낱말]` |
 | 📅 | [**look-back**](#-look-back-돌아보기) | 오늘·어제·7일·30일·올해 동안 한 일을 보여 줍니다. 한눈에 숫자·차트(아낀 시간 추정, 종류·모델별)와 프로젝트별 요청, 결정, 커밋. | `/lookback [기간]` |
 | 🧒 | [**eli12**](#-eli12-12살-버전-설명) | 어려운 설명을 12살 버전으로 풉니다. | `/eli12 [주제]` |
@@ -64,7 +64,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 claude plugin marketplace add yeochul-jeon/devflow-mods#stable
 claude plugin install team-board@devflow-mods
 claude plugin install work-plan@devflow-mods      # 요청마다 약 560 토큰 (team-board와 함께 쓰세요)
-claude plugin install plain-terms@devflow-mods    # 대화 첫 요청에 규칙 약 280 토큰, 답변이 조금 길어집니다
+claude plugin install plain-terms@devflow-mods    # 대화 첫 요청에 규칙 약 440 토큰
 claude plugin install draw@devflow-mods           # /draw 할 때만 Haiku를 호출합니다
 claude plugin install look-back@devflow-mods      # 기록은 토큰 0, [요약] 누를 때만 Haiku를 호출합니다
 claude plugin install eli12@devflow-mods
@@ -221,13 +221,14 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 
 ## 🔤 plain-terms: 용어 풀이
 
-- Claude가 답변에서 약어(`tsc`), 작업 번호(`T6`), 코드 이름(`scanGen`)을 처음 쓸 때 괄호로 짧게 풀어 씁니다. 예: `tsc(TypeScript 타입 검사기)`
+- Claude가 작업 번호(`T6`), 코드 이름(`scanGen`), 약어(`tsc`)를 대화에서 처음 쓸 때 한 번 짧게 풀어 씁니다. 예: `tsc(TypeScript 타입 검사기)`. 목록·표에 번호가 몰려 나오면 아래에 범례 한 줄(`D24 = …`)을 답니다.
+- 30분 넘게 자리를 비웠다 돌아오면 이번 답에서 다시 풉니다.
 
 <img src="docs/images/plain-terms-answer.webp" alt="답변의 TTL, LRU, getOrder(id) 뒤에 괄호 풀이" width="760">
 
 - 화면에 그리는 것은 없습니다. 혼자 설치해도 동작합니다.
-- 효과: 처음 나온 용어 중 풀이가 붙은 비율이 시험 프롬프트 5개에서 44.9% → 81.1% 로 올랐습니다. 평소 답변 20개의 기준값은 20.8% 였습니다.
-- 비용: 대화 첫 요청에 규칙 약 280 토큰. 요청 수는 늘지 않았고 답변은 평균 11.5% 길어졌습니다.
+- 효과 (0.2.0 을 0.1.1 과 비교, 6턴 시험 대화 3회씩): 처음 나온 작업 번호·코드 이름의 풀이 75% → 89%, 이미 푼 용어를 다시 푼 횟수 105 → 24, 번호만 되풀이한 풀이(`T5 (작업 5번)`) 22 → 0. 답은 0.1.1 보다 13% 짧았습니다.
+- 비용: 대화 첫 요청에 규칙 약 440 토큰(0.1.1 보다 +160). 요청 수는 늘지 않습니다.
 
 측정 방법과 알아둘 것은 [plain-terms/README.md](plain-terms/README.md)를 보세요.
 

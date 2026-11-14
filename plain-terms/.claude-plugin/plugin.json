@@ -1,8 +1,8 @@
 {
   "name": "plain-terms",
   "displayName": "Plain Terms",
-  "version": "0.1.1",
-  "description": "약어·작업 번호·코드 이름이 답변에 처음 나올 때 괄호로 짧게 풀어 쓰게 하는 규칙 (대화 첫 프롬프트에 한 번)",
+  "version": "0.2.0",
+  "description": "작업 번호·코드 이름·약어가 대화에 처음 나올 때 한 번 짧게 풀어 쓰게 하는 규칙 (대화 첫 프롬프트에 한 번, 30분 넘게 비웠다 돌아오면 다시 풀라는 한 줄)",
   "author": {
     "name": "yeochul-jeon",
     "url": "https://github.com/yeochul-jeon"
