@@ -498,8 +498,11 @@ function card ({ Box, Image, Raster, Text }: Ui, all: Record<string, Picture>, i
     <Box key={`card-${id}`} flexDirection="column" borderStyle="round" borderDimColor flexShrink={0} width={width + CARD_COLUMNS}>
       <Box flexDirection="row">
         {side(left)}
+        {/* Where the terminal cannot draw the picture the engine draws the alt, which does not keep
+            to `columns`: the blank cells beside it were squeezed and wrapped, the card taller than
+            its rows (tmux, 2.1.323). The box keeps the picture's cells either way. */}
         {source
-          ? <Image key={`image-${id}`} source={source} columns={columns} rows={rows} alt={label} />
+          ? <Box width={columns} height={rows} flexShrink={0} overflow="hidden"><Image key={`image-${id}`} source={source} columns={columns} rows={rows} alt={label} /></Box>
           : <Raster key={`image-${id}`} columns={columns} rows={rows} cells={painted!} />}
         {side(width - columns - left)}
       </Box>

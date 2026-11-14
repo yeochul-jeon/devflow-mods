@@ -669,6 +669,35 @@ test('told the terminal draws pictures, the card sends it the picture as PNG byt
   expect(w.runs).toContainEqual(['sips', '-s', 'format', 'png', '-Z', '1024', `${FOLDER}/images/1.png`, '--out', `${FOLDER}/image-preview/1.view.png`])
 })
 
+/** The element whose children hold the one keyed `key`, in a drawn tree. */
+function holderOf (tree: RenderElement, key: string): Drawn | undefined {
+  const node = tree as Drawn
+  for (const child of node.children ?? []) {
+    if (typeof child !== 'object') continue
+    if (child.props?.key === key) return node
+    const found = holderOf(child, key)
+    if (found) return found
+  }
+  return undefined
+}
+
+// Where the terminal cannot draw the picture the engine draws the Image's alt, which does not keep to
+// `columns`: the blank cells beside it were squeezed and wrapped, the card taller than its rows (tmux,
+// 2.1.323). The test kit lays out no text, so the box holding the Image is checked instead.
+test('in Ghostty the picture sits in a box of its exact cells, so an alt drawn in its place cannot grow the card', cells, async ($, on) => {
+  const w = world(on, { draft: '[Image #1]', env: { TERM_PROGRAM: 'ghostty' } })
+  await startSession($)
+  await w.clock.settle()
+  const ui = await band($)
+  await point(ui, 'chip:1')
+  const image = await ui.find({ key: 'image-1' })
+  expect(image).toMatchObject({ type: 'Image' })
+  const { columns, rows } = image!.props as { columns: number; rows: number }
+  const holder = holderOf(await ui.drawn(), 'image-1')
+  expect(holder).toMatchObject({ type: 'Box', props: { width: columns, height: rows, flexShrink: 0, overflow: 'hidden' } })
+  expect(holder!.children).toHaveLength(1)
+})
+
 test('moving from one listed image to the next opens the next card, the leave and the enter in either order', cells, async ($, on) => {
   const w = world(on, { files: { '1.png': 2048, '2.png': 2048 } })
   await running($, w.clock)
