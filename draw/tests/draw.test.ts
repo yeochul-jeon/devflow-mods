@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { cells, flowArt } from '../hooks/diagram'
+import { cells, chooseLayout, compactHeight, compactLines, fullHeight, packRows, progressBar, rowHeight } from '../hooks/diagram'
 import { buildPrompt, parseDraw } from '../hooks/prompt'
 
-const PANE = { component: 'Pane', requestId: 'draw', props: { bodyColumns: 60 } } as any
+const PANE = { component: 'Pane', requestId: 'draw', props: { bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 } } } as any
+const SMALL = { component: 'Pane', requestId: 'draw', props: { bodyColumns: 78, placement: 'inline', scroll: { offset: 0, bodyRows: 3 } } } as any
 const USAGE = { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const ANSWER = 'prompt.submit 이 규칙을 붙이고, session.compact 뒤에 pending 을 켭니다.'
 
@@ -50,31 +51,100 @@ describe('prompt (순수 함수)', () => {
   })
 })
 
-describe('그림', () => {
-  test('한 줄에 들어가면 상자 세 줄의 폭이 같다', async () => {
-    const lines = flowArt(['prompt.submit', '규칙 붙임', 'pending'], 80)
-    expect(lines.length).toBe(3)
-    expect(new Set(lines.map(cells)).size).toBe(1)
+describe('그림 (순수 함수)', () => {
+  const MANY = {
+    title: 'band 행 배분',
+    flows: [
+      { label: '행이 충분할 때', steps: ['maxRows 읽기', 'team-board', 'next-steps', 'prompt-coach'] },
+      { label: '행이 모자랄 때', steps: ['maxRows 읽기', '바깥 mod 가 순서를 정한다', '넘친 줄은 위쪽만 보인다'] },
+      { label: '2.1.323 부터', steps: ['mod 마다 따로 묻는다', 'AbovePromptList 가 쌓는다'] },
+      { label: 'maxRows 0', steps: ['아무것도 그리지 않는다', '다른 mod 행 유지'] },
+    ],
+    notes: ['--plugin-dir 로 띄운 mod 는 앞에 붙지 않는다', 'team-board 창을 안 그려도 1행이 남는다'],
+  }
+  const boxWidth = (lines: string[]) => Math.max(...lines.map(cells)) + 4
+  const rowWidth = (r: { boxes: string[][]; more: boolean }) =>
+    r.boxes.reduce((a, b) => a + boxWidth(b), 0) + (r.boxes.length - 1) * 3 + (r.more ? 2 : 0)
+
+  test('상자를 폭에 맞춰 여러 줄로 접는다 (A1)', async () => {
+    const rows = packRows(['bump', 'test', 'commit', 'release.sh', 'install'], 51)
+    expect(rows.map(r => r.boxes.map(b => b.join(' ')))).toEqual([['bump', 'test', 'commit', 'release.sh'], ['install']])
+    expect(rows.map(r => r.more)).toEqual([true, false])
+    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(51)
   })
 
-  test('6단계까지 그리고 좁으면 줄을 바꿔 폭을 넘지 않는다', async () => {
-    const lines = flowArt(['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱'], 30)
-    const text = lines.join('\n')
-    expect(text).toContain('여섯')
-    expect(text).not.toContain('일곱')
-    for (const l of lines) expect(cells(l)).toBeLessThanOrEqual(30)
+  test('6단계까지만 그린다', async () => {
+    const rows = packRows(['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱'], 80)
+    const names = rows.flatMap(r => r.boxes.map(b => b.join(' ')))
+    expect(names).toEqual(['하나', '둘', '셋', '넷', '다섯', '여섯'])
   })
 
-  test('긴 식별자는 상자 대신 세로로 그려 이름을 자르지 않는다', async () => {
+  test('패널보다 긴 이름은 자르지 않고 상자 안에서 줄을 바꾼다', async () => {
     const id = 'ArsCustomerService.saveCustomerDeliveryAddress'
-    const lines = flowArt(['/Store.action', id], 60)
-    expect(lines).toEqual(['┌─ /Store.action', `└→ ${id}`])
+    const rows = packRows(['배포 전 캡처 (--env qa --when before)', id], 24)
+    const all = rows.flatMap(r => r.boxes)
+    expect(all.map(b => b.join(''))).toEqual(['배포 전 캡처(--env qa --whenbefore)', id])
+    for (const r of rows) expect(rowWidth(r)).toBeLessThanOrEqual(24)
   })
 
-  test('세로 그림에서 폭을 넘는 이름은 다음 줄로 이어 쓴다', async () => {
-    const lines = flowArt(['배포 전 캡처 (--env qa --when before)', '끝'], 20)
-    expect(lines).toEqual(['┌─ 배포 전 캡처', '│  (--env qa --when', '│  before)', '└→ 끝'])
-    for (const l of lines) expect(cells(l)).toBeLessThanOrEqual(20)
+  test('높이: 상자 줄은 테두리 2줄 + 이름 줄 수', async () => {
+    const rows = packRows(['bump', 'test', 'commit', 'release.sh', 'install'], 51)
+    expect(rows.map(rowHeight)).toEqual([3, 3])
+  })
+
+  test('압축 줄: 흐름마다 번호·이름 뒤에 칩을 잇고 폭을 넘으면 들여 써서 잇는다 (B1)', async () => {
+    const lines = compactLines('2. 행이 모자랄 때', MANY.flows[1]!.steps, 50)
+    const text = lines.map(l => l.map(s => s.text).join(''))
+    const pad = ' '.repeat(cells('2. 행이 모자랄 때') + 2)
+    expect(text).toEqual([
+      '2. 행이 모자랄 때' + '  ' + 'maxRows 읽기' + ' →',
+      pad + '바깥 mod 가 순서를 정한다' + ' →',
+      pad + '넘친 줄은 위쪽만 보인다',
+    ])
+    for (const l of text) expect(cells(l)).toBeLessThanOrEqual(50)
+    expect(lines[0]!.filter(s => s.kind === 'chip').map(s => s.text)).toEqual(['maxRows 읽기'])
+  })
+
+  test('압축 줄: 머리가 길어 남은 칸이 모자라면 칩을 새 줄에서 시작한다', async () => {
+    const head = '1. ' + '가'.repeat(22)
+    const step = '바깥 mod 가 순서를 정한다'
+    const lines = compactLines(head, [step, '끝'], 51)
+    const text = lines.map(l => l.map(s => s.text).join(''))
+    expect(text[0]).toBe(head)
+    expect(lines.flatMap(l => l.filter(s => s.kind === 'chip').map(s => s.text))).toEqual([step, '끝'])
+    for (const l of text) expect(cells(l)).toBeLessThanOrEqual(51)
+  })
+
+  test('프롬프트 위 패널에서 보이는 줄 수를 넘으면 압축형, 옆 패널은 늘 상자 그림', async () => {
+    expect(chooseLayout(MANY, 74, { placement: 'inline', bodyRows: 6 }, '')).toBe('compact')
+    expect(chooseLayout(MANY, 74, { placement: 'inline', bodyRows: 40 }, '')).toBe('full')
+    // 옆에 붙은 패널은 넘쳐도 상자 그림 (스크롤로 본다)
+    expect(chooseLayout(MANY, 51, { placement: 'dock', bodyRows: 6 }, '')).toBe('full')
+    expect(fullHeight(MANY, 51, '')).toBeGreaterThan(6)
+  })
+
+  test('높이: 접히는 제목·초점 줄도 센다', async () => {
+    const d = { title: 'a'.repeat(21), flows: [{ label: '', steps: ['A'] }], notes: [] }
+    expect(fullHeight(d, 20, '')).toBe(2 + 1 + 1 + 3)
+    expect(chooseLayout(d, 20, { placement: 'inline', bodyRows: 6 }, '')).toBe('compact')
+    expect(fullHeight(d, 20, 'f'.repeat(30))).toBe(2 + 2 + 1 + 1 + 3)
+  })
+
+  test('압축 줄: 머리가 폭의 절반을 넘으면 머리만 한 줄, 칩은 다음 줄부터', async () => {
+    const head = '1. ' + 'a'.repeat(21)
+    const lines = compactLines(head, ['A'], 20)
+    expect(lines.map(l => l.map(s => s.text).join(''))).toEqual([head, '  A'])
+    expect(compactHeight({ title: '', flows: [{ label: 'a'.repeat(21), steps: ['A'] }], notes: [] }, 20)).toBe(3)
+  })
+
+  test('압축형 높이는 80×24 패널(6줄)에 흐름 4개가 들어간다', async () => {
+    expect(compactHeight(MANY, 74)).toBeLessThanOrEqual(6)
+  })
+
+  test('진행 막대: 평소 시간 대비 채우고 넘치면 가득 찬다 (D2)', async () => {
+    expect(progressBar(12, 15, 20)).toBe('█'.repeat(16) + '░'.repeat(4))
+    expect(progressBar(0, 15, 10)).toBe('░'.repeat(10))
+    expect(progressBar(40, 15, 10)).toBe('█'.repeat(10))
   })
 })
 
@@ -92,7 +162,8 @@ describe('/draw', () => {
 
     const ui = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /^규칙 주입$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /│ prompt\.submit │ → │ 규칙 붙임 │/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^1. 첫 프롬프트$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^prompt\.submit$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /compact 뒤 다시/ })).toBeDefined()
     await ui.unmount()
   })
@@ -123,5 +194,73 @@ describe('/draw', () => {
 
     expect(text).toContain('그릴 답변이 없어요')
     expect(called).toBe(false)
+  })
+})
+
+describe('패널 배치', () => {
+  const REPLY = JSON.stringify({
+    title: '규칙 주입',
+    flows: [
+      { label: '첫 프롬프트', steps: ['prompt.submit', '규칙 붙임'] },
+      { label: 'compact 뒤', steps: ['session.compact', 'pending 켬', '다음 프롬프트에 붙임'] },
+    ],
+    notes: ['compact 뒤 다시'],
+  })
+
+  test('보이는 줄이 모자라면 흐름마다 칩 한 줄로 그린다', async ($, on) => {
+    boot(on, REPLY)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
+    await $.command.run({ command: 'draw', args: '' } as any)
+
+    const ui = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...SMALL })
+    expect(await ui.find({ type: 'Text', text: /^1. 첫 프롬프트$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^prompt\.submit$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^2. compact 뒤$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /메모 1개/ })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('그리는 동안 경과 초와 막대를 보이고, 끝나면 시계를 멈춘다', async ($, on) => {
+    const clock = mock.clock(on, { now: 1_800_000_000_000 })
+    let answer: (v: any) => void = () => {}
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.messages', () => ({ value: [{ role: 'assistant', text: ANSWER, toolUses: [] }] }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('model.complete', () => new Promise(r => { answer = r }))
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
+    const run = $.command.run({ command: 'draw', args: '' } as any)
+    await clock.advance(3000)
+
+    const ui = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /그리는 중… 3초/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^█+░+$/ })).toBeDefined()
+    await ui.unmount()
+
+    answer({ value: { isAnswered: true, text: REPLY, usage: USAGE } })
+    await run
+    await clock.advance(5000)
+    const done = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...PANE })
+    expect(await done.find({ type: 'Text', text: /그리는 중/ })).toBeUndefined()
+    await done.unmount()
+
+    // 앞 실행의 시계가 남아 있으면 다음 실행의 초가 두 배로 오른다
+    const again = $.command.run({ command: 'draw', args: '' } as any)
+    await clock.advance(2000)
+    const next = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...PANE })
+    expect(await next.find({ type: 'Text', text: /그리는 중… 2초/ })).toBeDefined()
+    await next.unmount()
+    answer({ value: { isAnswered: false, reason: 'api-error' } })
+    await again
+  })
+
+  test('데스크톱 앱에서도 같은 그림 트리를 받는다', async ($, on) => {
+    boot(on, REPLY)
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' } as any)
+    await $.command.run({ command: 'draw', args: '' } as any)
+    const ui = await $.ui.mount({ plugin: 'draw', surface: 'desktop', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /^1. 첫 프롬프트$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^prompt\.submit$/ })).toBeDefined()
+    await ui.unmount()
   })
 })

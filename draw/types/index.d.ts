@@ -21,6 +21,6 @@ export type DrawView = {
 
 declare module 'claude-code' {
   interface PluginState {
-    draw: { view: DrawView }
+    draw: { view: DrawView; elapsed: number }
   }
 }

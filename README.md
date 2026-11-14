@@ -241,7 +241,7 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 - 효과: 실제 긴 답변 10개에서 상자 이름 99.3% 가 원문 낱말이었고, 9/10 이 원문 단계를 빠뜨리지 않았습니다(2회 측정).
 - 비용: 실행마다 Haiku 1회. 메인 대화 요청은 늘지 않습니다. Esc로 패널을 닫습니다.
 
-<img src="docs/images/draw-panel.webp" alt="왼쪽 답변, 오른쪽 패널에 place_order 네 갈래 흐름 그림" width="760">
+<img src="docs/images/draw-panel.webp" alt="왼쪽 답변, 오른쪽 패널에 place_order 네 갈래 흐름을 번호와 색 테두리 상자로 그린 그림" width="760">
 
 측정 방법과 알아둘 것은 [draw/README.md](draw/README.md)를 보세요.
 
