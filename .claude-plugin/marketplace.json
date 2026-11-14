@@ -93,7 +93,7 @@
         "source": "git-subdir",
         "url": "https://github.com/yeochul-jeon/devflow-mods.git",
         "path": "image-preview",
-        "ref": "image-preview--v0.3.2"
+        "ref": "image-preview--v0.3.3"
       }
     }
   ]
