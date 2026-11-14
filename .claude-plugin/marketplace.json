@@ -48,7 +48,7 @@
         "source": "git-subdir",
         "url": "https://github.com/yeochul-jeon/devflow-mods.git",
         "path": "draw",
-        "ref": "draw--v0.1.0"
+        "ref": "draw--v0.2.0"
       }
     },
     {
