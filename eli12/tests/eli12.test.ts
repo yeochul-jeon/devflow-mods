@@ -237,6 +237,8 @@ describe('그림 배치', () => {
     const svgs = await ui.findAll({ type: 'Svg' })
     expect(svgs).toHaveLength(1)
     expect(svgs[0]!.props.alt).toBe('1. 요청 흐름: 요청 → 검문소 → 도착')
+    // 흐름 이름은 Svg 테두리와 같은 진한 색 (밝은 테마에서 앱의 색 이름이 흐렸다)
+    expect((await ui.find({ type: 'Text', text: /^1\. 요청 흐름$/ }))!.props.color).toBe('#2a9bb0')
     // 폭·높이를 주지 않으면 데스크톱 앱이 패널 폭까지 늘려 글자가 커진다
     const own = flowSvg(['요청', '검문소', '도착'], 56, 0)
     expect(svgs[0]!.props.width).toBe(own.width)

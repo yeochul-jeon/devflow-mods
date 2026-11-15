@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { ModelCompleteResult, Register, Timer } from 'claude-code'
 
 import type { Eli12View } from '../types'
-import { flowHead, flowSvg, packRows, progressBar } from './diagram'
+import { flowHead, flowStroke, flowSvg, packRows, progressBar } from './diagram'
 import { buildPrompt, buildTopicPrompt, lastAnswer, parseEli12 } from './prompt'
 
 const PANE = 'eli12'
@@ -116,6 +116,8 @@ export const register: Register = on => {
     const color = (i: number) => COLORS[i % COLORS.length]!
     // 터미널(Ink)에는 Svg 가 없다. surface 로 좁힌 뒤에 resolve 해야 Svg 가 보인다
     const Svg = e.surface === 'terminal' ? null : $.ui.resolve(e).Svg
+    // 데스크톱 앱 등에서는 흐름 이름을 Svg 테두리와 같은 진한 색으로: 앱의 yellow 는 밝은 테마 흰 바탕에서 읽히지 않았다(2026-11-15 캡처)
+    const headColor = (i: number) => (Svg ? flowStroke(i) : color(i))
     const section = (title: string, body: JSX.Element[]) => (
       <Box flexDirection="column" marginTop={1}>
         <Text color="cyan" bold>{title}</Text>
@@ -130,7 +132,7 @@ export const register: Register = on => {
         {d.flows.length > 0
           ? section('그림', d.flows.map((f, i) => (
             <Box key={`f${i}`} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
-              <Text color={color(i)}>{flowHead(f.label, i)}</Text>
+              <Text color={headColor(i)}>{flowHead(f.label, i)}</Text>
               {Svg ? (
                 // 데스크톱 앱·VS Code·모바일: 상자 줄을 그림 하나로
                 // 폭·높이를 주지 않으면 데스크톱 앱이 패널 폭까지 늘려 글자가 1.7배로 커졌다(2026-11-15 캡처). 그림 자신의 크기로 고정한다

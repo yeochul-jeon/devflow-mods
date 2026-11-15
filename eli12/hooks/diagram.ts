@@ -83,6 +83,10 @@ const SVG_COLORS = [
   { stroke: '#b0469b', fill: '#f7e3f3', text: '#4a1440' },
   { stroke: '#3f9a4f', fill: '#e2f3e5', text: '#173d1e' },
 ] as const
+/** 흐름 i 의 진한 색(Svg 테두리). 앱 바깥 글자(흐름 이름)도 이 색이면 밝은·어두운 테마 둘 다에서 읽힌다. */
+export function flowStroke(i: number): string {
+  return SVG_COLORS[i % SVG_COLORS.length]!.stroke
+}
 // 상자 밖(투명 바탕)이라 밝음·어두움 둘 다에서 보이는 중간 회색
 const SVG_ARROW = '#8a8a8a'
 const FONT_PX = 13
