@@ -1,4 +1,4 @@
-// draw/hooks/diagram.ts 에서 복사 (plugin 끼리 의존하지 않는다).
+// draw/hooks/diagram.ts 에서 eli12 가 쓰는 함수만 옮긴 것 (plugin 끼리 의존하지 않는다). draw 쪽을 고치면 여기도 맞춘다.
 // 모델에게는 내용(JSON)만 받고, 그림은 여기서 한글 폭(2칸)을 계산해 직접 그려서 상자가 어긋나지 않게 한다.
 
 import { MAX_STEPS } from './prompt'
@@ -38,36 +38,150 @@ export function clip(text: string, max: number): string {
   return out + '…'
 }
 
-function pad(text: string, width: number): string {
-  return text + ' '.repeat(Math.max(0, width - cells(text)))
+// ①②③④ 는 터미널에 따라 1칸·2칸으로 갈리는 문자라(East Asian Ambiguous) 칩 줄 들여쓰기가 어긋날 수 있어 폭이 확실한 숫자를 쓴다
+export const NUMS = ['1.', '2.', '3.', '4.']
+
+/** 접힌 상자 한 줄: 상자마다 이름 줄들, 다음 줄로 이어지면 more. */
+export type BoxRow = { boxes: string[][]; more: boolean }
+
+/**
+ * 단계 상자를 패널 폭에 맞춰 여러 줄로 나눈다. 그리기는 엔진 Box 테두리가 하고, 줄 나누기는 여기서 한다
+ * (엔진의 flexWrap 은 몇 줄이 됐는지 hook 에 알려 주지 않아 압축형으로 바꿀지 정할 수 없다).
+ * 상자 폭은 이름 칸 + 4(테두리·안쪽 여백), 상자 사이 " → " 3칸, 다음 줄로 이어지면 끝에 " →" 2칸.
+ * 이름이 상자 안 폭을 넘으면 자르지 않고 상자 안에서 줄을 바꾼다.
+ */
+export function packRows(steps: readonly string[], maxWidth: number): BoxRow[] {
+  const labels = steps.map(s => s.trim()).filter(Boolean).slice(0, MAX_STEPS)
+  const inner = Math.max(4, maxWidth - 6)
+  const boxes = labels.map(l => (cells(l) <= inner ? [l] : wrap(l, inner)))
+  const rows: string[][][] = []
+  let cur: string[][] = []
+  let used = 0
+  boxes.forEach((b, i) => {
+    const bw = Math.max(...b.map(cells)) + 4
+    const isLast = i === boxes.length - 1
+    if (cur.length && used + 3 + bw + (isLast ? 0 : 2) > maxWidth) {
+      rows.push(cur)
+      cur = []
+      used = 0
+    }
+    used += (cur.length ? 3 : 0) + bw
+    cur.push(b)
+  })
+  if (cur.length) rows.push(cur)
+  return rows.map((r, i) => ({ boxes: r, more: i < rows.length - 1 }))
+}
+
+export function flowHead(label: string, i: number): string {
+  return label ? `${NUMS[i] ?? ''} ${label}` : (NUMS[i] ?? '')
+}
+
+// Svg (데스크톱 앱·VS Code·모바일). 이미지로 그려져 앱 테마를 따르지 않으므로 상자 바탕을 직접 칠한다 (사용자 결정 2026-11-15)
+const SVG_COLORS = [
+  { stroke: '#2a9bb0', fill: '#e3f4f7', text: '#0f3d46' },
+  { stroke: '#b58900', fill: '#fbf1d6', text: '#4a3800' },
+  { stroke: '#b0469b', fill: '#f7e3f3', text: '#4a1440' },
+  { stroke: '#3f9a4f', fill: '#e2f3e5', text: '#173d1e' },
+] as const
+// 상자 밖(투명 바탕)이라 밝음·어두움 둘 다에서 보이는 중간 회색
+const SVG_ARROW = '#8a8a8a'
+const FONT_PX = 13
+const LINE_PX = 18
+const PAD_X = 10
+const PAD_Y = 7
+const ARROW_PX = 28
+const MORE_PX = 22
+const ROW_GAP = 10
+// 단계 이름 상한(칸). 좁은 패널에서 아주 긴 이름은 줄마다 <text> 가 붙어 Svg 상한(131072자)을 넘는다
+const SVG_LABEL_CELLS = 200
+
+/**
+ * 13px 글꼴에서 글자 폭 어림(px). 그리는 쪽 글꼴을 잴 수 없어 macOS Chrome 에서 잰 평균(한글 11.2, 소문자 6.2,
+ * 대문자 7.6, W·M 10.7, 좁은 글자 3.2)보다 5% 남짓 넓게 잡는다. 글자는 이 폭에 맞춰 늘이거나 줄여 그린다.
+ */
+export function textPx(text: string): number {
+  let w = 0
+  for (const ch of text) {
+    if (cells(ch) === 2) w += 11.8
+    else if (ch === ' ') w += 3.5
+    else if (ch === 'W' || ch === 'M') w += 11.2
+    else if (ch === 'm' || ch === 'w') w += 10.4
+    else if ('iljI.,:;\'|!'.includes(ch)) w += 3.4
+    else if (ch >= 'A' && ch <= 'Z') w += 8
+    else w += 6.5
+  }
+  return Math.ceil(w)
+}
+
+function xml(text: string): string {
+  return text
+    // XML 1.0 이 허용하지 않는 글자(탭·줄바꿈 외 제어문자, U+FFFE·U+FFFF, 짝 없는 서로게이트)는 문서 전체를 깨뜨린다
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+function arrow(x1: number, x2: number, y: number): string {
+  return `<path d="M${x1} ${y}H${x2}M${x2 - 6} ${y - 4}L${x2} ${y}L${x2 - 6} ${y + 4}" stroke="${SVG_ARROW}" stroke-width="1.5" fill="none"/>`
 }
 
 /**
- * 단계를 잇는 그림. 이름을 자르지 않고 한 줄에 다 들어가면 3줄 상자로, 아니면 한 단계에 한 줄씩 세로로 그린다
- * (team-board 의 칩 줄바꿈은 식별자를 18칸에서 잘라 원문 이름이 사라지므로 쓰지 않는다):
- *   ┌──────┐   ┌──────┐           ┌─ 단계
- *   │ 단계 │ → │ 단계 │    또는    ├→ 단계
- *   └──────┘   └──────┘           └→ 단계
+ * 흐름 하나의 단계 상자를 Svg 문서로. 줄 나누기는 터미널과 같은 packRows(maxCells 칸 기준)를 쓴다.
+ * 폭·높이는 마크업에 넣고 Svg prop 으로는 주지 않는다: 칸보다 넓으면 엔진이 줄여 그린다.
  */
-export function flowArt(steps: readonly string[], maxWidth: number): string[] {
-  const labels = steps.map(s => s.trim()).filter(Boolean).slice(0, MAX_STEPS)
-  if (labels.length === 0) return []
-  const widths = labels.map(l => cells(l))
-
-  const across = widths.reduce((a, w) => a + w + 4, 0) + (labels.length - 1) * 3
-  if (across <= maxWidth && widths.every(w => w <= 18)) {
-    const top = labels.map((_, i) => '┌' + '─'.repeat(widths[i]! + 2) + '┐').join('   ')
-    const mid = labels.map((l, i) => '│ ' + pad(l, widths[i]!) + ' │').join(' → ')
-    const bot = labels.map((_, i) => '└' + '─'.repeat(widths[i]! + 2) + '┘').join('   ')
-    return [top, mid, bot]
-  }
-
-  // 긴 이름은 자르지 않고 다음 줄로 이어 쓴다 (원문 이름을 지키려고)
-  const last = labels.length - 1
-  return labels.flatMap((l, i) => {
-    const [first, ...rest] = wrap(l, Math.max(4, maxWidth - 3))
-    return [(i === 0 ? '┌─ ' : i === last ? '└→ ' : '├→ ') + first, ...rest.map(r => (i === last ? '   ' : '│  ') + r)]
+export function flowSvg(steps: readonly string[], maxCells: number, colorIndex: number): { source: string; width: number; height: number } {
+  const c = SVG_COLORS[colorIndex % SVG_COLORS.length]!
+  const parts: string[] = []
+  let y = 0
+  let width = 0
+  packRows(steps.map(s => clip(s.trim(), SVG_LABEL_CELLS)), maxCells).forEach((row, r) => {
+    if (r > 0) y += ROW_GAP
+    const boxes = row.boxes.map(lines => ({
+      lines,
+      w: Math.max(...lines.map(textPx)) + PAD_X * 2,
+      h: lines.length * LINE_PX + PAD_Y * 2,
+    }))
+    const rowH = Math.max(...boxes.map(b => b.h))
+    const mid = y + rowH / 2
+    let x = 0
+    boxes.forEach((b, k) => {
+      if (k > 0) {
+        parts.push(arrow(x + 4, x + ARROW_PX - 4, mid))
+        x += ARROW_PX
+      }
+      const top = y + (rowH - b.h) / 2
+      parts.push(`<rect x="${x + 0.75}" y="${top + 0.75}" width="${b.w - 1.5}" height="${b.h - 1.5}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5"/>`)
+      b.lines.forEach((l, m) => {
+        const tw = textPx(l)
+        // 가운데 정렬로 어림 오차를 양쪽에 나누고, 어림 폭에 맞춰 늘이거나 줄여 상자 밖으로 넘치지 않게 한다
+        parts.push(`<text x="${x + b.w / 2}" y="${top + PAD_Y + m * LINE_PX + 13.5}" text-anchor="middle" textLength="${tw}" lengthAdjust="spacingAndGlyphs" fill="${c.text}">${xml(l)}</text>`)
+      })
+      x += b.w
+    })
+    if (row.more) {
+      parts.push(arrow(x + 4, x + MORE_PX - 2, mid))
+      x += MORE_PX
+    }
+    width = Math.max(width, x)
+    y += rowH
   })
+  const height = Math.ceil(y)
+  width = Math.ceil(width)
+  const font = `-apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', 'Segoe UI', sans-serif`
+  const source =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="${font}" font-size="${FONT_PX}">` +
+    parts.join('') +
+    '</svg>'
+  return { source, width, height }
+}
+
+/** 그리는 동안 막대: 평소 걸리는 시간(expected 초) 대비로 채우고, 넘으면 가득 찬 채로 둔다. */
+export function progressBar(seconds: number, expected: number, width: number): string {
+  const filled = Math.min(width, Math.round((seconds / expected) * width))
+  return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
 /** max 칸 단위로 나눈다. 띄어쓰기에서 나누고, 한 낱말이 max 를 넘으면 글자에서 나눈다. */

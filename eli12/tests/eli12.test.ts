@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'claude-code/testing'
+import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { cells, flowArt } from '../hooks/diagram'
+import { cells, flowSvg, packRows, progressBar } from '../hooks/diagram'
 import { buildPrompt, buildTopicPrompt, lastAnswer, parseEli12, stripMarkdown } from '../hooks/prompt'
 
 const PANE = { component: 'Pane', requestId: 'eli12', props: { bodyColumns: 60 } } as any
@@ -59,12 +59,24 @@ describe('prompt (순수 함수)', () => {
     expect(parseEli12('{"flows": []}')).toBeNull()
   })
 
-  test('한글 단계도 상자 세 줄의 폭이 같다', async () => {
-    const lines = flowArt(['결제 요청', '실패', '다시 시도'], 56)
-    expect(lines.length).toBe(3)
-    expect(new Set(lines.map(cells)).size).toBe(1)
-    // 한글 한 글자 = 2칸: '결제 요청' 은 9칸이라 윗줄 가로선이 11개
-    expect(lines[0]!.startsWith('┌' + '─'.repeat(11) + '┐')).toBe(true)
+  // 그림 코드는 draw/hooks/diagram.ts 에서 옮긴 것 (plugin 끼리 의존하지 않는다)
+  test('상자를 폭에 맞춰 여러 줄로 접는다', async () => {
+    const rows = packRows(['결제 요청', '실패', '다시 시도', '기다림', '성공'], 30)
+    expect(rows.length).toBeGreaterThan(1)
+    for (const r of rows) {
+      const w = r.boxes.reduce((a, b) => a + Math.max(...b.map(cells)) + 4, 0) + (r.boxes.length - 1) * 3 + (r.more ? 2 : 0)
+      expect(w).toBeLessThanOrEqual(30)
+    }
+  })
+
+  test('Svg 는 xmlns 를 갖추고 글자를 이스케이프한다', async () => {
+    const svg = flowSvg(['a<b', '끝'], 51, 0)
+    expect(svg.source.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
+    expect(svg.source).toContain('>a&lt;b</text>')
+  })
+
+  test('진행 막대', async () => {
+    expect(progressBar(10, 20, 10)).toBe('█'.repeat(5) + '░'.repeat(5))
   })
 })
 
@@ -109,7 +121,11 @@ describe('/eli12', () => {
     const ui = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /^검문소$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^택배가 지나가는/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /│ 검문소 │ → │ 도착 │/ })).toBeDefined()
+    // 흐름 번호 + 이름, 단계는 엔진 둥근 테두리 상자 안의 Text
+    expect(await ui.find({ type: 'Text', text: /^1\. 요청 흐름$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^검문소$/ })).toBeDefined()
+    expect((await ui.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round')).toHaveLength(3)
+    expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
     expect(await ui.find({ type: 'Text', text: /^셋$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /초점: 미들웨어/ })).toBeDefined()
     await ui.unmount()
@@ -202,5 +218,54 @@ describe('/eli12', () => {
     const ui = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /모델 호출 실패/ })).toBeDefined()
     await ui.unmount()
+  })
+})
+
+describe('그림 배치', () => {
+  function boot(on: any, reply: any) {
+    on('session.start', ($: any, e: any) => ({ cwd: e.cwd }))
+    on('session.messages', () => ({ value: [{ role: 'assistant', text: 'mod는 미들웨어입니다.', toolUses: [] }] }))
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('model.complete', reply)
+  }
+
+  test('데스크톱 앱에서는 흐름마다 상자 줄을 Svg 하나로 그린다', async ($, on) => {
+    boot(on, () => ({ value: { isAnswered: true, text: REPLY, usage: USAGE } }))
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' } as any)
+    await $.command.run({ command: 'eli12', args: '' } as any)
+    const ui = await $.ui.mount({ plugin: 'eli12', surface: 'desktop', ...PANE })
+    const svgs = await ui.findAll({ type: 'Svg' })
+    expect(svgs).toHaveLength(1)
+    expect(svgs[0]!.props.alt).toBe('1. 요청 흐름: 요청 → 검문소 → 도착')
+    expect(await ui.find({ type: 'Text', text: /^1\. 요청 흐름$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^도착$/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('바꾸는 동안 경과 초와 막대를 보이고, 끝나면 시계를 멈춘다', async ($, on) => {
+    const clock = mock.clock(on, { now: 1_800_000_000_000 })
+    let answer: (v: any) => void = () => {}
+    boot(on, () => new Promise(r => { answer = r }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
+    const run = $.command.run({ command: 'eli12', args: '' } as any)
+    await clock.advance(3000)
+
+    const ui = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
+    expect(await ui.find({ type: 'Text', text: /쉽게 바꾸는 중… 3초/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^█*░+$/ })).toBeDefined()
+    await ui.unmount()
+
+    answer({ value: { isAnswered: true, text: REPLY, usage: USAGE } })
+    await run
+    await clock.advance(5000)
+
+    // 앞 실행의 시계가 남아 있으면 다음 실행의 초가 두 배로 오른다
+    const again = $.command.run({ command: 'eli12', args: '' } as any)
+    await clock.advance(2000)
+    const next = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
+    expect(await next.find({ type: 'Text', text: /쉽게 바꾸는 중… 2초/ })).toBeDefined()
+    await next.unmount()
+    answer({ value: { isAnswered: false, reason: 'api-error' } })
+    await again
   })
 })

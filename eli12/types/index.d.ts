@@ -26,6 +26,6 @@ export type Eli12View = {
 
 declare module 'claude-code' {
   interface PluginState {
-    eli12: { view: Eli12View }
+    eli12: { view: Eli12View; elapsed: number }
   }
 }
