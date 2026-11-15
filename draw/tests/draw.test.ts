@@ -327,6 +327,9 @@ describe('패널 배치', () => {
     const svgs = await ui.findAll({ type: 'Svg' })
     expect(svgs).toHaveLength(2)
     expect(svgs[0]!.props.alt).toBe('1. 첫 프롬프트: prompt.submit → 규칙 붙임')
+    // 흐름 이름은 Svg 테두리와 같은 진한 색: 앱의 yellow 는 밝은 테마 흰 바탕에서 읽히지 않았다 (2026-11-15 캡처)
+    const head2 = await ui.find({ type: 'Text', text: /^2. compact 뒤$/ })
+    expect(head2!.props.color).toBe('#b58900')
     // 폭·높이를 주지 않으면 데스크톱 앱이 패널 폭까지 늘려 글자가 1.7배로 커졌다 (2026-11-15 캡처)
     const own = flowSvg(['prompt.submit', '규칙 붙임'], 58, 0)
     expect(svgs[0]!.props.width).toBe(own.width)
@@ -346,6 +349,8 @@ describe('패널 배치', () => {
     const ui = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...PANE })
     expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
     expect(await ui.find({ type: 'Text', text: /^prompt\.submit$/ })).toBeDefined()
+    // 터미널은 테마 색 이름 그대로
+    expect((await ui.find({ type: 'Text', text: /^2. compact 뒤$/ }))!.props.color).toBe('yellow')
     await ui.unmount()
   })
 })

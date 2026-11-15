@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { ModelCompleteResult, Register, Timer } from 'claude-code'
 
 import type { DrawView } from '../types'
-import { chooseLayout, compactLines, flowHead, flowSvg, packRows, progressBar } from './diagram'
+import { chooseLayout, compactLines, flowHead, flowStroke, flowSvg, packRows, progressBar } from './diagram'
 import { buildPrompt, lastAnswer, parseDraw } from './prompt'
 
 const PANE = 'draw'
@@ -105,6 +105,8 @@ export const register: Register = on => {
     const color = (i: number) => COLORS[i % COLORS.length]!
     // 터미널(Ink)에는 Svg 가 없다. surface 로 좁힌 뒤에 resolve 해야 Svg 가 보인다
     const Svg = e.surface === 'terminal' ? null : $.ui.resolve(e).Svg
+    // 데스크톱 앱 등에서는 흐름 이름을 Svg 테두리와 같은 진한 색으로: 앱의 yellow 는 밝은 테마 흰 바탕에서 읽히지 않았다(2026-11-15 캡처)
+    const headColor = (i: number) => (Svg ? flowStroke(i) : color(i))
 
     if (chooseLayout(d, width, { placement: e.props.placement, bodyRows: e.props.scroll?.bodyRows }, v.focus) === 'compact') {
       // 보이는 줄이 모자라면 제목·초점을 빼고 흐름마다 칩 줄로. 메모는 개수만
@@ -138,7 +140,7 @@ export const register: Register = on => {
         {v.focus ? <Text dimColor>초점: {v.focus}</Text> : null}
         {d.flows.map((f, i) => (
           <Box key={`f${i}`} flexDirection="column" marginTop={1}>
-            <Text color={color(i)}>{flowHead(f.label, i)}</Text>
+            <Text color={headColor(i)}>{flowHead(f.label, i)}</Text>
             {Svg ? (
               // 데스크톱 앱·VS Code·모바일: 상자 줄을 그림 하나로 (E3). 엔진이 칸에 맞춰 줄여 그린다
               // 폭·높이를 주지 않으면 데스크톱 앱이 패널 폭까지 늘려 글자가 1.7배로 커졌다(2026-11-15 캡처). 그림 자신의 크기로 고정한다
