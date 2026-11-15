@@ -173,6 +173,108 @@ export function chooseLayout(
   return fullHeight({ ...d, notes: [] }, maxWidth, focus) <= view.bodyRows ? 'full' : 'compact'
 }
 
+// Svg (데스크톱 앱·VS Code·모바일). 이미지로 그려져 앱 테마를 따르지 않으므로 상자 바탕을 직접 칠한다 (사용자 결정 2026-11-15)
+const SVG_COLORS = [
+  { stroke: '#2a9bb0', fill: '#e3f4f7', text: '#0f3d46' },
+  { stroke: '#b58900', fill: '#fbf1d6', text: '#4a3800' },
+  { stroke: '#b0469b', fill: '#f7e3f3', text: '#4a1440' },
+  { stroke: '#3f9a4f', fill: '#e2f3e5', text: '#173d1e' },
+] as const
+// 상자 밖(투명 바탕)이라 밝음·어두움 둘 다에서 보이는 중간 회색
+const SVG_ARROW = '#8a8a8a'
+const FONT_PX = 13
+const LINE_PX = 18
+const PAD_X = 10
+const PAD_Y = 7
+const ARROW_PX = 28
+const MORE_PX = 22
+const ROW_GAP = 10
+// 단계 이름 상한(칸). 좁은 패널에서 아주 긴 이름은 줄마다 <text> 가 붙어 Svg 상한(131072자)을 넘는다
+const SVG_LABEL_CELLS = 200
+
+/**
+ * 13px 글꼴에서 글자 폭 어림(px). 그리는 쪽 글꼴을 잴 수 없어 macOS Chrome 에서 잰 평균(한글 11.2, 소문자 6.2,
+ * 대문자 7.6, W·M 10.7, 좁은 글자 3.2)보다 5% 남짓 넓게 잡는다. 글자는 이 폭에 맞춰 늘이거나 줄여 그린다.
+ */
+export function textPx(text: string): number {
+  let w = 0
+  for (const ch of text) {
+    if (cells(ch) === 2) w += 11.8
+    else if (ch === ' ') w += 3.5
+    else if (ch === 'W' || ch === 'M') w += 11.2
+    else if (ch === 'm' || ch === 'w') w += 10.4
+    else if ('iljI.,:;\'|!'.includes(ch)) w += 3.4
+    else if (ch >= 'A' && ch <= 'Z') w += 8
+    else w += 6.5
+  }
+  return Math.ceil(w)
+}
+
+function xml(text: string): string {
+  return text
+    // XML 1.0 이 허용하지 않는 글자(탭·줄바꿈 외 제어문자, U+FFFE·U+FFFF, 짝 없는 서로게이트)는 문서 전체를 깨뜨린다
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+function arrow(x1: number, x2: number, y: number): string {
+  return `<path d="M${x1} ${y}H${x2}M${x2 - 6} ${y - 4}L${x2} ${y}L${x2 - 6} ${y + 4}" stroke="${SVG_ARROW}" stroke-width="1.5" fill="none"/>`
+}
+
+/**
+ * 흐름 하나의 단계 상자를 Svg 문서로. 줄 나누기는 터미널과 같은 packRows(maxCells 칸 기준)를 쓴다.
+ * 폭·높이는 마크업에 넣고 Svg prop 으로는 주지 않는다: 칸보다 넓으면 엔진이 줄여 그린다.
+ */
+export function flowSvg(steps: readonly string[], maxCells: number, colorIndex: number): { source: string; width: number; height: number } {
+  const c = SVG_COLORS[colorIndex % SVG_COLORS.length]!
+  const parts: string[] = []
+  let y = 0
+  let width = 0
+  packRows(steps.map(s => clip(s.trim(), SVG_LABEL_CELLS)), maxCells).forEach((row, r) => {
+    if (r > 0) y += ROW_GAP
+    const boxes = row.boxes.map(lines => ({
+      lines,
+      w: Math.max(...lines.map(textPx)) + PAD_X * 2,
+      h: lines.length * LINE_PX + PAD_Y * 2,
+    }))
+    const rowH = Math.max(...boxes.map(b => b.h))
+    const mid = y + rowH / 2
+    let x = 0
+    boxes.forEach((b, k) => {
+      if (k > 0) {
+        parts.push(arrow(x + 4, x + ARROW_PX - 4, mid))
+        x += ARROW_PX
+      }
+      const top = y + (rowH - b.h) / 2
+      parts.push(`<rect x="${x + 0.75}" y="${top + 0.75}" width="${b.w - 1.5}" height="${b.h - 1.5}" rx="6" fill="${c.fill}" stroke="${c.stroke}" stroke-width="1.5"/>`)
+      b.lines.forEach((l, m) => {
+        const tw = textPx(l)
+        // 가운데 정렬로 어림 오차를 양쪽에 나누고, 어림 폭에 맞춰 늘이거나 줄여 상자 밖으로 넘치지 않게 한다
+        parts.push(`<text x="${x + b.w / 2}" y="${top + PAD_Y + m * LINE_PX + 13.5}" text-anchor="middle" textLength="${tw}" lengthAdjust="spacingAndGlyphs" fill="${c.text}">${xml(l)}</text>`)
+      })
+      x += b.w
+    })
+    if (row.more) {
+      parts.push(arrow(x + 4, x + MORE_PX - 2, mid))
+      x += MORE_PX
+    }
+    width = Math.max(width, x)
+    y += rowH
+  })
+  const height = Math.ceil(y)
+  width = Math.ceil(width)
+  const font = `-apple-system, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', 'Segoe UI', sans-serif`
+  const source =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="${font}" font-size="${FONT_PX}">` +
+    parts.join('') +
+    '</svg>'
+  return { source, width, height }
+}
+
 /** 그리는 동안 막대: 평소 걸리는 시간(expected 초) 대비로 채우고, 넘으면 가득 찬 채로 둔다. */
 export function progressBar(seconds: number, expected: number, width: number): string {
   const filled = Math.min(width, Math.round((seconds / expected) * width))

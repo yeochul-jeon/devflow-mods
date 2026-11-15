@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { ModelCompleteResult, Register, Timer } from 'claude-code'
 
 import type { DrawView } from '../types'
-import { chooseLayout, compactLines, flowHead, packRows, progressBar } from './diagram'
+import { chooseLayout, compactLines, flowHead, flowSvg, packRows, progressBar } from './diagram'
 import { buildPrompt, lastAnswer, parseDraw } from './prompt'
 
 const PANE = 'draw'
@@ -103,6 +103,8 @@ export const register: Register = on => {
     }
     const d = v.data
     const color = (i: number) => COLORS[i % COLORS.length]!
+    // 터미널(Ink)에는 Svg 가 없다. surface 로 좁힌 뒤에 resolve 해야 Svg 가 보인다
+    const Svg = e.surface === 'terminal' ? null : $.ui.resolve(e).Svg
 
     if (chooseLayout(d, width, { placement: e.props.placement, bodyRows: e.props.scroll?.bodyRows }, v.focus) === 'compact') {
       // 보이는 줄이 모자라면 제목·초점을 빼고 흐름마다 칩 줄로. 메모는 개수만
@@ -137,7 +139,10 @@ export const register: Register = on => {
         {d.flows.map((f, i) => (
           <Box key={`f${i}`} flexDirection="column" marginTop={1}>
             <Text color={color(i)}>{flowHead(f.label, i)}</Text>
-            {packRows(f.steps, width).map((row, j) => (
+            {Svg ? (
+              // 데스크톱 앱·VS Code·모바일: 상자 줄을 그림 하나로 (E3). 엔진이 칸에 맞춰 줄여 그린다
+              <Svg source={flowSvg(f.steps, width, i).source} alt={`${flowHead(f.label, i)}: ${f.steps.join(' → ')}`} />
+            ) : packRows(f.steps, width).map((row, j) => (
               // 줄 나누기는 packRows 가 했으므로 엔진이 상자를 줄이거나 넘기지 않게 flexShrink 0
               <Box key={`r${j}`} flexDirection="row" alignItems="center">
                 {row.boxes.flatMap((lines, k) => [

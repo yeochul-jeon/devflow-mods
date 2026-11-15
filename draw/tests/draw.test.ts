@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { cells, chooseLayout, compactHeight, compactLines, fullHeight, packRows, progressBar, rowHeight } from '../hooks/diagram'
+import { cells, chooseLayout, compactHeight, compactLines, flowSvg, fullHeight, packRows, progressBar, rowHeight, textPx } from '../hooks/diagram'
 import { buildPrompt, parseDraw } from '../hooks/prompt'
 
 const PANE = { component: 'Pane', requestId: 'draw', props: { bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 } } } as any
@@ -146,6 +146,70 @@ describe('그림 (순수 함수)', () => {
     expect(progressBar(0, 15, 10)).toBe('░'.repeat(10))
     expect(progressBar(40, 15, 10)).toBe('█'.repeat(10))
   })
+
+  // Svg (E3): 데스크톱 앱·VS Code·모바일. 이미지로 그려지므로 xmlns 가 없거나 XML 이 틀리면 경고 없이 빈 그림이 된다
+  test('Svg: xmlns·viewBox 를 갖춘 문서 하나', async () => {
+    const svg = flowSvg(['bump', 'test'], 51, 0)
+    expect(svg.source.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
+    expect(svg.source.endsWith('</svg>')).toBe(true)
+    expect(svg.source).toContain(`viewBox="0 0 ${svg.width} ${svg.height}"`)
+    expect(svg.source).toContain(`width="${svg.width}"`)
+    expect(svg.source).not.toContain('<style')
+  })
+
+  test('Svg: 글자는 XML 이스케이프하고 금지 제어문자는 뺀다', async () => {
+    const svg = flowSvg(['a<b & "c"', "d'e\u0001f", 'x]]>y', 'p\ufffeq\uffffr', 's\ud800t', '😀'], 51, 0)
+    expect(svg.source).toContain('a&lt;b &amp; &quot;c&quot;')
+    expect(svg.source).toContain('d&apos;ef')
+    expect(svg.source).toContain('x]]&gt;y')
+    expect(svg.source).toContain('>pqr</text>')
+    expect(svg.source).toContain('>st</text>')
+    // 짝이 맞는 서로게이트(이모지)는 남긴다
+    expect(svg.source).toContain('😀')
+    expect(svg.source).not.toContain('\u0001')
+  })
+
+  test('Svg: 좁은 패널의 아주 긴 이름도 Svg 상한(131072자) 안', async () => {
+    const svg = flowSvg(Array(6).fill('a'.repeat(5000)), 8, 0)
+    expect(svg.source.length).toBeLessThanOrEqual(131072)
+    expect(svg.source).toContain('…')
+  })
+
+  test('Svg: 6단계까지, 상자마다 단계 이름 하나', async () => {
+    const svg = flowSvg(['하나', '둘', '셋', '넷', '다섯', '여섯', '일곱'], 200, 1)
+    expect(svg.source.match(/<rect /g)?.length).toBe(6)
+    expect(svg.source).toContain('>여섯</text>')
+    expect(svg.source).not.toContain('일곱')
+  })
+
+  test('Svg: 상자 폭은 글자 폭 어림을 따르고, 넓은 라틴 대문자는 더 넓게 잡는다', async () => {
+    expect(textPx('가나')).toBeGreaterThan(textPx('ab'))
+    expect(textPx('WWWW')).toBeGreaterThan(textPx('iiii'))
+    const narrow = flowSvg(['iiii'], 51, 0)
+    const wide = flowSvg(['WWWW_MMMM'], 51, 0)
+    expect(wide.width).toBeGreaterThan(narrow.width)
+    // 어림이 모자라도 상자 밖으로 넘치지 않게 글자를 어림 폭에 맞춘다
+    expect(wide.source).toContain('lengthAdjust="spacingAndGlyphs"')
+  })
+
+  test('Svg: 접히면 높이가 늘고 줄 끝에 이어짐 화살표를 그린다', async () => {
+    const steps = ['bump', 'test', 'commit', 'release.sh', 'install']
+    const one = flowSvg(steps, 200, 0)
+    const two = flowSvg(steps, 51, 0)
+    expect(packRows(steps, 51)).toHaveLength(2)
+    expect(two.height).toBeGreaterThan(one.height)
+    expect(two.width).toBeLessThan(one.width)
+    // 단계 5개 = 이음 4개: 한 줄이면 상자 사이 4개, 접히면 상자 사이 3개 + 줄 끝 1개
+    expect(one.source.match(/<path /g)?.length).toBe(4)
+    expect(two.source.match(/<path /g)?.length).toBe(4)
+  })
+
+  test('Svg: 흐름마다 다른 색, 화살표는 밝음·어두움 둘 다 보이는 회색', async () => {
+    const a = flowSvg(['x', 'y'], 51, 0)
+    const b = flowSvg(['x', 'y'], 51, 1)
+    expect(a.source).not.toBe(b.source)
+    expect(a.source).toContain('#8a8a8a')
+  })
 })
 
 describe('/draw', () => {
@@ -254,12 +318,29 @@ describe('패널 배치', () => {
     await again
   })
 
-  test('데스크톱 앱에서도 같은 그림 트리를 받는다', async ($, on) => {
+  test('데스크톱 앱에서는 흐름마다 상자 줄을 Svg 하나로 그린다 (E3)', async ($, on) => {
     boot(on, REPLY)
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' } as any)
     await $.command.run({ command: 'draw', args: '' } as any)
     const ui = await $.ui.mount({ plugin: 'draw', surface: 'desktop', ...PANE })
     expect(await ui.find({ type: 'Text', text: /^1. 첫 프롬프트$/ })).toBeDefined()
+    const svgs = await ui.findAll({ type: 'Svg' })
+    expect(svgs).toHaveLength(2)
+    expect(svgs[0]!.props.alt).toBe('1. 첫 프롬프트: prompt.submit → 규칙 붙임')
+    expect(String(svgs[1]!.props.source)).toContain('>session.compact</text>')
+    // 흐름마다 색이 다르다 (흐름 번호를 색 인덱스로 넘긴다)
+    expect(String(svgs[1]!.props.source)).toContain(flowSvg(['x'], 60, 1).source.match(/stroke="(#[0-9a-f]{6})"/)![1]!)
+    // 상자 테두리 Box 는 그리지 않는다
+    expect(await ui.find({ type: 'Text', text: /^prompt\.submit$/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('터미널에는 Svg 가 없다', async ($, on) => {
+    boot(on, REPLY)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
+    await $.command.run({ command: 'draw', args: '' } as any)
+    const ui = await $.ui.mount({ plugin: 'draw', surface: 'terminal', ...PANE })
+    expect(await ui.findAll({ type: 'Svg' })).toHaveLength(0)
     expect(await ui.find({ type: 'Text', text: /^prompt\.submit$/ })).toBeDefined()
     await ui.unmount()
   })
