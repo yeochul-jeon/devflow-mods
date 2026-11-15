@@ -237,6 +237,10 @@ describe('그림 배치', () => {
     const svgs = await ui.findAll({ type: 'Svg' })
     expect(svgs).toHaveLength(1)
     expect(svgs[0]!.props.alt).toBe('1. 요청 흐름: 요청 → 검문소 → 도착')
+    // 폭·높이를 주지 않으면 데스크톱 앱이 패널 폭까지 늘려 글자가 커진다
+    const own = flowSvg(['요청', '검문소', '도착'], 56, 0)
+    expect(svgs[0]!.props.width).toBe(own.width)
+    expect(svgs[0]!.props.height).toBe(own.height)
     expect(await ui.find({ type: 'Text', text: /^1\. 요청 흐름$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^도착$/ })).toBeUndefined()
     await ui.unmount()

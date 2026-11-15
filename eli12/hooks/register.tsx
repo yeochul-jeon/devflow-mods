@@ -132,8 +132,9 @@ export const register: Register = on => {
             <Box key={`f${i}`} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
               <Text color={color(i)}>{flowHead(f.label, i)}</Text>
               {Svg ? (
-                // 데스크톱 앱·VS Code·모바일: 상자 줄을 그림 하나로. 엔진이 칸에 맞춰 줄여 그린다
-                <Svg source={flowSvg(f.steps, width, i).source} alt={`${flowHead(f.label, i)}: ${f.steps.join(' → ')}`} />
+                // 데스크톱 앱·VS Code·모바일: 상자 줄을 그림 하나로
+                // 폭·높이를 주지 않으면 데스크톱 앱이 패널 폭까지 늘려 글자가 1.7배로 커졌다(2026-11-15 캡처). 그림 자신의 크기로 고정한다
+                <Svg {...flowSvg(f.steps, width, i)} alt={`${flowHead(f.label, i)}: ${f.steps.join(' → ')}`} />
               ) : packRows(f.steps, width).map((row, j) => (
                 // 줄 나누기는 packRows 가 했으므로 엔진이 상자를 줄이거나 넘기지 않게 flexShrink 0
                 <Box key={`r${j}`} flexDirection="row" alignItems="center">
