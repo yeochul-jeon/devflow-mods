@@ -214,7 +214,7 @@ export function textPx(text: string): number {
   return Math.ceil(w)
 }
 
-function xml(text: string): string {
+export function xml(text: string): string {
   return text
     // XML 1.0 이 허용하지 않는 글자(탭·줄바꿈 외 제어문자, U+FFFE·U+FFFF, 짝 없는 서로게이트)는 문서 전체를 깨뜨린다
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '')
@@ -286,7 +286,7 @@ export function progressBar(seconds: number, expected: number, width: number): s
 }
 
 /** max 칸 단위로 나눈다. 띄어쓰기에서 나누고, 한 낱말이 max 를 넘으면 글자에서 나눈다. */
-function wrap(text: string, max: number): string[] {
+export function wrap(text: string, max: number): string[] {
   const out: string[] = []
   let line = ''
   for (const word of text.split(' ')) {
