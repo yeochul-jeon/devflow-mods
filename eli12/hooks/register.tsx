@@ -21,7 +21,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'eli12',
-      description: '직전 답변을 12살도 이해하게 (비유 + 그림) 옆 패널에 다시 설명',
+      description: '직전 답변을 12살도 이해하게 (비유 + 그림) 패널에 다시 설명',
       argumentHint: '[어려운 부분]',
     })
     return next(e)
@@ -74,7 +74,8 @@ export const register: Register = on => {
 
       await update($, view, (v): Eli12View => ({ ...v, status: 'done', data }))
       // 이 줄은 모델도 읽으므로 짧게 둔다. 본문은 패널에만.
-      return { text: '12살 버전을 옆 패널에 띄웠어요. (Esc로 닫기)' }
+      // 패널은 넓은 창에서는 옆, 좁은 창에서는 입력창 위에 뜬다. 여기서는 어디인지 모른다 (T71)
+      return { text: '12살 버전을 띄웠어요. (Esc로 닫기)' }
     } finally {
       // 끝·실패·예외 어느 쪽이든 이 실행의 시계를 멈춘다 (뒤에 시작한 /eli12 의 시계는 두고)
       tick.cancel()

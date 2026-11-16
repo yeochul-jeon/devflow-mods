@@ -112,7 +112,8 @@ describe('/eli12', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
     const { text } = await $.command.run({ command: 'eli12', args: '미들웨어' } as any)
 
-    expect(text).toContain('옆 패널')
+    // 패널은 넓은 창에서는 옆, 좁은 창에서는 입력창 위에 뜬다. 어디인지 모르므로 "옆"이라 하지 않는다 (T71)
+    expect(text).toBe('12살 버전을 띄웠어요. (Esc로 닫기)')
     expect(asked).toContain('미들웨어입니다')
     expect(asked).toContain('"미들웨어"')
     // 생각 토큰만 2천을 넘은 실측이 있다
@@ -161,7 +162,8 @@ describe('/eli12', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' } as any)
     const { text } = await $.command.run({ command: 'eli12', args: '바운디드 컨텍스트' } as any)
 
-    expect(text).toContain('옆 패널')
+    // 패널은 넓은 창에서는 옆, 좁은 창에서는 입력창 위에 뜬다. 어디인지 모르므로 "옆"이라 하지 않는다 (T71)
+    expect(text).toBe('12살 버전을 띄웠어요. (Esc로 닫기)')
     expect(asked).toContain('"바운디드 컨텍스트" 를 12살도')
 
     const ui = await $.ui.mount({ plugin: 'eli12', surface: 'terminal', ...PANE })
