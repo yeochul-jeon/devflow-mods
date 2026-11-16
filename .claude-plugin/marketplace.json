@@ -57,7 +57,7 @@
         "source": "git-subdir",
         "url": "https://github.com/yeochul-jeon/devflow-mods.git",
         "path": "look-back",
-        "ref": "look-back--v0.3.7"
+        "ref": "look-back--v0.3.8"
       }
     },
     {
