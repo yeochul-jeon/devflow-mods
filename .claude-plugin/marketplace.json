@@ -30,7 +30,7 @@
         "source": "git-subdir",
         "url": "https://github.com/yeochul-jeon/devflow-mods.git",
         "path": "work-plan",
-        "ref": "work-plan--v0.4.2"
+        "ref": "work-plan--v0.4.3"
       }
     },
     {
