@@ -4,6 +4,8 @@ import type { ModelCompleteResult, Register, Timer } from 'claude-code'
 import type { Eli12View } from '../types'
 import { flowHead, flowStroke, flowSvg, packRows, progressBar } from './diagram'
 import { buildPrompt, buildTopicPrompt, lastAnswer, parseEli12 } from './prompt'
+import { lifelineLines, listLines, NARROW_CELLS, seqAlt, seqSvg } from './sequence'
+import type { SeqLine } from './sequence'
 
 const PANE = 'eli12'
 const IDLE: Eli12View = { status: 'idle', data: null, text: '', focus: '' }
@@ -16,6 +18,13 @@ let ticker: Timer | null = null
 const EXPECTED_SECONDS = 20
 // 흐름마다 이름·테두리 색 (draw 와 같은 순서)
 const COLORS = ['cyan', 'yellow', 'magenta', 'green'] as const
+// 시퀀스 줄 색 (draw /draw-seq 와 같음)
+const SEQ_COLOR: Record<NonNullable<SeqLine['kind']>, { color?: string; dimColor?: boolean; bold?: boolean }> = {
+  head: { bold: true, color: 'cyan' },
+  reply: { dimColor: true },
+  self: { color: 'yellow' },
+  dim: { dimColor: true },
+}
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -130,7 +139,18 @@ export const register: Register = on => {
         {v.focus ? <Text dimColor>초점: {v.focus}</Text> : null}
         {section('한 줄 요약', [<Text key="s">{d.summary}</Text>])}
         {d.analogy ? section('비유', [<Text key="a">{d.analogy}</Text>]) : null}
-        {d.flows.length > 0
+        {d.sequence
+          ? section('그림', [
+            // 주고받음 설명: 데스크톱 앱 등은 Svg 생명선(자기 크기로 고정), 터미널은 생명선형, 좁으면 번호 목록형
+            Svg ? <Svg key="seq" {...seqSvg(d.sequence, width)} alt={seqAlt(d.sequence)} />
+              : <Box key="seq" flexDirection="column">
+                {(width < NARROW_CELLS ? listLines(d.sequence, width) : lifelineLines(d.sequence, width)).map((l, i) => (
+                  <Text key={`l${i}`} {...(l.kind ? SEQ_COLOR[l.kind] : {})}>{l.text}</Text>
+                ))}
+              </Box>,
+            ...d.sequence.notes.map((n, i) => <Text key={`n${i}`} dimColor>· {n}</Text>),
+          ])
+          : d.flows.length > 0
           ? section('그림', d.flows.map((f, i) => (
             <Box key={`f${i}`} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
               <Text color={headColor(i)}>{flowHead(f.label, i)}</Text>
