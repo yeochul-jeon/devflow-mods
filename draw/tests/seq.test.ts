@@ -106,6 +106,16 @@ describe('시퀀스 그림 (순수 함수)', () => {
     ])
   })
 
+  test('생명선형: 결합 문자(0칸 글자)가 든 이름도 세로줄이 같은 칸에 선다 (Codex 지적 6)', async () => {
+    const d = { title: '', participants: ['A', 'B'], messages: [{ from: 'A', to: 'B', label: 'café', reply: false }, { from: 'B', to: 'A', label: 'ño', reply: true }], notes: [] }
+    const text = lifelineLines(d, 20).map(l => l.text)
+    // 머리 줄을 뺀 모든 줄이 오른쪽 세로줄 '|' 로 끝나고 칸 수가 같다
+    expect(text.slice(1).map(t => [t.endsWith('|'), cells(t)])).toEqual(text.slice(1).map(() => [true, 18]))
+    // 결합 문자는 버리지 않고 앞 글자에 붙인다
+    expect(text.join('\n')).toContain('café')
+    expect(text.join('\n')).toContain('ño')
+  })
+
   test('생명선형: 자기 자신에게 하는 일은 오른쪽(마지막 참여자는 왼쪽)으로 돌아오는 고리', async () => {
     const d = { title: '', participants: ['A', 'B'], messages: [{ from: 'A', to: 'A', label: '저장', reply: false }, { from: 'B', to: 'B', label: '기록', reply: false }], notes: [] }
     const text = lifelineLines(d, 40).map(l => l.text)

@@ -33,6 +33,13 @@ class Row {
   put(x: number, s: string) {
     for (const ch of s) {
       const w = cells(ch)
+      // 0칸 글자(결합 문자 등)는 칸을 차지하지 않으므로 바로 앞 글자에 붙인다
+      if (w === 0) {
+        let p = x - 1
+        while (p > 0 && this.c[p] === '') p--
+        if (p >= 0 && p < this.c.length) this.c[p] += ch
+        continue
+      }
       if (x < 0 || x + w > this.c.length) {
         x += w
         continue
