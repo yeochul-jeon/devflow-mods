@@ -303,9 +303,45 @@ function isReadOnly(command: string): boolean {
   return steps(command).every(stepReadOnly)
 }
 
-/** 도구 하나를 쓴 뒤의 종류. 앞 것(수정 > 실행 > 조사)이 이긴다. 실패·거부한 도구와 모르는 도구는 바꾸지 않는다. 읽기만 하는 Bash 명령은 조사 */
-export function kindAfter(prev: Kind | undefined, tool: string, ok: boolean, command?: string): Kind | undefined {
-  const k = tool === 'Bash' && command !== undefined && isReadOnly(command) ? 'research' : KIND_OF_TOOL[tool]
+/** 임시 폴더: /tmp, /private/tmp, macOS 의 /var/folders (TMPDIR) */
+const TEMP_DIR = /^~?\/?(?:tmp|private\/tmp|var\/folders)(?:\/|$)/
+
+/** 셸 변수·임시 폴더·장치가 아닌, 글자 그대로의 경로 (T72) */
+function literalTarget(p: string): boolean {
+  return !!p && !TEMP_DIR.test(p) && !/^(?:~?\/?dev\/|-)/.test(p) && !/[$`\\*?]/.test(p)
+}
+
+/** 파일을 쓰는 단계가 쓰는 대상(따옴표 벗김): sed -i·perl -i 의 마지막 낱말, heredoc·echo·printf 의 > · >> 대상. 대상을 알 수 없으면 undefined (T72) */
+function authoredTarget(s: string): string | undefined {
+  const u = unquoted(s)
+  // perl 의 -I·-M·-m 은 인자를 붙여 받는 옵션이라 그 안의 i 는 -i 가 아니다
+  if ((/^sed\b/.test(u) && /\s(?:-[a-zA-Z]*i(?![a-zA-Z])|--in-place)/.test(u)) || /^perl\b.*\s-(?![IMm])[a-zA-Z]*i/.test(u)) {
+    // 리다이렉트·파이프·줄 이어 쓰기가 붙거나 마지막 낱말이 -e 의 스크립트면 대상인지 알 수 없다
+    if (/[<>|\\]/.test(u) || /\s-[a-zA-Z]*[eE]\s+\S+\s*$/.test(u)) return undefined
+    const m = u.match(/(\S+)\s*$/)
+    return m ? s.slice(m.index!, m.index! + m[1]!.length).replace(/^(['"])(.*)\1$/, '$2') : undefined
+  }
+  if (!/^(?:cat\b.*<<|echo\b|printf\b)/.test(u)) return undefined
+  const rs = [...u.matchAll(/(?<![0-9&>])>>?\s*(?!&)(\S+)/g)]
+  if (rs.length !== 1) return undefined
+  const m = rs[0]!
+  const at = m.index! + m[0].length - m[1]!.length
+  return s.slice(at, at + m[1]!.length).replace(/^(['"])(.*)\1$/, '$2')
+}
+
+/** 상대 경로가 셸 변수·임시 폴더 안을 가리키게 되는 cd·pushd */
+const CD_AWAY = /(?:^|[;&|\n(]\s*)(?:cd|pushd)\s+["']?(?:\$|~?\/?(?:tmp|private\/tmp|var\/folders)(?:\/|["']?(?:\s|$|[;&|)])))/
+
+/** 파일을 고친 Bash 명령인가: sed -i, perl -i, heredoc·echo·printf 를 글자 그대로의 경로로 쓴 단계가 있다 (T72) */
+function authorsFile(command: string): boolean {
+  const targets = steps(command).map(authoredTarget).filter((t): t is string => t !== undefined && literalTarget(t))
+  // 셸 변수·임시 폴더로 옮긴 뒤에는 절대 경로만 센다
+  return CD_AWAY.test(command) ? targets.some(t => t.startsWith('/')) : targets.length > 0
+}
+
+/** 도구 하나를 쓴 뒤의 종류. 앞 것(수정 > 실행 > 조사)이 이긴다. 실패·거부한 도구와 모르는 도구는 바꾸지 않는다. 읽기만 하는 Bash 명령은 조사, 실패하지 않고 파일을 고친 Bash 명령은 수정 */
+export function kindAfter(prev: Kind | undefined, tool: string, ok: boolean, command?: string, errored = false): Kind | undefined {
+  const k = tool !== 'Bash' || command === undefined ? KIND_OF_TOOL[tool] : isReadOnly(command) ? 'research' : !errored && authorsFile(command) ? 'edit' : 'run'
   if (!ok || !k) return prev
   return prev && KIND_RANK[prev] >= KIND_RANK[k] ? prev : k
 }

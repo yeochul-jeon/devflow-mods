@@ -52,12 +52,14 @@ claude plugin install look-back@devflow-mods
 
 | 종류 | 도구 | 아낀 시간 기본값 |
 |---|---|---|
-| 코드 수정 | Edit · Write · NotebookEdit (성공한 것) | 20분 |
-| 실행 | Bash (실패한 명령 포함) | 10분 |
+| 코드 수정 | Edit · Write · NotebookEdit (성공한 것), 파일을 고친 Bash (`sed -i` · `perl -i` · heredoc · `echo`/`printf` 를 파일로, 실패하지 않은 것) | 20분 |
+| 실행 | 그 밖의 Bash (실패한 명령 포함) | 10분 |
 | 조사 | Read · Grep · Glob · WebSearch · WebFetch · Agent, 읽기만 하는 Bash (`cat` · `grep` · `sed -n` · `git log` 등) | 15분 |
 | 대화 | 도구 없음 | 5분 |
 
-거부된 도구는 세지 않습니다. Bash 는 이어 붙인 명령이 모두 읽기만 할 때만 조사입니다. 하나라도 다른 명령이나 파일로 쓰는 리다이렉트(`> f`, `&> f`)가 섞이면 실행입니다. 파일을 바꾸는 `sed -i`(`-Ei` 처럼 붙인 것도), `find -delete`, `sort -o` 도 실행입니다. `find -exec` 는 실행하는 명령이 읽기만 할 때(`grep`, `cat` 등)만 조사입니다. 판정은 team-board 의 숨은 실패 감지에 쓰는 규칙과 같습니다.
+거부된 도구는 세지 않습니다. Bash 는 이어 붙인 명령이 모두 읽기만 할 때만 조사입니다. 하나라도 다른 명령이나 파일로 쓰는 리다이렉트(`> f`, `&> f`)가 섞이면 실행입니다. `find -delete`, `sort -o` 도 실행입니다. `find -exec` 는 실행하는 명령이 읽기만 할 때(`grep`, `cat` 등)만 조사입니다. 읽기 전용 판정은 team-board 의 숨은 실패 감지에 쓰는 규칙과 같습니다.
+
+0.3.8 부터 파일을 고친 Bash 는 코드 수정입니다: `sed -i`·`perl -i` 의 대상, heredoc(`cat > f <<EOF`)·`echo`·`printf` 를 `>`·`>>` 로 쓴 대상이 글자 그대로의 경로일 때만 셉니다. 대상이 셸 변수(`$S/x`), 임시 폴더(`/tmp`, `/var/folders`), 와일드카드(`*.ts`), 줄을 이어 쓴 것, 리다이렉트가 붙은 `sed` 이거나, 변수·임시 폴더로 `cd`·`pushd` 한 뒤의 상대 경로면 실행으로 둡니다. `sudo sed -i`, `xargs sed -i`, `find -exec sed -i`, `sed -ibak`(접미사를 붙여 쓴 것)도 세지 않습니다. 로그 파일(`echo x >> out.log`)처럼 글자 그대로의 경로면 수정으로 셉니다. 복사(`cat a > b`), 출력 저장(`git show x > f`), `tee`, python·node 스크립트, `git apply`, `mv`·`cp`·`rm` 도 실행입니다. 엔진이 실패로 본 명령은 파일을 고쳤어도 실행이라, `sed -i … && 테스트` 에서 테스트가 실패하면 실행으로 남고, `sed -i …; echo ok` 처럼 실패를 숨긴 명령은 고친 것이 없어도 수정으로 셉니다. 고친 파일 목록에는 Edit·Write 로 고친 파일만 들어갑니다. 0.3.7 까지의 기록은 다시 세지 않으므로, 차트는 0.3.8 을 쓴 날부터 오를 수 있습니다.
 
 - 누가 했나: 모델별 막대·건수 (메인 요청의 모델).
 

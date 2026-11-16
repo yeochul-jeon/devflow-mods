@@ -271,7 +271,7 @@ export const register: Register = (on, options) => {
     // 거부된 도구는 안 쓴 것. 수정은 성공해야 수정이고, 실패한 명령·검색도 한 일이다
     if (entry) {
       const command = (e as { command?: unknown }).command
-      entry.kind = kindAfter(entry.kind, e.tool, r.deny === undefined && !(EDIT_TOOLS.has(e.tool) && r.isError), typeof command === 'string' ? command : undefined)
+      entry.kind = kindAfter(entry.kind, e.tool, r.deny === undefined && !(EDIT_TOOLS.has(e.tool) && r.isError), typeof command === 'string' ? command : undefined, r.isError === true)
     }
     if (entry && EDIT_TOOLS.has(e.tool) && r.deny === undefined && !r.isError) {
       const input = e as { file_path?: unknown; notebook_path?: unknown }

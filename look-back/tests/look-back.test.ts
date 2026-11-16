@@ -167,12 +167,45 @@ describe('Work Report (순수 함수)', () => {
     expect(kindAfter(undefined, 'Bash', true, '{ ls; ./gradlew test; }')).toBe('run')
     // heredoc 본문은 명령이 아니다
     expect(kindAfter(undefined, 'Bash', true, "cat <<'EOF'\nrm -rf build\nEOF")).toBe('research')
-    expect(kindAfter(undefined, 'Bash', true, "sed -i '' s/a/b/ a.txt")).toBe('run')
+    expect(kindAfter(undefined, 'Bash', true, "sed -i '' s/a/b/ a.txt")).toBe('edit') // T72: 파일을 고친 Bash 는 수정
     expect(kindAfter(undefined, 'Bash', true, "python3 -c 'print(1)'")).toBe('run')
     expect(kindAfter('run', 'Bash', true, 'ls')).toBe('run') // 앞 것이 이긴다
     expect(kindAfter(undefined, 'Bash', true)).toBe('run') // 명령을 모르면 실행
     // T71: 파일을 바꾸는 플래그·옵션, &> 리다이렉트는 읽기만이 아니다. find -exec 는 실행하는 명령으로 판정한다
-    for (const c of NOT_READ_ONLY) expect([c, kindAfter(undefined, 'Bash', true, c)]).toEqual([c, 'run'])
+    // T72 부터 sed -i 처럼 파일을 고친 단계는 수정(edit)이 된다. 여기서는 읽기만이 아닌지(조사가 아닌지)만 본다
+    for (const c of NOT_READ_ONLY) expect([c, kindAfter(undefined, 'Bash', true, c)]).not.toEqual([c, 'research'])
+  })
+
+  test('종류 (T72): 파일을 고친 Bash (sed -i · perl -i · heredoc · echo/printf 를 파일로) 는 수정, 대상이 셸 변수·임시 폴더면 실행', async () => {
+    const k = (c: string, errored = false) => [c, kindAfter(undefined, 'Bash', true, c, errored)]
+    const is = (kind: string, ...cs: string[]) => { for (const c of cs) expect(k(c)).toEqual([c, kind]) }
+    is('edit',
+      "sed -i '' 's/a/b/' src/app.ts", "perl -pi -e 's/a/b/' x.pl",
+      "cat > notes.md <<'EOF'\n# 제목\nEOF", 'cat >> log.md <<EOF\n- 한 줄\nEOF', 'cat <<EOF > notes.md\nx\nEOF',
+      "echo '- x' >> MEMORY.md", "printf 'a\\n' > a.md",
+      "cd x && sed -i '' s/a/b/ f.ts", "sed -i '' s/a/b/ 'my notes.md'", 'cd "$S" && echo x > /abs/a.md',
+      "sed -i '' s/a/b/ missing.txt; echo ok", // 실패를 숨긴 명령은 엔진이 실패로 보지 않는다: 수정으로 센다 (받아들인 한계)
+      'cat > a.md 2>/dev/null <<EOF\nx\nEOF') // 2> 는 파일 쓰기 대상이 아니다
+    is('run',
+      'cat > $S/x.py <<EOF\nprint(1)\nEOF', 'cat > "$S/x" <<EOF\nx\nEOF', 'echo x > /tmp/a', "sed -i '' s/a/b/ $f", 'echo x > /private/tmp/a/b.md',
+      'cat a.txt > b.txt', 'git show x > f', // 복사·출력 저장은 수정이 아니다
+      "python3 - <<'EOF'\nopen('out.md', 'w').write('x') > out.md\nEOF", // 스크립트 본문은 보지 않는다
+      "sed -i '' s/a/b/ \\\n  f.ts", "sed -i '' s/a/b/ \"$f\" 2>/dev/null", "sed -i '' s/a/b/ f.ts 2>/dev/null", // 대상이 글자 그대로 드러나지 않으면 세지 않는다
+      'cd /tmp/x && cat > a.py <<EOF\nx\nEOF', 'cd $S && echo x > a.md', // 임시 폴더·변수로 옮긴 뒤 상대 경로
+      'echo x > a.md > b.md', 'echo x | tee a.md', 'echo x > out/$n.md',
+      'npm test || echo fail >&2', 'make; echo done >&2') // >&2 는 파일이 아니다
+    // 검수 지적 (Codex·goldfish): perl 의 -I·-M 은 인자를 받는 옵션, -e 뒤는 스크립트, /tmp 자체·macOS 임시 폴더, cd 뒤 2> 는 대상이 아니다, pushd
+    is('run',
+      'perl -Ilib script.pl', "perl -MList::Util=sum -e 'print sum(1,2)'", 'perl -i -e "print 1"',
+      'cd /tmp && echo x > a.md', 'echo x > /var/folders/ab/T/x.md', 'cd "$S" && cat 2>/dev/null > a.md <<EOF\nx\nEOF', 'pushd $S && echo x > a.md')
+    is('edit', 'echo x > a.md >&2', "perl -pe 's/a/b/' -i f.pl", 'cd /tmp && echo x > /abs/a.md', 'cd tmpl && echo x > a.md')
+    is('research', 'echo x > /dev/null', 'echo "a > b"', "cat <<'EOF'\nx > out.md\nEOF")
+    // 실패한 명령은 파일을 고쳤어도 실행으로 둔다 (엔진의 isError: 0 이 아닌 종료 코드, 2.1.325 실측)
+    expect(kindAfter(undefined, 'Bash', true, "sed -i '' s/a/b/ f.ts && false", true)).toBe('run')
+    expect(kindAfter(undefined, 'Bash', false, "sed -i '' s/a/b/ f.ts")).toBeUndefined() // 거부
+    expect(kindAfter('research', 'Bash', true, "echo x >> a.md")).toBe('edit')
+    expect(kindAfter('edit', 'Bash', true, 'npm test')).toBe('edit')
+    expect(kindAfter('edit', 'Bash', true, "sed -i '' s/a/b/ f.ts", true)).toBe('edit')
     for (const c of STILL_READ_ONLY) expect([c, kindAfter(undefined, 'Bash', true, c)]).toEqual([c, 'research'])
   })
 
@@ -290,7 +323,7 @@ function boot(on: any, interactive = true) {
   })
   on('tool.call', { tool: 'Edit' }, () => ({ result: 'ok' }))
   on('tool.call', { tool: 'Read' }, () => ({ result: 'ok' }))
-  on('tool.call', { tool: 'Bash' }, ($: any, e: any) => (e.command === 'npm test' ? { result: '1 failed', isError: true } : { result: 'ok' }))
+  on('tool.call', { tool: 'Bash' }, ($: any, e: any) => (e.command === 'npm test' || e.command.endsWith('&& false') ? { result: '1 failed', isError: true } : { result: 'ok' }))
   on('turn.complete', () => ({ text: '' }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   const store = new Map<string, unknown>()
@@ -536,6 +569,22 @@ describe('look-back (hook)', () => {
     await $.tool.call({ tool: 'Edit', file_path: '/repo/order-svc/x.ts', agentId: 'sub-1', tool_use_id: 'b2' } as any)
     await complete($, 't2')
     expect(JSON.parse([...files.values()][0]!).entries.map((e: Entry) => `${e.text}:${e.kind}`)).toEqual(['안녕:chat', '테스트 돌려 줘:run'])
+  })
+
+  test('종류 (T72): 파일을 고친 Bash 는 수정, 실패한 명령(isError)은 실행. 수정한 파일 목록은 Edit·Write 만', async ($, on) => {
+    const { files, clock } = boot(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await submit($, '고쳐 줘')
+    await start($, 't1', '고쳐 줘')
+    await $.tool.call({ tool: 'Bash', command: "sed -i '' s/a/b/ api.ts", tool_use_id: 'b1' } as any)
+    await complete($, 't1')
+    await clock.advance(1000)
+    await submit($, '다시 고쳐 줘')
+    await start($, 't2', '다시 고쳐 줘')
+    await $.tool.call({ tool: 'Bash', command: "sed -i '' s/b/c/ api.ts && false", tool_use_id: 'b2' } as any)
+    await complete($, 't2')
+    const es = JSON.parse([...files.values()][0]!).entries as Entry[]
+    expect(es.map(e => `${e.text}:${e.kind}:${e.files.length}`)).toEqual(['고쳐 줘:edit:0', '다시 고쳐 줘:run:0'])
   })
 
   test('/lookback: 한눈에 칸(타일·종류·모델·차트), /lookback report off 로 끄고 on 으로 켠다', { options: { minutes_edit: 30 } }, async ($, on) => {
