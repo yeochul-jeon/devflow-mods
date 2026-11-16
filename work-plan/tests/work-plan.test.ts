@@ -122,6 +122,24 @@ describe('work-plan (hook)', () => {
     expect((await plan()).steps).toEqual(STEPS)
   })
 
+  test('막힌 보내기(drop)는 규칙을 쓰지 않는다. 다음에 실제로 들어가는 프롬프트에 붙인다 (T71, plain-terms 와 같음)', async ($, on) => {
+    mock.clock(on, { now: NOW })
+    const contexts: (readonly string[] | undefined)[] = []
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('tool.register', ($, e: any) => ({ value: { tool: `mcp__work-plan__${e.name}` } }))
+    // work-plan 안쪽에서 next() 뒤에 막는 mod (prependPlugins 가 없거나 순서가 다르면 prompt-coach 가 여기 온다)
+    on('prompt.submit', ($, e: any) => {
+      contexts.push(e.context)
+      return e.text.startsWith('HOLD') ? { drop: 'prompt-coach: 질문에 답하면 다듬어요' } : { text: e.text }
+    })
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/r' } as any)
+    const submit = (text: string) => $.prompt.submit({ text, origin: { kind: 'composer' }, wait: false } as any)
+    await submit('HOLD 고쳐 줘')
+    await submit('다듬은 요청')
+    await submit('계속')
+    expect(contexts).toEqual([[RULE], [RULE], undefined])
+  })
+
   test('규칙은 첫 프롬프트에 한 번, compaction 뒤엔 규칙 + 계획, /clear 뒤엔 규칙만 다시 붙는다', { plugins: [PEEK] }, async ($, on) => {
     const clock = mock.clock(on, { now: NOW })
     const contexts: (readonly string[] | undefined)[] = []

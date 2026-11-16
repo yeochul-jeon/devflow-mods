@@ -55,7 +55,10 @@ export const register: Register = (on, options) => {
     if (!pending || e.text.trim().startsWith('/')) return next(e)
     const why = pending
     pending = null
-    return next({ ...e, context: [...(e.context ?? []), contextFor(await read($, plan), why, gate)] })
+    const r = await next({ ...e, context: [...(e.context ?? []), contextFor(await read($, plan), why, gate)] })
+    // 안쪽 mod 가 막은(drop) 프롬프트는 들어가지 않았다. 다음 프롬프트에 붙인다 (T71, plain-terms 와 같음)
+    if (r.drop !== undefined) pending = why
+    return r
   })
 
   // 서브에이전트의 계획은 메인 진행 줄이 아니므로 받기만 하고 저장하지 않는다.
