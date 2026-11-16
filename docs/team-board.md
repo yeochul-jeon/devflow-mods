@@ -296,7 +296,7 @@ team-board가 숨은 실패를 찾으면 아래와 같이 알립니다.
 
 ### 무시하는 것
 
-- 읽기만 하는 단계로만 된 명령: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `sed`(`-i` 없이), `fold`, `xargs grep`, `git log/diff/rev-parse`, `git -C <경로> …`, `pwd`, `docker logs`, `kubectl logs`, 도움말·버전(`x --help`, `x --version`, `git help y`, `man`, `which`) 등. `/bin/ls` 처럼 경로를 붙여도 같습니다. `echo x && ./gradlew test` 처럼 다른 단계가 섞이면 판정합니다.
+- 읽기만 하는 단계로만 된 명령: `grep`, `cat`, `tail`, `sort`, `uniq`, `cut`, `sed`(`-i`·`-Ei` 같은 붙인 꼴 없이), `find`(`-delete` 없이, `-exec` 는 `grep`·`cat` 등 읽기 명령일 때), `fold`, `xargs grep`, `git log/diff/rev-parse`, `git -C <경로> …`, `pwd`, `docker logs`, `kubectl logs`, 도움말·버전(`x --help`, `x --version`, `git help y`, `man`, `which`) 등. `/bin/ls` 처럼 경로를 붙여도 같습니다. `echo x && ./gradlew test` 처럼 다른 단계가 섞이면 판정합니다.
   - 반복·조건 구문(`for f in …; do …; done`, `if [ -f x ]; then …; fi`)은 건너뛰고 안쪽 명령으로 판정합니다.
   - 출력을 파일로 쓰는 단계(`git show x > f`, `>> f`)는 읽기 전용으로 보지 않습니다. `2>&1`, `> /dev/null` 은 괜찮습니다.
 - 통과 요약: `0 failed`, `ok=1 skipped=0`, `tests 52 failures 0`
@@ -311,7 +311,7 @@ team-board가 숨은 실패를 찾으면 아래와 같이 알립니다.
 
 ### 저장과 지우기
 
-- 저장하는 명령과 실패 흔적에서 비밀 값을 `***` 로 가립니다. 대상: token·password 변수, `Authorization` 헤더, URL 비밀번호, `sk-`·`ghp_` 같은 토큰
+- 저장하는 명령과 실패 흔적에서 비밀 값을 `***` 로 가립니다. 대상: token·password 변수(`password: 값`·`"api_key": "값"` 꼴은 값이 6자 이상이고 글자와 숫자가 섞일 때), `Authorization` 헤더, URL 비밀번호, `mysql -p값`, 개인 키 블록, `sk-`·`sk_live_`·`ghp_`·`AIza`·`glpat-`·`npm_` 같은 토큰
 - 같은 명령이 실패 흔적 없이 다시 실행되면 표시를 지웁니다. 출력이 없어도 지웁니다. `|| true` 처럼 실패 코드를 가리는 명령은 출력이 있을 때만 지웁니다.
 - 같은 명령인지는 앞 두 낱말로 판단합니다. 예: `./gradlew test --tests X` → `./gradlew test`
 - 명령의 어느 단계에서 다시 돌려도 같은 명령입니다(0.29.8). 예: 스크립트를 고치는 `python3 - <<'EOF'` 다음에 `python3 check.py` 를 돌린 경우

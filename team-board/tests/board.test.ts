@@ -77,6 +77,38 @@ import { cells, clip, EXPLAIN_JSON_SPEC, flowArt, parseExplain, parseSte, STE_JS
 import { character, characterOf, HUES, parseLook, snapHex } from '../hooks/pixel'
 import { commandKey, isReadOnly, isVerify, judge, masksIn, noteForClaude, redact, reruns, scanOutput } from '../hooks/failure'
 
+// T71: 아래 네 표는 look-back/tests/look-back.test.ts 에도 같은 것이 있다 (판정·가리기 코드를 복사해 쓰므로 둘 다 같은 표로 잰다)
+// 가짜 토큰은 저장소 비밀 검사에 걸리지 않게 실행할 때 이어 붙인다
+const FAKE = { stripe: 'sk_' + 'live_' + '51H' + 'a1'.repeat(10), google: 'AI' + 'za' + 'SyA' + 'b2'.repeat(16), gitlab: 'gl' + 'pat-' + 'c3'.repeat(10), npm: 'np' + 'm_' + 'd4'.repeat(18), slack: 'xo' + 'xe.' + 'xoxp-1-' + 'e5'.repeat(6) }
+const SECRET_CASES: [string, string][] = [
+  ['login password: hunter2 입니다', 'login password: *** 입니다'],
+  ['{"api_key": "abcd1234efgh"}', '{"api_key": "***"}'],
+  ['curl -H "X-Api-Key: zzz123" https://x', 'curl -H "X-Api-Key: ***" https://x'],
+  ['DB_PASSWORD = s3cret99 ./run', 'DB_PASSWORD = *** ./run'],
+  ['mysql -u root -pS3cret db', 'mysql -u root -p*** db'],
+  ["mysql -uroot -p'S3cret' db", 'mysql -uroot -p*** db'],
+  ['mysql -u me -p"S3 cret" db', 'mysql -u me -p*** db'],
+  [`키 ${FAKE.stripe} 확인`, '키 *** 확인'],
+  [`${FAKE.google} ${FAKE.gitlab} ${FAKE.npm} ${FAKE.slack}`, '*** *** *** ***'],
+  ['키: -----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY----- 끝', '키: *** 끝'],
+  ['-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1r', '***'],
+  ['비밀번호는 qwer1234 야', '비밀번호는 *** 야'],
+  // 따옴표 안의 값은 닫는 따옴표까지 (Codex 검토: `;` 뒤가 남았다)
+  ['{"password":"abc123;def456"}', '{"password":"***"}'],
+  // 전부터 가리던 꼴
+  ['API_TOKEN=abc123 ./gradlew test', 'API_TOKEN=*** ./gradlew test'],
+  ['curl -H "Authorization: Bearer abc.def" https://x', 'curl -H "Authorization: Bearer ***" https://x'],
+]
+// 실제 기록·명령(2026-11-16, 요청 4,064 · Bash 27,071)에서 새 꼴이 잘못 가리던 글: 값이 숫자만·글자만이거나 셸 변수
+const PLAIN_CASES = [
+  'maxTokens: 16_000', 'maxTokens: 16_000,foo', 'usage: { input_tokens: 0, output_tokens: 5 }', 'tokensOk: true', 'auth: login.ts 4', 'print -r -- "${NEO4J_PASSWORD:-$C}"',
+  'for pair in "password:$NEO4J_PASSWORD"', 'CUST_NO_TOKEN = "{" + CUST_NO', '비밀번호는 메신저 대화에 있다', '토큰 수를 세 줘',
+]
+const NOT_READ_ONLY = ["sed -Ei 's/a/b/' f", "sed -ni '1p' f", 'find . -name "*.log" -delete', 'find . -exec rm {} +', 'sort -o out.txt in.txt', 'grep x f &> out.log', 'find . -exec grep -l x {} + -exec rm {} +', 'sort -o "out.txt" "in.txt"', "sed -i'' s/a/b/ f"]
+const STILL_READ_ONLY = ["sed -n '1,5p' f", 'find . -name x', 'find . -name "*.ts" -exec grep -n foo {} +', 'grep x f 2>&1', 'grep x f &> /dev/null', 'cat a && cat b', "sed -n '/-ignore/p' f", "sed -n '1p' -- -input.txt", 'find . -exec "cat" {} +',
+  // 프로세스 치환은 단계로 나뉘지 않는다: `sort -u) <(grep -oE …` 의 -oE 는 sort 의 -o 가 아니다 (실제 명령, 2026-11-16)
+  'diff <(grep x a | sort -u) <(grep -oE y b | sort -u)']
+
 // 알약 바탕: 상태색을 카드 바탕 쪽으로 30% (위 줄 배지와 구분, T27 D2)
 const chip = (tone: 'ask' | 'work') => mix(paletteOf('night')[tone], paletteOf('night').card, 0.3)
 
@@ -955,6 +987,21 @@ describe('숨은 실패', () => {
     expect(isReadOnly('env LANG=C grep -n FAILED build.log')).toBe(true)
     expect(reruns('tmux send-keys', 'env -u TMUX tmux send-keys -t y Up')).toBe(true)
     expect(masksIn('./gradlew test || true')).toHaveLength(1)
+  })
+
+  test('파일을 바꾸는 플래그·옵션과 &> 는 읽기만이 아니다. find -exec 는 실행하는 명령으로 판정한다 (T71)', async () => {
+    for (const c of NOT_READ_ONLY) expect([c, isReadOnly(c)]).toEqual([c, false])
+    // 판정한 명령은 다시 돌렸는지 비교할 키가 있어야 한다: 키가 비면 다시 돌려 성공해도 실패 표시가 안 지워진다
+    // 리다이렉트로만 쓰는 단계는 전처럼 키가 아니다 (`cat >> log.md <<EOF` 가 실제 명령 500개 가까이: 키가 되면 다른 파일의 cat >> 로도 지워진다)
+    for (const c of NOT_READ_ONLY.filter(c => !c.includes('&>'))) expect([c, commandKey(c) !== '', reruns(commandKey(c), c)]).toEqual([c, true, true])
+    expect(commandKey('git show x > f')).toBe('')
+    expect(commandKey('diff <(grep x a | sort -u) <(grep -oE y b | sort -u)')).toBe('')
+    for (const c of STILL_READ_ONLY) expect([c, isReadOnly(c)]).toEqual([c, true])
+  })
+
+  test('비밀 값: 이름: 값 · 토큰 꼴 · 개인 키 · mysql -p 를 가리고, 숫자만·글자만인 값과 셸 변수는 둔다 (T71)', async () => {
+    for (const [from, to] of SECRET_CASES) expect(redact(from)).toBe(to)
+    for (const text of PLAIN_CASES) expect(redact(text)).toBe(text)
   })
 
   test('도움말·버전 출력은 판정하지 않는다 (2026-10-26 오탐: `codex exec --help` 의 `Error out when …`)', async () => {
