@@ -558,7 +558,12 @@ export const register: Register = (on, options) => {
         {chips}
         {hideReport ? <Text bold>{`돌아보기 · ${range}`}</Text> : report()}
         {section('s-proj', '프로젝트')}
-        <Text>{`요청 ${reqs} · Claude 작업 ${durationText(ms)} · 결정 ${decided} · 커밋 ${commits} · 프로젝트 ${rep.projects.length}`}</Text>
+        {/* 합계도 프로젝트 수치처럼 조각마다 한 Text: 한 글이면 `커밋` 뒤에서 꺾여 숫자가 떨어졌다 */}
+        <Box key="total" flexDirection="row" flexWrap="wrap" columnGap={1}>
+          {[`요청 ${reqs}`, `Claude 작업 ${durationText(ms)}`, `결정 ${decided}`, `커밋 ${commits}`, `프로젝트 ${rep.projects.length}`].map((s, j, all) => (
+            <Box key={`total-s${j}`} flexShrink={0}><Text>{j < all.length - 1 ? `${s} ·` : s}</Text></Box>
+          ))}
+        </Box>
         {rep.projects.length === 0 ? <Text dimColor>이 기간에 기록된 요청이 없어요. 기록은 look-back 을 설치한 뒤 대화형 세션에서 보낸 요청부터 남아요.</Text> : null}
         {rep.projects.map(project)}
         {self.writeError ? <Text color="red">{`기록 쓰기 실패: ${self.writeError}`}</Text> : null}

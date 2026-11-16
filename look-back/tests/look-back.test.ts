@@ -422,7 +422,7 @@ describe('look-back (hook)', () => {
     const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
     expect(await ui.find({ type: 'Text', text: /^오늘 한 일$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^2026-10-18$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 5분 · 결정 0 · 커밋 1 · 프로젝트 1$/ })).toBeDefined()
+    for (const part of ['요청 1 ·', 'Claude 작업 5분 ·', '결정 0 ·', '커밋 1 ·', '프로젝트 1']) expect([part, (await ui.find({ type: 'Text', text: part }))?.text]).toEqual([part, part]) // 합계 줄 조각
     expect(await ui.find({ type: 'Text', text: /^order-svc$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^프로젝트 ─+$/ })).toBeDefined() // 합계 줄 위 가로줄
     expect(await ui.find({ type: 'Text', text: /^order-svc ─+$/ })).toBeDefined() // 프로젝트마다 이름 붙은 가로줄
@@ -474,7 +474,7 @@ describe('look-back (hook)', () => {
 
     // 질문·답 전문이 한 줄에 들어가는 폭 (좁은 폭은 아래 '좁은 패널' 시험)
     const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE, props: { bodyColumns: 120 } })
-    expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 1초 · 결정 2 · 커밋 2 · 프로젝트 2$/ })).toBeDefined()
+    for (const part of ['요청 1 ·', 'Claude 작업 1초 ·', '결정 2 ·', '커밋 2 ·', '프로젝트 2']) expect([part, (await ui.find({ type: 'Text', text: part }))?.text]).toEqual([part, part])
     expect(await ui.find({ type: 'Text', text: /23:54 \? 커밋, push, 설치를 진행할까요\? → 커밋하고 push 후 설치까지 진행해주세요/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
     // 요청 기록이 없으면 요청·시간·토큰을 빼고 결정·커밋만
@@ -514,6 +514,11 @@ describe('look-back (hook)', () => {
     for (const [j, part] of parts.entries()) {
       expect([String(part), await ui.find({ type: 'Text', text: part }) !== undefined]).toEqual([String(part), true])
       expect((await ui.find({ key: `p0-s${j}` }))?.props.flexShrink).toBe(0) // 조각 안에서는 꺾지 않는다
+    }
+    // 맨 위 합계 줄도 같다 (실화면: `… · 커밋` / `40 · …` 로 숫자가 떨어졌다)
+    expect((await ui.find({ key: 'total' }))!.props.flexWrap).toBe('wrap')
+    for (const [j, part] of ['요청 1 ·', 'Claude 작업 2분 ·', '결정 1 ·', '커밋 1 ·', '프로젝트 1'].entries()) {
+      expect([part, (await ui.find({ key: `total-s${j}` }))?.props.flexShrink, (await ui.find({ type: 'Text', text: part }))?.text]).toEqual([part, 0, part])
     }
     await ui.unmount()
   })
