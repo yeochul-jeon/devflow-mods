@@ -2,9 +2,41 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import type { Entry } from '../types'
 import {
-  bigDigits, buildReport, chartOf, clockText, dayOf, kindAfter, MINUTES, modelName, questionText, streakOf, summaryPrompt, dayStartIso, durationText, nextDay, parseGitLog,
+  bigDigits, buildReport, cells, chartOf, clip, clockText, dayOf, decisionText, kindAfter, MINUTES, modelName, questionText, redact, streakOf, summaryPrompt, dayStartIso, durationText, nextDay, parseGitLog,
   parseOffset, periodDays, requestText, tokensText, upsert, workOf,
 } from '../hooks/ledger'
+
+// T71: 아래 네 표는 team-board/tests/board.test.ts 에도 같은 것이 있다 (판정·가리기 코드를 복사해 쓰므로 둘 다 같은 표로 잰다)
+// 가짜 토큰은 저장소 비밀 검사에 걸리지 않게 실행할 때 이어 붙인다
+const FAKE = { stripe: 'sk_' + 'live_' + '51H' + 'a1'.repeat(10), google: 'AI' + 'za' + 'SyA' + 'b2'.repeat(16), gitlab: 'gl' + 'pat-' + 'c3'.repeat(10), npm: 'np' + 'm_' + 'd4'.repeat(18), slack: 'xo' + 'xe.' + 'xoxp-1-' + 'e5'.repeat(6) }
+const SECRET_CASES: [string, string][] = [
+  ['login password: hunter2 입니다', 'login password: *** 입니다'],
+  ['{"api_key": "abcd1234efgh"}', '{"api_key": "***"}'],
+  ['curl -H "X-Api-Key: zzz123" https://x', 'curl -H "X-Api-Key: ***" https://x'],
+  ['DB_PASSWORD = s3cret99 ./run', 'DB_PASSWORD = *** ./run'],
+  ['mysql -u root -pS3cret db', 'mysql -u root -p*** db'],
+  ["mysql -uroot -p'S3cret' db", 'mysql -uroot -p*** db'],
+  ['mysql -u me -p"S3 cret" db', 'mysql -u me -p*** db'],
+  [`키 ${FAKE.stripe} 확인`, '키 *** 확인'],
+  [`${FAKE.google} ${FAKE.gitlab} ${FAKE.npm} ${FAKE.slack}`, '*** *** *** ***'],
+  ['키: -----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY----- 끝', '키: *** 끝'],
+  ['-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1r', '***'],
+  ['비밀번호는 qwer1234 야', '비밀번호는 *** 야'],
+  // 따옴표 안의 값은 닫는 따옴표까지 (Codex 검토: `;` 뒤가 남았다)
+  ['{"password":"abc123;def456"}', '{"password":"***"}'],
+  // 전부터 가리던 꼴
+  ['API_TOKEN=abc123 ./gradlew test', 'API_TOKEN=*** ./gradlew test'],
+  ['curl -H "Authorization: Bearer abc.def" https://x', 'curl -H "Authorization: Bearer ***" https://x'],
+]
+// 실제 기록·명령(2026-11-16, 요청 4,064 · Bash 27,071)에서 새 꼴이 잘못 가리던 글: 값이 숫자만·글자만이거나 셸 변수
+const PLAIN_CASES = [
+  'maxTokens: 16_000', 'maxTokens: 16_000,foo', 'usage: { input_tokens: 0, output_tokens: 5 }', 'tokensOk: true', 'auth: login.ts 4', 'print -r -- "${NEO4J_PASSWORD:-$C}"',
+  'for pair in "password:$NEO4J_PASSWORD"', 'CUST_NO_TOKEN = "{" + CUST_NO', '비밀번호는 메신저 대화에 있다', '토큰 수를 세 줘',
+]
+const NOT_READ_ONLY = ["sed -Ei 's/a/b/' f", "sed -ni '1p' f", 'find . -name "*.log" -delete', 'find . -exec rm {} +', 'sort -o out.txt in.txt', 'grep x f &> out.log', 'find . -exec grep -l x {} + -exec rm {} +', 'sort -o "out.txt" "in.txt"', "sed -i'' s/a/b/ f"]
+const STILL_READ_ONLY = ["sed -n '1,5p' f", 'find . -name x', 'find . -name "*.ts" -exec grep -n foo {} +', 'grep x f 2>&1', 'grep x f &> /dev/null', 'cat a && cat b', "sed -n '/-ignore/p' f", "sed -n '1p' -- -input.txt", 'find . -exec "cat" {} +',
+  // 프로세스 치환은 단계로 나뉘지 않는다: `sort -u) <(grep -oE …` 의 -oE 는 sort 의 -o 가 아니다 (실제 명령, 2026-11-16)
+  'diff <(grep x a | sort -u) <(grep -oE y b | sort -u)']
 
 const KST = 540
 // 2026-10-18 23:59:30 KST
@@ -39,6 +71,24 @@ describe('ledger (순수 함수)', () => {
     // 붙여 넣은 글은 엔진이 <pasted_content id="…"> 로 감싸 보낸다. 태그는 빼고 글만 남긴다 (2026-10-21 시험 F7)
     expect(requestText('<pasted_content id="1f0b">\n시험용 요청\n둘째 줄\n</pasted_content id="1f0b">')).toBe('시험용 요청 둘째 줄')
     expect(requestText('앞 글 <pasted_content id="a1">붙인 글</pasted_content id="a1"> 뒤 글')).toBe('앞 글 붙인 글 뒤 글')
+  })
+
+  test('비밀 값: 이름: 값 · 토큰 꼴 · 개인 키 · mysql -p 를 가리고, 숫자만·글자만인 값과 셸 변수는 둔다 (T71)', async () => {
+    for (const [from, to] of SECRET_CASES) expect(redact(from)).toBe(to)
+    for (const text of PLAIN_CASES) expect(redact(text)).toBe(text)
+  })
+
+  test('칸 기준 자르기: 한글은 2칸, 넘치면 … 를 붙여 n 칸 안에 (T71)', async () => {
+    expect(clip('abcdef', 6)).toBe('abcdef')
+    expect(clip('abcdefg', 6)).toBe('abcde…')
+    expect(clip('가나다라', 8)).toBe('가나다라')
+    expect(clip('가나다라마', 8)).toBe('가나다…')
+    // 결정 줄: 앞머리 16칸 + ` → ` 3칸 + 질문 + 답이 cols 안에 (가장 좁은 패널 22칸까지)
+    for (const cols of [22, 30, 55, 118]) {
+      const [q, a] = decisionText('질문'.repeat(20), '답변'.repeat(20), cols)
+      expect([cols, 16 + 3 + cells(q) + cells(a) <= cols]).toEqual([cols, true])
+    }
+    expect(cells(clip('가나다라마', 7))).toBeLessThanOrEqual(7)
   })
 
   test('같은 요청은 바꾸고 시각 순으로 둔다, git log 를 읽는다', async () => {
@@ -121,6 +171,9 @@ describe('Work Report (순수 함수)', () => {
     expect(kindAfter(undefined, 'Bash', true, "python3 -c 'print(1)'")).toBe('run')
     expect(kindAfter('run', 'Bash', true, 'ls')).toBe('run') // 앞 것이 이긴다
     expect(kindAfter(undefined, 'Bash', true)).toBe('run') // 명령을 모르면 실행
+    // T71: 파일을 바꾸는 플래그·옵션, &> 리다이렉트는 읽기만이 아니다. find -exec 는 실행하는 명령으로 판정한다
+    for (const c of NOT_READ_ONLY) expect([c, kindAfter(undefined, 'Bash', true, c)]).toEqual([c, 'run'])
+    for (const c of STILL_READ_ONLY) expect([c, kindAfter(undefined, 'Bash', true, c)]).toEqual([c, 'research'])
   })
 
   test('올해: 1월 1일부터 오늘까지', async () => {
@@ -326,6 +379,23 @@ describe('look-back (hook)', () => {
     expect(JSON.parse([...files.values()][0]!).entries[0]).toMatchObject({ text: '원래 글', turnId: 't1', end: 'answer' })
   })
 
+  test('도구 중에 끊긴 턴은 엔진이 answer 로 보내도 중단으로 남긴다. 오류·거절은 그대로 (T71)', async ($, on) => {
+    const { files, clock } = boot(on)
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    const end = async (turnId: string, text: string, reason: string, answer: string, isAborted: boolean) => {
+      await clock.advance(1000) // 같은 시각의 요청은 같은 요청으로 본다(upsert)
+      await submit($, text)
+      await start($, turnId, text)
+      await $.turn.complete({ reason, answer, durationMs: 1_000, isAborted, turnId } as any)
+    }
+    await end('t1', 'A', 'answer', '', true)
+    await end('t2', 'B', 'answer', '', false)
+    await end('t3', 'C', 'error', '', false)
+    await end('t4', 'D', 'answer', '끝', false)
+    await end('t5', 'E', 'answer', '쓰던 답', true) // 답을 쓰다 끊겨도 isAborted 면 중단
+    expect(JSON.parse([...files.values()][0]!).entries.map((e: Entry) => `${e.text}:${e.end}`)).toEqual(['A:aborted', 'B:aborted', 'C:error', 'D:answer', 'E:aborted'])
+  })
+
   test('비대화형(claude -p) 세션은 기록하지 않는다', async ($, on) => {
     const { files } = boot(on)
     await $.session.start({ surface: 'terminal', isInteractive: false, cwd: '/repo/order-svc' } as any)
@@ -345,7 +415,8 @@ describe('look-back (hook)', () => {
 
     expect((await $.command.run({ command: 'lookback', args: '지난달' } as any)).text).toBe('/lookback [오늘|어제|7일|30일|올해] · /lookback report on|off')
     const { text } = await $.command.run({ command: 'lookback', args: '' } as any)
-    expect(text).toContain('옆 패널')
+    // 패널은 넓은 창에서는 옆, 좁은 창에서는 입력창 위에 뜬다. 명령 응답 때는 어디인지 모르므로 "옆"이라 하지 않는다 (T71)
+    expect(text).toBe('돌아보기를 띄웠어요. (Esc로 닫기)')
     expect(gitCalls).toEqual([['git', '-C', '/repo/order-svc', 'log', '--since-as-filter=2026-10-18T00:00:00+09:00', '--until=2026-10-19T00:00:00+09:00', '--format=%ct%x09%h%x09%s']])
 
     const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
@@ -401,14 +472,49 @@ describe('look-back (hook)', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
     await $.command.run({ command: 'lookback', args: '' } as any)
 
-    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE })
+    // 질문·답 전문이 한 줄에 들어가는 폭 (좁은 폭은 아래 '좁은 패널' 시험)
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE, props: { bodyColumns: 120 } })
     expect(await ui.find({ type: 'Text', text: /^요청 1 · Claude 작업 1초 · 결정 2 · 커밋 2 · 프로젝트 2$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /23:54 \? 커밋, push, 설치를 진행할까요\? → 커밋하고 push 후 설치까지 진행해주세요/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^wiki$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^결정 1 · 커밋 1$/ })).toBeDefined() // 요청 기록이 없으면 요청·시간·토큰을 빼고
+    // 요청 기록이 없으면 요청·시간·토큰을 빼고 결정·커밋만
+    expect(await ui.find({ type: 'Text', text: /^결정 1 ·$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^커밋 1$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^─ 결정$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /A 로 할까요\? → A/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /어제 질문|안 읽힘/ })).toBeUndefined()
+    await ui.unmount()
+  })
+
+  test('좁은 패널: 결정 줄은 칸으로 나눠 답을 남기고, 요청 줄은 시간을 남긴다. 수치는 조각 사이에서만 줄을 바꾼다 (T71)', async ($, on) => {
+    const { files } = boot(on)
+    const tb = '/home/me/.claude/team-board'
+    files.set('/home/me/.claude/look-back/2026-10-18/s1-aaaa.json', JSON.stringify({ v: 1, entries: [
+      entry(NOW - 600_000, '/repo/order-svc', { text: '결제 모듈의 환불 경로를 다시 읽고 실패하는 테스트를 먼저 쓴 다음 고쳐 주세요. 끝나면 알려 주세요', ms: 125_000, tokens: 43_248_000 }),
+    ] }))
+    files.set(`${tb}/repo-order-svc/s1.json`, JSON.stringify({ cwd: '/repo/order-svc', decisions: [
+      { at: NOW - 300_000, question: '원본 HTML 파일은 scratchpad 에만 있습니다. 저장소로 옮겨 커밋하고 push 까지 진행할까요?', answer: '커밋하고 push 해 주세요' },
+    ] }))
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/repo/order-svc' } as any)
+    await $.command.run({ command: 'lookback', args: '' } as any)
+
+    // 120×40 dock 의 패널 몸통 폭(2026-11-16 실화면 55칸)
+    const ui = await $.ui.mount({ plugin: 'look-back', surface: 'terminal', ...PANE, props: { bodyColumns: 57 } })
+    const decision = await ui.find({ type: 'Text', text: /→ 커밋하고/ })
+    expect(decision).toBeDefined()
+    expect(cells(decision!.text!)).toBeLessThanOrEqual(55)
+    const request = await ui.find({ type: 'Text', text: /결제 모듈/ })
+    expect(request!.text).toMatch(/…  2분$/)
+    expect(cells(request!.text!)).toBeLessThanOrEqual(55)
+    // 수치는 '이름 값' 조각마다 한 Text 로 두고 줄 바꿈 row 에 [ 요약 ] 과 함께 둔다: 줄은 조각 사이에서만 바뀐다
+    // (2026-11-16 실화면: 한 글로 두면 `토큰` 뒤에서 꺾여 `4324.8만` 이 버튼 아래로 떨어졌다)
+    const stat = (await ui.find({ key: 'p0-stat' }))!
+    expect(stat.props.flexWrap).toBe('wrap')
+    const parts = [/^요청 1 ·$/, /^2분 ·$/, /^결정 1 ·$/, /^커밋 1 ·$/, /^토큰 4324\.8만$/]
+    for (const [j, part] of parts.entries()) {
+      expect([String(part), await ui.find({ type: 'Text', text: part }) !== undefined]).toEqual([String(part), true])
+      expect((await ui.find({ key: `p0-s${j}` }))?.props.flexShrink).toBe(0) // 조각 안에서는 꺾지 않는다
+    }
     await ui.unmount()
   })
 

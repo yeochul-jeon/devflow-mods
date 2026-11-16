@@ -45,12 +45,27 @@ export function nextDay(day: string): string {
 // 비밀 값: 이름에 token·secret·password 등이 든 변수·옵션의 값, 인증 헤더, URL 의 비밀번호, 알려진 토큰 꼴
 const SECRET_NAME = String.raw`[\w-]*(?:token|secret|passw(?:or)?d|pwd|api[_-]?key|auth(?!or)|credential)[\w-]*`
 const SECRET_VALUE = String.raw`(?:"[^"]*"|'[^']*'|[^\s'"]+)`
+/** 비밀처럼 생긴 값: $·- 로 시작하지 않고, 6자 이상, 글자와 숫자가 함께 든 낱말. 값이 끝나는 곳(쉼표 등)에서 찾기도 멈춘다 */
+const SECRETISH = String.raw`(?![-$])(?=[^\s'",;)}\]]*[A-Za-z])(?=[^\s'",;)}\]]*\d)[^\s'",;)}\]]{6,}`
+/** 따옴표 안의 비밀 같은 값: 닫는 따옴표까지 ( `"abc123;def456"` ) */
+const QUOTED = (q: string) => String.raw`(?![-$])(?=[^${q}]*[A-Za-z])(?=[^${q}]*\d)[^${q}]{6,}`
 const SECRETS: [RegExp, string][] = [
+  // T71: 토큰 꼴 더. 맨 앞에 둔다: `xoxe.xoxp-…` 의 뒤쪽을 아래 xox 규칙이 먼저 가리면 앞쪽이 남는다
+  [/\b(?:sk_(?:live|test)_\w{8,}|AIza[\w-]{30,}|glpat-[\w-]{16,}|npm_[A-Za-z0-9]{30,}|xoxe\.[\w-]{10,})/g, '***'],
   [/\b(?:sk-[\w-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|github_pat_\w{20,}|xox[abpr]-[\w-]{10,}|AKIA[0-9A-Z]{16}|eyJ[\w-]+\.eyJ[\w-]+\.[\w-]+)/g, '***'],
   [new RegExp(String.raw`(${SECRET_NAME}=)${SECRET_VALUE}`, 'gi'), '$1***'],
   [new RegExp(String.raw`(--?${SECRET_NAME}\s+)(?!-)${SECRET_VALUE}`, 'gi'), '$1***'],
   [/(Authorization:\s*(?:Bearer|Basic|Token)\s+)[^\s'"]+/gi, '$1***'],
   [/(\/\/[^\s:/@]+:)[^\s@/]+(@)/g, '$1***$2'],
+  // T71: 개인 키 블록(끝 줄이 없으면 글 끝까지), mysql -p비밀번호
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, '***'],
+  [new RegExp(String.raw`(\bmysql(?:dump|admin)?\b[^|;&\n]*?\s-p)(?=\S)${SECRET_VALUE}`, 'g'), '$1***'],
+  // `password: 값` · `KEY = 값` · JSON `"api_key": "값"` · `비밀번호는 값`. 값이 6자 이상이고 글자와 숫자가 섞일 때만:
+  // 실제 명령 2.7만 개에서 `maxTokens: 16_000`, `tokensOk: true`, `"password:$VAR"` 같은 코드·셸 변수가 걸려서 좁혔다 (2026-11-16)
+  [new RegExp(String.raw`(${SECRET_NAME}["']?\s*(?::|\s=)\s*")${QUOTED('"')}(")`, 'gi'), '$1***$2'],
+  [new RegExp(String.raw`(${SECRET_NAME}["']?\s*(?::|\s=)\s*')${QUOTED("'")}(')`, 'gi'), '$1***$2'],
+  [new RegExp(String.raw`(${SECRET_NAME}["']?\s*(?::|\s=)\s*)${SECRETISH}`, 'gi'), '$1***'],
+  [new RegExp(String.raw`((?:비밀번호|패스워드|암호)\s*(?:는|은|:|=)\s*)${SECRETISH}`, 'g'), '$1***'],
 ]
 
 export function redact(text: string): string {
@@ -73,6 +88,26 @@ export function requestText(text: string): string {
 export function clipText(text: string, n: number): string {
   const chars = [...text.replace(/\s+/g, ' ').trim()]
   return chars.length > n ? chars.slice(0, n - 1).join('') + '…' : chars.join('')
+}
+
+/** 결정·요청 줄의 앞머리 칸 수: `  MM/DD HH:MM ` 14칸 + `? `·`✓ ` 2칸 */
+export const LINE_HEAD = 16
+
+/**
+ * 결정 줄의 질문과 답을 cols 칸에 나눠 자른다(앞머리와 ` → ` 3칸 빼고). 답에 40% 까지 주고 질문이 짧으면 남은 칸도 답에.
+ * 한글은 2칸이라 글자 수로 자르면 좁은 패널에서 답이 통째로 잘렸다 (T71, 2026-11-16 실화면 55칸)
+ */
+export function decisionText(question: string, answer: string, cols: number): [string, string] {
+  const q = clipText(question, 60)
+  const a = clipText(answer, 40)
+  const room = Math.max(2, cols - LINE_HEAD - 3)
+  const qw = Math.max(1, room - Math.min(cells(a), Math.max(1, Math.floor(room * 0.4))))
+  return [clip(q, qw), clip(a, room - Math.min(cells(q), qw))]
+}
+
+/** 요청 줄 끝의 걸린 시간·고친 파일 수. 본문을 이만큼 덜 써서 끝이 잘리지 않게 한다 (T71) */
+export function requestTail(r: Pick<Entry, 'ms' | 'files'>): string {
+  return `${r.ms ? `  ${durationText(r.ms)}` : ''}${r.files.length ? ` · 파일 ${r.files.length}` : ''}`
 }
 
 /** 결정 질문 앞의 목록 기호('- ', '2. ', '1) ')를 뗀다: team-board 는 답변의 한 줄을 그대로 질문으로 남긴다. */
@@ -237,12 +272,35 @@ function steps(command: string): string[] {
 /** 실행하는 명령이 아닌 셸 구문: 반복·조건의 머리와 끝, 파일 검사 `[ -f x ]`. */
 const SHELL_SYNTAX = /^(?:for\s+\w+\s+in\b.*|(?:done|fi|esac)(?:\s*[0-9]?>&?\s*\S+)*|\[\[? .*\]\]?|while\s+(?:IFS=\S*\s+)?read\b.*)$/
 
-/** 출력을 파일로 쓰는 리다이렉트: `> f`, `>> f`. `2>&1`, `>&2`, `> /dev/null` 은 아니다. */
-const WRITES_FILE = /(?:^|[^0-9&>])>>?\s*(?!&|\/dev\/null\b)[^\s>&]/
+/** 출력을 파일로 쓰는 리다이렉트: `> f`, `>> f`, `&> f`. `2>&1`, `>&2`, `> /dev/null`, `&> /dev/null` 은 아니다. */
+const WRITES_FILE = /(?:^|[^0-9&>])>>?\s*(?!&|\/dev\/null\b)[^\s>&]|&>>?\s*(?!\/dev\/null\b)[^\s>&]/
+
+/** 읽기 명령이지만 파일을 바꾸는 플래그·옵션: `sed -Ei`, `find -delete`, `sort -o out` (T71) */
+// 프로세스 치환 `<( … )` 은 단계로 나뉘지 않아 `sort -u) <(grep -oE …` 같은 단계가 생긴다: ( ) < > 를 넘어 옵션을 찾지 않는다
+const MUTATES = /^sed\b[^|;()<>]*\s(?:-[a-zA-Z]*i(?![a-zA-Z])|--in-place)|^find\b[^()<>]*\s-(?:delete|fprint\w*|fls)\b|^sort\b[^()<>]*\s(?:-o\s*\S|--output)/
+/** `find … -exec <명령>`: 모든 -exec 의 명령이 읽기만 할 때만 읽기 전용 (xargs 와 같은 목록) */
+const FIND_EXEC = /\s-(?:exec|execdir|ok|okdir)\s+['"]?([^\s'"]+)/g
+const EXEC_READ_ONLY = /^(?:grep|rg|egrep|cat|head|tail|wc|ls|stat|file)$/
+
+/** 따옴표 안 글을 같은 길이의 _ 로 가린다. 지우면 `sort -o "out.txt"`, `>> "$f"` 의 인자가 사라진다 */
+function unquoted(s: string): string {
+  return s.replace(/'[^']*'|"[^"]*"/g, m => '_'.repeat(m.length))
+}
+
+/** 읽기 명령인데 플래그·옵션으로 파일을 바꾸는 단계: `sed -Ei`, `find -delete`, `find -exec rm`, `sort -o` (T71) */
+function changesFiles(s: string): boolean {
+  if (MUTATES.test(unquoted(s))) return true
+  // 명령 이름은 원문에서 읽는다: `-exec "cat" {} +`
+  return /^find\b/.test(s) && [...s.matchAll(FIND_EXEC)].some(m => !EXEC_READ_ONLY.test(m[1]!))
+}
+
+function stepReadOnly(s: string): boolean {
+  return READ_ONLY.test(s) && !WRITES_FILE.test(unquoted(s)) && !changesFiles(s)
+}
 
 /** 모든 단계가 읽기 전용일 때만 true. `echo x && ./gradlew test` 는 판정한다. 파일로 쓰는 단계(`git show x > f`)는 읽기 전용이 아니다. */
 function isReadOnly(command: string): boolean {
-  return steps(command).every(s => READ_ONLY.test(s) && !WRITES_FILE.test(s.replace(/'[^']*'|"[^"]*"/g, '')))
+  return steps(command).every(stepReadOnly)
 }
 
 /** 도구 하나를 쓴 뒤의 종류. 앞 것(수정 > 실행 > 조사)이 이긴다. 실패·거부한 도구와 모르는 도구는 바꾸지 않는다. 읽기만 하는 Bash 명령은 조사 */
@@ -382,6 +440,18 @@ export function cells(text: string): number {
     n += wide ? 2 : 1
   }
   return n
+}
+
+// team-board/hooks/diagram.ts 에서 복사
+/** max 칸 안으로 자른다. 넘치면 끝에 … (1칸) */
+export function clip(text: string, max: number): string {
+  if (cells(text) <= max) return text
+  let out = ''
+  for (const ch of text) {
+    if (cells(out + ch) > max - 1) break
+    out += ch
+  }
+  return out + '…'
 }
 
 /** 칸 수에 맞춰 오른쪽(end) 또는 왼쪽(start)에 빈칸을 채운다. 넘치면 그대로 */

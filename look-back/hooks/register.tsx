@@ -5,8 +5,8 @@ import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code
 
 import type { DayFile, Decision, Entry, Kind, LookView, Minutes, Period, ProjectReport } from '../types'
 import {
-  bigDigits, blockRow, buildReport, cells, chartOf, pad, clipText, clockText, questionText, dayOf, dayStartIso, decisionsIn, durationText, END_MARK, hoursText, kindAfter, MINUTES, modelName,
-  nextDay, parseGitLog, parseOffset, periodDays, repoKey, requestText, streakOf, summaryPrompt, tokensText, upsert, workOf,
+  bigDigits, blockRow, buildReport, cells, chartOf, clip, pad, clockText, questionText, dayOf, dayStartIso, decisionsIn, decisionText, durationText, END_MARK, hoursText, kindAfter, LINE_HEAD,
+  MINUTES, modelName, nextDay, parseGitLog, parseOffset, periodDays, repoKey, requestTail, requestText, streakOf, summaryPrompt, tokensText, upsert, workOf,
 } from './ledger'
 
 const PANE = 'look-back'
@@ -193,7 +193,7 @@ export const register: Register = (on, options) => {
     await update($, reportOff, () => stored === true)
     await $.command.register({
       name: 'lookback',
-      description: '기간 동안 한 일(한눈에 숫자·차트, 프로젝트별 요청·결정·커밋)을 옆 패널에',
+      description: '기간 동안 한 일(한눈에 숫자·차트, 프로젝트별 요청·결정·커밋)을 패널에',
       argumentHint: '[오늘|어제|7일|30일|올해] | report on|off',
     })
     const cwd = await $.session.cwd()
@@ -286,7 +286,8 @@ export const register: Register = (on, options) => {
     const entry = e.agentId ? undefined : self.open.get(e.turnId)
     if (entry) {
       self.open.delete(e.turnId)
-      entry.end = e.reason
+      // 도구 사용 중 끊긴 턴은 엔진이 reason 'answer' 로 보낸다. work-plan·team-board 와 같이 isAborted·빈 답을 중단으로 본다 (T71)
+      entry.end = e.reason === 'answer' && (e.isAborted || !e.answer) ? 'aborted' : e.reason
       entry.ms = e.durationMs
       entry.kind ??= 'chat'
       await persist($, entry)
@@ -314,7 +315,8 @@ export const register: Register = (on, options) => {
       return { text: `/lookback: 기록을 읽지 못했어요 (${why})` }
     }
     // 이 줄은 모델도 읽으므로 짧게 둔다
-    return { text: '돌아보기를 옆 패널에 띄웠어요. (Esc로 닫기)' }
+    // 패널은 넓은 창에서는 옆, 좁은 창에서는 입력창 위에 뜬다. 여기서는 어디인지 모른다
+    return { text: '돌아보기를 띄웠어요. (Esc로 닫기)' }
   })
 
   // 그리기의 $ 로는 상태를 쓸 수 없어서, 누름은 여기서 받는다.
@@ -369,16 +371,22 @@ export const register: Register = (on, options) => {
     const project = (p: ProjectReport, i: number) => {
       const shown = p.entries.slice(-MAX_REQUESTS)
       const sum = v.summaries[p.root]
+      const stats = [
+        ...(p.entries.length ? [`요청 ${p.entries.length}`, durationText(p.ms)] : []),
+        `결정 ${decisionsOf(p).length}`,
+        `커밋 ${p.commits.length}`,
+        ...(p.entries.length ? [`토큰 ${tokensText(p.tokens)}`] : []),
+      ]
       return (
         <Box key={`p${i}`} flexDirection="column" marginTop={1}>
           {/* 프로젝트마다 이름 붙은 가로줄, 그 아래 수치. 안의 커밋·결정·요청은 작은 머리로 나눈다 */}
           {ruled(`p${i}-h`, <Text><Text bold color="cyan">{p.name}</Text> </Text>, cells(p.name) + 1)}
-          <Box flexDirection="row" gap={1}>
-            <Text dimColor>
-              {p.entries.length ? `요청 ${p.entries.length} · ${durationText(p.ms)} · ` : ''}
-              {`결정 ${decisionsOf(p).length} · 커밋 ${p.commits.length}`}
-              {p.entries.length ? ` · 토큰 ${tokensText(p.tokens)}` : ''}
-            </Text>
+          {/* 수치는 '이름 값' 조각마다 한 Text, [ 요약 ] 과 함께 줄 바꿈 row 에: 줄은 조각 사이에서만 바뀐다.
+              한 글로 두면 `토큰` 뒤에서 꺾여 숫자가 떨어졌다 (T71, 2026-11-16 실화면) */}
+          <Box key={`p${i}-stat`} flexDirection="row" flexWrap="wrap" columnGap={1}>
+            {stats.map((s, j) => (
+              <Box key={`p${i}-s${j}`} flexShrink={0}><Text dimColor>{j < stats.length - 1 ? `${s} ·` : s}</Text></Box>
+            ))}
             {sum === undefined || sum.startsWith('요약 실패') ? <Button key={`sum-${i}`} label="요약" variant="secondary" onPress={noop} /> : null}
           </Box>
           {sum !== undefined ? <Text color={sum.startsWith('요약 실패') ? 'red' : undefined}>{sum === '…' ? '요약하는 중…' : sum}</Text> : null}
@@ -397,9 +405,9 @@ export const register: Register = (on, options) => {
             <Text key={`d${d.at}`} wrap="truncate-end">
               <Text dimColor>{`  ${clockText(d.at, off)} `}</Text>
               <Text color="yellow">{'? '}</Text>
-              {clipText(questionText(d.question), 60)}
+              {decisionText(questionText(d.question), d.answer, cols)[0]}
               <Text color="yellow">{' → '}</Text>
-              {clipText(d.answer, 40)}
+              {decisionText(questionText(d.question), d.answer, cols)[1]}
             </Text>
           ))}
           {p.entries.length ? <Text dimColor>─ 요청</Text> : null}
@@ -408,8 +416,8 @@ export const register: Register = (on, options) => {
             <Text key={`r${r.at}`} wrap="truncate-end">
               <Text dimColor>{`  ${clockText(r.at, off)} `}</Text>
               <Text>{`${r.end ? END_MARK[r.end] : '·'} `}</Text>
-              {r.text}
-              <Text dimColor>{r.ms ? `  ${durationText(r.ms)}` : ''}{r.files.length ? ` · 파일 ${r.files.length}` : ''}</Text>
+              {clip(r.text, Math.max(8, cols - LINE_HEAD - cells(requestTail(r))))}
+              <Text dimColor>{requestTail(r)}</Text>
             </Text>
           ))}
         </Box>
