@@ -95,6 +95,15 @@
         "path": "image-preview",
         "ref": "image-preview--v0.3.3"
       }
+    },
+    {
+      "name": "study",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/yeochul-jeon/devflow-mods.git",
+        "path": "study",
+        "ref": "study--v0.1.0"
+      }
     }
   ]
 }
