@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: out-existing
+expected_outcome: |
+  The study sheet is saved as notes/guide.html inside the existing notes folder, not in the working folder root.
+context:
+  scaffold_script: make-notes.sh

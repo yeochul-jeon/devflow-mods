@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: diagram
+expected_outcome: |
+  diagram.html: an inline SVG with 4-9 boxes and arrows showing the components and flow of loading a web page, each box with a one-line description; no external resources.

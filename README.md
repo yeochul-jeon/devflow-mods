@@ -1,6 +1,6 @@
 # devflow-mods
 
-Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 기간별 돌아보기, 12살 버전 설명, 오해 없는 절차 글, 다음 요청 제안, 초안 다듬기, 이미지 미리보기를 제공합니다.
+Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보고, 용어 풀이, 흐름 그림, 기간별 돌아보기, 12살 버전 설명, 오해 없는 절차 글, 공부용 HTML 한 장, 다음 요청 제안, 초안 다듬기, 이미지 미리보기를 제공합니다.
 
 [![Claude Code](https://img.shields.io/badge/Claude_Code-2.1.311%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
@@ -20,6 +20,7 @@ Claude Code mod 모음입니다. 여러 세션의 상황판, 작업 계획 보�
 | 📅 | [**look-back**](#-look-back-돌아보기) | 오늘·어제·7일·30일·올해 동안 한 일을 보여 줍니다. 한눈에 숫자·차트(아낀 시간 추정, 종류·모델별)와 프로젝트별 요청, 결정, 커밋. | `/lookback [기간]` |
 | 🧒 | [**eli12**](#-eli12-12살-버전-설명) | 어려운 설명을 12살 버전으로 풉니다. | `/eli12 [주제]` |
 | 📏 | [**ste100**](#-ste100-오해-없는-절차-글) | 절차·지시·결정 항목을 ASD-STE100 에서 착안한 문체로 씁니다. | 없음 (스킬만) |
+| 📚 | [**study**](#-study-공부용-html-한-장) | 주제 하나를 마인드맵·구조도·A4 한 장 학습지·퀴즈 HTML 파일 한 장으로 만듭니다. | `/study:study <모드> <주제> [--out <디렉터리>]` |
 | 💡 | [**next-steps**](#-next-steps-다음-요청-제안) | 답변이 끝나면 다음 요청 2~3개를 제안합니다. | `/next [on\|off]` |
 | 📝 | [**prompt-coach**](#-prompt-coach-초안-다듬기) | 보내기 전에 초안의 빈 곳을 묻고 다듬습니다. | `/coach <초안>\|view\|auto on\|off`, `다듬기`·`되돌리기` 버튼 |
 | 📷 | [**image-preview**](#-image-preview-이미지-미리보기) | 붙인 이미지의 `[Image #N]` 에 마우스를 올리면 그림을 보여 주고, 클릭하면 Preview 로 엽니다. [midudev/better-claude](https://github.com/midudev/better-claude) 의 fork 입니다. | 없음 (입력창 위 칩 줄) |
@@ -69,6 +70,7 @@ claude plugin install draw@devflow-mods           # /draw 할 때만 Haiku를 �
 claude plugin install look-back@devflow-mods      # 기록은 토큰 0, [요약] 누를 때만 Haiku를 호출합니다
 claude plugin install eli12@devflow-mods
 claude plugin install ste100@devflow-mods          # 별도 모델 호출 없음. 스킬이 발동할 때만 스킬 본문이 대화에 들어갑니다
+claude plugin install study@devflow-mods           # 별도 모델 호출 없음. /study:study 를 칠 때만 스킬 본문이 대화에 들어갑니다
 claude plugin install next-steps@devflow-mods     # 답변마다 Haiku를 호출합니다
 claude plugin install prompt-coach@devflow-mods   # 다듬을 때 Haiku 2회. 자동 모드(기본 꺼짐)면 보낼 때마다
 claude plugin install image-preview@devflow-mods  # 모델 호출 없음. 이미지를 붙였을 때만 입력창 위에 한 줄
@@ -287,6 +289,17 @@ Orca 도크처럼 좁은 패널에서는 카드 머리줄이 덜 중요한 것(c
 
 ---
 
+## 📚 study: 공부용 HTML 한 장
+
+- `/study:study mindmap 엑셀 피벗 테이블` 은 현재 폴더에 `mindmap.html` 을 만듭니다. 모드는 `mindmap`(접고 펴는 마인드맵), `diagram`(상자와 화살표 구조도), `guide`(A4 한 장: 개념 5·실수 3·연습 1), `quiz`(실무형 객관식 5문항, 답은 눌러야 보임)입니다.
+- `--out <디렉터리>` 로 저장 위치를 정합니다. 같은 이름이 있으면 `-2` 를 붙여 덮어쓰지 않습니다.
+- 파일 하나로 열리고(외부 자원 없음) 인쇄하면 접힌 것이 펼쳐집니다.
+- 직접 칠 때만 동작합니다. 빌더 조쉬의 공부용 요청문 10개 중 4개에서 조건을 가져왔습니다.
+
+자세한 내용은 [study/README.md](study/README.md)를 보세요.
+
+---
+
 ## 💡 next-steps: 다음 요청 제안
 
 - 답변이 끝나면 입력창 위에 `다음: 1: … 2: … 3: …` 을 보여 줍니다. 목록 위의 흐린 가로줄 `── next-steps ──`이 위 대화와 목록을 나눕니다.
@@ -423,6 +436,7 @@ claude plugin test ./look-back
 claude plugin test ./image-preview
 claude plugin validate ./ste100         # ste100 은 스킬만 있어 테스트 대신 eval 을 씁니다
 claude plugin eval ./ste100
+claude plugin validate ./study          # study 도 스킬만 있습니다. eval 옵션은 study/README.md
 ```
 
 - 각 mod의 화면과 문구는 `hooks/` 의 순수 함수에 있습니다. 예: `board.ts`, `diagram.ts`, `failure.ts`, `prompt.ts`

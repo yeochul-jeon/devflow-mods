@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: mindmap
+expected_outcome: |
+  mindmap.html in the working folder: a Korean mind map of Excel pivot tables for a first-time learner, branches fold and unfold on click, one line of explanation per branch, no external resources.

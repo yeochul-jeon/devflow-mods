@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: plain-diagram-no-skill
+expected_outcome: |
+  A plain request without the slash command does not invoke the study skill (it is user-invoked only).

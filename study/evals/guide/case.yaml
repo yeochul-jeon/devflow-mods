@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: guide
+expected_outcome: |
+  guide.html: an A4 one-page study sheet on Excel VLOOKUP with exactly 5 key concepts, 3 common mistakes and 1 practice exercise; no external resources.
