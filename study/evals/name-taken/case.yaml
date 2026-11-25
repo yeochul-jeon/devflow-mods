@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: name-taken
+expected_outcome: |
+  mindmap.html already exists from an earlier study session. The new mind map is saved as mindmap-2.html and the old mindmap.html is left exactly as it was.
+context:
+  scaffold_script: make-old.sh

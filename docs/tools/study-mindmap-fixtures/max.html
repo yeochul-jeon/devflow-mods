@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>클라우드 네이티브 애플리케이션 관측 가능성 설계 — 마인드맵</title>
+<style>
+body{font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;line-height:1.55;max-width:880px;margin:24px auto;padding:0 16px;color:#222;background:#fff}
+h1{font-size:1.5em;margin:0 0 .4em}
+.lead{color:#555;margin:0 0 1em}
+.fold>.head{cursor:pointer;user-select:none}
+.fold>.head::before{content:"▾ ";color:#888}
+.fold.closed>.head::before{content:"▸ "}
+.fold.closed>.body{display:none}
+.source{margin-top:24px;color:#666;font-size:.9em}
+@media print{
+  body{margin:0;max-width:none}
+  .fold>.head::before,.fold.closed>.head::before{content:""}
+  .fold.closed>.body{display:block}
+}
+/* 모드 CSS */
+@page{size:A4 landscape;margin:10mm}
+body{max-width:none}
+.map{border-left:3px solid #4a7bd0;padding-left:14px}
+.map .fold,.map .leaf{margin:6px 0}
+.map .body{border-left:2px solid #c9d6ee;margin-left:8px;padding-left:14px}
+.mm-on .map{display:none}
+.mm-wrap{overflow:auto}
+body:not(.mm-on) .mm-wrap{display:none}
+.mm-print{position:absolute;left:-20000px;top:0;width:3000px}
+.mm{position:relative;margin:0 auto}
+.mm svg{position:absolute;left:0;top:0}
+.mm-node{position:absolute;box-sizing:border-box;max-width:240px;padding:6px 10px;border-radius:10px;background:#f5f6f8;border:0 solid var(--c);border-left-width:4px;font-size:13px;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.mm-node.d0{max-width:170px;background:#2b2f3a;color:#fff;font-size:17px;text-align:center;padding:12px 16px;border:0}
+.mm-node.d1{background:var(--c);color:#fff;border:0}
+.mm-node.d1 .mm-desc{color:#fff}
+.mm-name{font-weight:bold}
+.mm-desc{font-size:12px;color:#555}
+.mm-has{cursor:pointer;user-select:none}
+.mm-tog{position:absolute;top:50%;width:18px;height:18px;margin-top:-9px;border-radius:50%;background:#fff;border:1.5px solid var(--c);color:#333;font-size:11px;line-height:15px;text-align:center;box-sizing:border-box}
+.mm-r .mm-tog{right:-10px}
+.mm-l .mm-tog{left:-10px}
+@media print{.mm-wrap{display:none}.mm-wrap.mm-print{display:block;position:static;width:auto;overflow:visible}.mm{zoom:var(--pz)}}
+</style>
+</head>
+<body>
+<h1>클라우드 네이티브 애플리케이션 관측 가능성 설계</h1>
+<p class="lead">렌더 검사용 시험 파일입니다.</p>
+<div class="map">
+<div class="fold" data-study="branch"><div class="head"><b>큰 가지 이름 1번</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="body"><div class="leaf" data-study="branch"><b>작은 가지 이름 1-1</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 1-2</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 1-3</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div></div></div>
+<div class="fold" data-study="branch"><div class="head"><b>큰 가지 이름 2번</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="body"><div class="leaf" data-study="branch"><b>작은 가지 이름 2-1</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 2-2</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 2-3</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div></div></div>
+<div class="fold" data-study="branch"><div class="head"><b>큰 가지 이름 3번</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="body"><div class="leaf" data-study="branch"><b>작은 가지 이름 3-1</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 3-2</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 3-3</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div></div></div>
+<div class="fold" data-study="branch"><div class="head"><b>큰 가지 이름 4번</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="body"><div class="leaf" data-study="branch"><b>작은 가지 이름 4-1</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 4-2</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 4-3</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div></div></div>
+<div class="fold" data-study="branch"><div class="head"><b>큰 가지 이름 5번</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="body"><div class="leaf" data-study="branch"><b>작은 가지 이름 5-1</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 5-2</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 5-3</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div></div></div>
+<div class="fold" data-study="branch"><div class="head"><b>큰 가지 이름 6번</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="body"><div class="leaf" data-study="branch"><b>작은 가지 이름 6-1</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 6-2</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div><div class="leaf" data-study="branch"><b>작은 가지 이름 6-3</b> — 처음 보는 사람도 이해하도록 이 가지가 무엇을 뜻하는지 한 문장으로 적은 설명이다.</div></div></div>
+</div>
+<script>
+document.addEventListener('click',function(e){var h=e.target.closest('.fold>.head');if(h)h.parentElement.classList.toggle('closed')});
+</script>
+<script>
+(function(){
+var src=document.querySelector('.map'),NS='http://www.w3.org/2000/svg',C=['#e8590c','#2f9e44','#1971c2','#7048e8','#c2255c','#0c8599'],GX=36,GY=10,GB=22;
+function kids(p){return [].filter.call(p.children,function(c){return c.matches('.fold,.leaf')}).map(read)}
+function read(el){var f=el.classList.contains('fold'),h=(f?el.querySelector(':scope>.head'):el).cloneNode(true),b=h.querySelector('b');if(b)b.remove();
+  return {el:el,name:b?b.innerHTML:h.innerHTML,desc:b?h.innerHTML.replace(/^\s*—\s*/,''):'',kids:f?kids(el.querySelector(':scope>.body')):[]}}
+function box(c){var w=document.createElement('div'),v=document.createElement('div');w.className=c;v.className='mm';w.appendChild(v);src.after(w);return v}
+function draw(v,all){
+  v.innerHTML='';var s=document.createElementNS(NS,'svg'),L=[],R={name:document.querySelector('h1').innerHTML,desc:'',kids:kids(src)};v.appendChild(s);
+  (function mk(d,dp,c){var n=document.createElement('div');n.className='mm-node d'+Math.min(dp,2);n.style.setProperty('--c',c);
+    n.innerHTML='<div class="mm-name">'+d.name+'</div>'+(d.desc?'<div class="mm-desc">'+d.desc+'</div>':'');
+    d.open=all||!d.el||!d.el.classList.contains('closed');d.n=n;d.c=c;d.dp=dp;
+    if(!all&&d.el&&d.kids.length){n.classList.add('mm-has');n.insertAdjacentHTML('beforeend','<span class="mm-tog">'+(d.open?'−':d.kids.length)+'</span>');
+      n.onclick=function(){d.el.classList.toggle('closed');draw(v,false)}}
+    v.appendChild(n);d.w=n.offsetWidth;d.h=n.offsetHeight;L.push(d);
+    if(d.open)d.kids.forEach(function(k,i){mk(k,dp+1,dp?c:C[i%C.length])})})(R,0,'#2b2f3a');
+  function sz(d){var k=d.open?d.kids:[];d.s=k.reduce(function(a,x){return a+sz(x)+GY},-GY);return d.sh=Math.max(d.h,d.s)}
+  function pl(d,x,t,r){d.r=r;d.n.classList.add(r?'mm-r':'mm-l');d.x=r?x:x-d.w;d.y=t+(d.sh-d.h)/2;var y=t+(d.sh-d.s)/2;
+    (d.open?d.kids:[]).forEach(function(k){pl(k,r?d.x+d.w+GX:d.x-GX,y,r);y+=k.sh+GY})}
+  function col(a){return a.reduce(function(t,k){return t+k.sh+GB},-GB)}
+  var K=R.kids,A=K.slice(0,Math.ceil(K.length/2)),B=K.slice(A.length).reverse();K.forEach(sz);
+  var H=Math.max(col(A),col(B),R.h);R.x=-R.w/2;R.y=(H-R.h)/2;
+  [[A,1],[B,0]].forEach(function(p){var y=(H-col(p[0]))/2;p[0].forEach(function(k){pl(k,p[1]?R.w/2+GX*1.5:-R.w/2-GX*1.5,y,p[1]);y+=k.sh+GB})});
+  var x0=Math.min.apply(0,L.map(function(d){return d.x})),W=Math.max.apply(0,L.map(function(d){return d.x+d.w}))-x0+32,T=Math.max.apply(0,L.map(function(d){return d.y+d.h}))+32;
+  L.forEach(function(d){d.x+=16-x0;d.y+=16;d.n.style.left=d.x+'px';d.n.style.top=d.y+'px'});
+  v.style.width=W+'px';v.style.height=T+'px';s.setAttribute('width',W);s.setAttribute('height',T);
+  L.forEach(function(p){(p.open?p.kids:[]).forEach(function(k){var x1=k.r?p.x+p.w:p.x,y1=p.y+p.h/2,x2=k.r?k.x:k.x+k.w,y2=k.y+k.h/2,m=(x1+x2)/2,e=document.createElementNS(NS,'path');
+    e.setAttribute('d','M'+x1+','+y1+' C'+m+','+y1+' '+m+','+y2+' '+x2+','+y2);e.setAttribute('stroke',k.c);e.setAttribute('stroke-width',k.dp>1?1.8:3);e.setAttribute('fill','none');s.appendChild(e)})});
+  v.style.setProperty('--pz',Math.min(1,1040/W,600/T));
+}
+var pv=box('mm-wrap mm-print'),sv=box('mm-wrap');document.body.classList.add('mm-on');
+try{draw(sv,false);draw(pv,true)}catch(e){document.body.classList.remove('mm-on');throw e}
+})();
+</script>
+</body>
+</html>

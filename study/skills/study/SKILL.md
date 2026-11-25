@@ -29,7 +29,9 @@ disable-model-invocation: true
 - `--out` 이 없으면 현재 작업 폴더에 저장한다.
 - `--out` 이 있으면 `ls -d -- '<디렉터리>'` 로 있는지 본다. 없으면 만들지 않는다. "`<디렉터리>` 가 없어서 만들지 않았습니다. 디렉터리를 만든 뒤 다시 실행하세요." 라고 알리고 끝낸다. 사용자가 정한 위치를 멋대로 만들면 엉뚱한 곳에 파일이 쌓인다.
 - 확인하거나 저장할 때 `cd` 하지 않는다. 디렉터리 경로를 명령과 파일 경로에 붙여 쓴다. `cd` 하면 셸의 현재 폴더가 바뀌어, 다음 실행의 기본 저장 위치가 그 폴더로 밀린다.
-- 파일 이름은 `<모드>.html` 이다. 같은 이름이 이미 있으면 덮어쓰지 않는다. 있는지는 Glob 으로만 본다(Bash 로 `ls` 하지 않는다. 권한 확인 창이 뜨지 않게). 그리고 `<모드>-2.html`, `<모드>-3.html` … 중 비어 있는 첫 이름을 쓴다. 전에 만든 공부 자료를 지우지 않기 위해서다.
+- 파일 이름은 `<모드>.html` 이다. 같은 이름이 이미 있으면 덮어쓰지 않는다. 그리고 `<모드>-2.html`, `<모드>-3.html` … 중 비어 있는 첫 이름을 쓴다. 전에 만든 공부 자료를 지우지 않기 위해서다.
+- 이름이 비었는지는 Bash 로 보지 않는다(권한 확인 창이 뜨지 않게). Glob 도구가 있으면 Glob 으로 본다. 없으면 Read 로 그 경로를 `limit: 1` 로 읽는다. «파일이 없다» 는 오류가 나면 빈 이름이다. 내용이 나오면 있는 파일이므로 다음 번호로 같은 확인을 한다.
+- 있다고 확인된 이름에는 절대 Write 하지 않는다. Read 로 읽은 파일은 Write 가 덮어쓰기를 막지 않으므로, 이 규칙만이 그 파일을 지킨다.
 
 ## 3. 내용의 근거
 
@@ -43,7 +45,8 @@ disable-model-invocation: true
 - 파일 하나에 모두 넣는다. 외부 자원(CDN 스크립트, 웹폰트, 외부 이미지, 외부 CSS, `@import`)을 쓰지 않는다. 인터넷이 없어도 열리고, 파일 하나만 보내도 그대로 보이게 하기 위해서다. 본문 안의 일반 링크(`<a href>`)는 써도 된다.
 - 아래 **공통 뼈대**를 그대로 쓴다. `/* 모드 CSS */` 자리에 그 모드의 CSS 를 그대로 넣고, `<!-- 본문 -->` 자리에 내용을 채운다. 뼈대의 CSS 와 스크립트는 고치지 않는다. 접기·펼치기와 인쇄 동작이 매번 같아야 하기 때문이다.
 - 개수 표지 `data-study="…"` 는 정해진 요소에만 붙인다. 다른 곳(CSS, 스크립트, 주석)에 `data-study` 라는 글자를 쓰지 않는다. 표지로 개수를 세어 조건을 검사한다.
-- 인쇄할 때는 접힌 것이 모두 펼쳐진다. 이것은 뼈대 CSS 가 한다.
+- 인쇄할 때는 접힌 것이 모두 펼쳐진다. 이것은 뼈대 CSS 가 한다(mindmap 은 모드 스크립트가 한다).
+- 모드 스크립트가 있는 모드(mindmap)는 뼈대의 `</script>` 바로 뒤, `</body>` 앞에 그 스크립트를 그대로 넣는다. 한 글자도 바꾸지 않는다.
 
 공통 뼈대:
 
@@ -90,13 +93,15 @@ document.addEventListener('click',function(e){var h=e.target.closest('.fold>.hea
 
 ### mindmap — 마인드맵 (`mindmap.html`)
 
-조건: 이 주제가 처음인 사람이 읽는다. 가지 머리를 클릭하면 그 아래가 숨겨지고 다시 보인다. 가지 하나에 붙는 설명은 한 문장이다.
+조건: 이 주제가 처음인 사람이 읽는다. 가운데 주제에서 색이 다른 큰 가지가 좌우로 퍼지는 그림이다. 가지를 클릭하면 그 아래가 숨겨지고 다시 보인다. 가지 하나에 붙는 설명은 한 문장이다. 인쇄하면 모든 가지를 펼쳐 A4 가로 한 장에 읽을 수 있는 크기로 들어간다.
 
-- `<h1>` 은 주제, 그 아래 `.lead` 한 줄로 이 지도가 무엇을 다루는지 쓴다.
-- 큰 가지 5~8개, 큰 가지마다 작은 가지 2~5개. 깊이는 2단계까지만 쓴다(3단계는 꼭 필요할 때만). 처음 접하는 사람이 한눈에 볼 수 있는 크기다.
-- 가지 하나 = `fold` 묶음 하나. `head` 에 `<b>가지 이름</b> — 설명 한 줄`. 설명은 40자 안팎의 한 문장이다. 두 문장이 되면 가지를 나눈다.
-- 큰 가지는 처음에 펼쳐 두고, 작은 가지가 더 있는 가지만 `closed` 로 둔다. 작은 가지가 끝 가지면 `fold` 대신 `<div class="leaf" data-study="branch"><b>이름</b> — 설명 한 줄</div>` 로 쓴다.
-- 모든 가지(큰 가지·작은 가지·끝 가지)에 `data-study="branch"` 를 붙인다.
+- `<h1>` 은 주제, 그 아래 `.lead` 한 줄로 이 지도가 무엇을 다루는지 쓴다. 그림의 가운데 노드는 `<h1>` 글자를 쓴다.
+- 큰 가지 5~6개, 큰 가지마다 작은 가지 2~3개. 깊이는 2단계까지만 쓴다(3단계 금지). 처음 접하는 사람이 한눈에 보고, 인쇄해도 글씨가 읽히는 크기다. 더 넣고 싶은 것이 있어도 고른다.
+- 가지 하나 = `fold` 묶음 하나. `head` 에 `<b>가지 이름</b> — 설명 한 줄`. 이름은 12자 이내, 설명은 40자 안팎의 한 문장이다. 두 문장이 되면 가지를 나눈다.
+- 설명에 긴 명령어·경로·URL 을 넣지 않는다. 띄어쓰기 없는 긴 글자는 그림의 노드 안에서 글자 중간이 끊긴다. 필요하면 짧은 이름만 쓴다(예: `sysctl` 설정).
+- 큰 가지는 `fold`(펼친 상태, `closed` 없음), 작은 가지는 끝 가지이므로 `fold` 대신 `<div class="leaf" data-study="branch"><b>이름</b> — 설명 한 줄</div>` 로 쓴다.
+- 모든 가지(큰 가지·작은 가지)에 `data-study="branch"` 를 붙인다.
+- 그림은 모드 스크립트가 이 목록을 읽어 그린다. 좌표·색·SVG 를 직접 쓰지 않는다. 스크립트가 꺼진 브라우저에서는 이 목록이 그대로 보인다.
 
 ```html
 <div class="map">
@@ -111,10 +116,67 @@ document.addEventListener('click',function(e){var h=e.target.closest('.fold>.hea
 모드 CSS:
 
 ```css
+@page{size:A4 landscape;margin:10mm}
+body{max-width:none}
 .map{border-left:3px solid #4a7bd0;padding-left:14px}
 .map .fold,.map .leaf{margin:6px 0}
 .map .body{border-left:2px solid #c9d6ee;margin-left:8px;padding-left:14px}
-.map>.fold>.head{font-size:1.08em}
+.mm-on .map{display:none}
+.mm-wrap{overflow:auto}
+body:not(.mm-on) .mm-wrap{display:none}
+.mm-print{position:absolute;left:-20000px;top:0;width:3000px}
+.mm{position:relative;margin:0 auto}
+.mm svg{position:absolute;left:0;top:0}
+.mm-node{position:absolute;box-sizing:border-box;max-width:240px;padding:6px 10px;border-radius:10px;background:#f5f6f8;border:0 solid var(--c);border-left-width:4px;font-size:13px;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.mm-node.d0{max-width:170px;background:#2b2f3a;color:#fff;font-size:17px;text-align:center;padding:12px 16px;border:0}
+.mm-node.d1{background:var(--c);color:#fff;border:0}
+.mm-node.d1 .mm-desc{color:#fff}
+.mm-name{font-weight:bold}
+.mm-desc{font-size:12px;color:#555}
+.mm-has{cursor:pointer;user-select:none}
+.mm-tog{position:absolute;top:50%;width:18px;height:18px;margin-top:-9px;border-radius:50%;background:#fff;border:1.5px solid var(--c);color:#333;font-size:11px;line-height:15px;text-align:center;box-sizing:border-box}
+.mm-r .mm-tog{right:-10px}
+.mm-l .mm-tog{left:-10px}
+@media print{.mm-wrap{display:none}.mm-wrap.mm-print{display:block;position:static;width:auto;overflow:visible}.mm{zoom:var(--pz)}}
+```
+
+모드 스크립트:
+
+```html
+<script>
+(function(){
+var src=document.querySelector('.map'),NS='http://www.w3.org/2000/svg',C=['#e8590c','#2f9e44','#1971c2','#7048e8','#c2255c','#0c8599'],GX=36,GY=10,GB=22;
+function kids(p){return [].filter.call(p.children,function(c){return c.matches('.fold,.leaf')}).map(read)}
+function read(el){var f=el.classList.contains('fold'),h=(f?el.querySelector(':scope>.head'):el).cloneNode(true),b=h.querySelector('b');if(b)b.remove();
+  return {el:el,name:b?b.innerHTML:h.innerHTML,desc:b?h.innerHTML.replace(/^\s*—\s*/,''):'',kids:f?kids(el.querySelector(':scope>.body')):[]}}
+function box(c){var w=document.createElement('div'),v=document.createElement('div');w.className=c;v.className='mm';w.appendChild(v);src.after(w);return v}
+function draw(v,all){
+  v.innerHTML='';var s=document.createElementNS(NS,'svg'),L=[],R={name:document.querySelector('h1').innerHTML,desc:'',kids:kids(src)};v.appendChild(s);
+  (function mk(d,dp,c){var n=document.createElement('div');n.className='mm-node d'+Math.min(dp,2);n.style.setProperty('--c',c);
+    n.innerHTML='<div class="mm-name">'+d.name+'</div>'+(d.desc?'<div class="mm-desc">'+d.desc+'</div>':'');
+    d.open=all||!d.el||!d.el.classList.contains('closed');d.n=n;d.c=c;d.dp=dp;
+    if(!all&&d.el&&d.kids.length){n.classList.add('mm-has');n.insertAdjacentHTML('beforeend','<span class="mm-tog">'+(d.open?'−':d.kids.length)+'</span>');
+      n.onclick=function(){d.el.classList.toggle('closed');draw(v,false)}}
+    v.appendChild(n);d.w=n.offsetWidth;d.h=n.offsetHeight;L.push(d);
+    if(d.open)d.kids.forEach(function(k,i){mk(k,dp+1,dp?c:C[i%C.length])})})(R,0,'#2b2f3a');
+  function sz(d){var k=d.open?d.kids:[];d.s=k.reduce(function(a,x){return a+sz(x)+GY},-GY);return d.sh=Math.max(d.h,d.s)}
+  function pl(d,x,t,r){d.r=r;d.n.classList.add(r?'mm-r':'mm-l');d.x=r?x:x-d.w;d.y=t+(d.sh-d.h)/2;var y=t+(d.sh-d.s)/2;
+    (d.open?d.kids:[]).forEach(function(k){pl(k,r?d.x+d.w+GX:d.x-GX,y,r);y+=k.sh+GY})}
+  function col(a){return a.reduce(function(t,k){return t+k.sh+GB},-GB)}
+  var K=R.kids,A=K.slice(0,Math.ceil(K.length/2)),B=K.slice(A.length).reverse();K.forEach(sz);
+  var H=Math.max(col(A),col(B),R.h);R.x=-R.w/2;R.y=(H-R.h)/2;
+  [[A,1],[B,0]].forEach(function(p){var y=(H-col(p[0]))/2;p[0].forEach(function(k){pl(k,p[1]?R.w/2+GX*1.5:-R.w/2-GX*1.5,y,p[1]);y+=k.sh+GB})});
+  var x0=Math.min.apply(0,L.map(function(d){return d.x})),W=Math.max.apply(0,L.map(function(d){return d.x+d.w}))-x0+32,T=Math.max.apply(0,L.map(function(d){return d.y+d.h}))+32;
+  L.forEach(function(d){d.x+=16-x0;d.y+=16;d.n.style.left=d.x+'px';d.n.style.top=d.y+'px'});
+  v.style.width=W+'px';v.style.height=T+'px';s.setAttribute('width',W);s.setAttribute('height',T);
+  L.forEach(function(p){(p.open?p.kids:[]).forEach(function(k){var x1=k.r?p.x+p.w:p.x,y1=p.y+p.h/2,x2=k.r?k.x:k.x+k.w,y2=k.y+k.h/2,m=(x1+x2)/2,e=document.createElementNS(NS,'path');
+    e.setAttribute('d','M'+x1+','+y1+' C'+m+','+y1+' '+m+','+y2+' '+x2+','+y2);e.setAttribute('stroke',k.c);e.setAttribute('stroke-width',k.dp>1?1.8:3);e.setAttribute('fill','none');s.appendChild(e)})});
+  v.style.setProperty('--pz',Math.min(1,1040/W,600/T));
+}
+var pv=box('mm-wrap mm-print'),sv=box('mm-wrap');document.body.classList.add('mm-on');
+try{draw(sv,false);draw(pv,true)}catch(e){document.body.classList.remove('mm-on');throw e}
+})();
+</script>
 ```
 
 ### diagram — 구조도 (`diagram.html`)
@@ -212,5 +274,5 @@ Write 로 파일을 쓴 뒤 답은 두 줄이다.
 
 ```
 <저장한 파일 경로>
-<무엇을 만들었는지 한 줄. 예: 가지 7개짜리 마인드맵입니다. 가지를 누르면 접고 펼 수 있습니다.>
+<무엇을 만들었는지 한 줄. 예: 큰 가지 6개짜리 마인드맵입니다. 가지를 누르면 접고 펼 수 있습니다.>
 ```
