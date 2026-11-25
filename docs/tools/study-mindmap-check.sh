@@ -40,20 +40,34 @@ let bad = 0;
 try {
 for (const f of FILES) {
   try {
+  // 1280px 창에서 열어 화면 그림이 가로 스크롤 없이 창 폭에 맞는지 본다(접기·펼치기 뒤에도, 비율이 그대로인지).
+  // 그 뒤 창을 넓혔다가 1280px 로 좁혀도 다시 맞는지 본다
+  const vw = (width) => page.cdp("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+  const frame = () => page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+  const swFit = () => page.evaluate(() => { const w = document.querySelector(".mm-wrap:not(.mm-print)"); return w.scrollWidth <= w.clientWidth; });
+  await vw(1280);
   await page.goto("file://" + f);
   await page.waitForSelector(".mm-node.d1", { timeout: 5000 });
+  await frame();
   const r = await page.evaluate(() => {
+    const sw = document.querySelector(".mm-wrap:not(.mm-print)");
+    const fit = () => sw.scrollWidth <= sw.clientWidth;
+    const zm = () => getComputedStyle(sw.querySelector(".mm")).zoom;
     const scr = () => document.querySelectorAll(".mm-wrap:not(.mm-print) .mm-node").length;
     const br = [...document.querySelectorAll(".map [data-study=branch]")];
     const shown = br.filter((b) => !b.parentElement.closest(".fold.closed")).length;
     const first = document.querySelector(".mm-wrap:not(.mm-print) .mm-node.d1");
-    const a = scr(); first.click();
-    const b = scr(); document.querySelector(".mm-wrap:not(.mm-print) .mm-node.d1").click();
+    const fits = [fit()], zooms = [zm()];
+    const a = scr(); first.click(); fits.push(fit()); zooms.push(zm());
+    const b = scr(); document.querySelector(".mm-wrap:not(.mm-print) .mm-node.d1").click(); fits.push(fit()); zooms.push(zm());
     const c = scr();
     const v = document.querySelector(".mm-print .mm");
     return { all: br.length, shown, a, b, c, printNodes: document.querySelectorAll(".mm-print .mm-node").length,
-      pz: +v.style.getPropertyValue("--pz") };
+      pz: +v.style.getPropertyValue("--pz"), fit1280: fits.every(Boolean), zoom: +(+zooms[0]).toFixed(2), sameZoom: new Set(zooms).size === 1 };
   });
+  await vw(1600); await frame(); await vw(1280); await frame();
+  r.fitResize = await swFit();
+  await page.cdp("Emulation.clearDeviceMetricsOverride");
   await page.cdp("Emulation.setEmulatedMedia", { media: "print" });
   const vis = await page.evaluate(() => ({
     printShown: getComputedStyle(document.querySelector(".mm-print")).display !== "none",
@@ -62,7 +76,7 @@ for (const f of FILES) {
   const pdf = await page.cdp("Page.printToPDF", { preferCSSPageSize: true });
   const pages = (Buffer.from(pdf.data, "base64").toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
   const ok = r.a === 1 + r.shown && r.b < r.a && r.c === r.a && r.printNodes === 1 + r.all
-    && vis.printShown && vis.screenHidden && r.pz >= 0.75 && pages === 1;
+    && vis.printShown && vis.screenHidden && r.pz >= 0.75 && pages === 1 && r.fit1280 && r.sameZoom && r.fitResize;
   bad += !ok;
   console.log((ok ? "ok   " : "FAIL ") + f, JSON.stringify({ ...r, pz: +r.pz.toFixed(2), ...vis, pages }));
   } catch (e) {

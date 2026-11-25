@@ -21,6 +21,7 @@ h1{font-size:1.5em;margin:0 0 .4em}
 /* 모드 CSS */
 @page{size:A4 landscape;margin:10mm}
 body{max-width:none}
+html{scrollbar-gutter:stable}
 .map{border-left:3px solid #4a7bd0;padding-left:14px}
 .map .fold,.map .leaf{margin:6px 0}
 .map .body{border-left:2px solid #c9d6ee;margin-left:8px;padding-left:14px}
@@ -64,7 +65,7 @@ function read(el){var f=el.classList.contains('fold'),h=(f?el.querySelector(':sc
   return {el:el,name:b?b.innerHTML:h.innerHTML,desc:b?h.innerHTML.replace(/^\s*—\s*/,''):'',kids:f?kids(el.querySelector(':scope>.body')):[]}}
 function box(c){var w=document.createElement('div'),v=document.createElement('div');w.className=c;v.className='mm';w.appendChild(v);src.after(w);return v}
 function draw(v,all){
-  v.innerHTML='';var s=document.createElementNS(NS,'svg'),L=[],R={name:document.querySelector('h1').innerHTML,desc:'',kids:kids(src)};v.appendChild(s);
+  v.innerHTML='';v.style.zoom='';var s=document.createElementNS(NS,'svg'),L=[],R={name:document.querySelector('h1').innerHTML,desc:'',kids:kids(src)};v.appendChild(s);
   (function mk(d,dp,c){var n=document.createElement('div');n.className='mm-node d'+Math.min(dp,2);n.style.setProperty('--c',c);
     n.innerHTML='<div class="mm-name">'+d.name+'</div>'+(d.desc?'<div class="mm-desc">'+d.desc+'</div>':'');
     d.open=all||!d.el||!d.el.classList.contains('closed');d.n=n;d.c=c;d.dp=dp;
@@ -84,10 +85,12 @@ function draw(v,all){
   v.style.width=W+'px';v.style.height=T+'px';s.setAttribute('width',W);s.setAttribute('height',T);
   L.forEach(function(p){(p.open?p.kids:[]).forEach(function(k){var x1=k.r?p.x+p.w:p.x,y1=p.y+p.h/2,x2=k.r?k.x:k.x+k.w,y2=k.y+k.h/2,m=(x1+x2)/2,e=document.createElementNS(NS,'path');
     e.setAttribute('d','M'+x1+','+y1+' C'+m+','+y1+' '+m+','+y2+' '+x2+','+y2);e.setAttribute('stroke',k.c);e.setAttribute('stroke-width',k.dp>1?1.8:3);e.setAttribute('fill','none');s.appendChild(e)})});
-  v.style.setProperty('--pz',Math.min(1,1040/W,600/T));
+  v.W=W;v.style.setProperty('--pz',Math.min(1,1040/W,600/T));if(!all)fit();
 }
+function fit(){sv.style.zoom=Math.min(1,sv.parentNode.clientWidth/pv.W)}
 var pv=box('mm-wrap mm-print'),sv=box('mm-wrap');document.body.classList.add('mm-on');
-try{draw(sv,false);draw(pv,true)}catch(e){document.body.classList.remove('mm-on');throw e}
+try{draw(pv,true);draw(sv,false)}catch(e){document.body.classList.remove('mm-on');throw e}
+addEventListener('resize',fit);
 })();
 </script>
 </body>
