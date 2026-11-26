@@ -1,6 +1,6 @@
 {
   "name": "study",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "공부용 HTML 한 장: /study:study mindmap|diagram|guide|quiz <주제> [--out <디렉터리>] 로 마인드맵·구조도·한 장 학습지·퀴즈를 파일 하나로 만듭니다",
   "author": {
     "name": "yeochul-jeon",

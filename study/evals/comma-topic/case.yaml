@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: comma-topic
+expected_outcome: |
+  A comma inside the topic (mindmap TCP, UDP 비교) is not a mode list: one mindmap.html is made, no split set.

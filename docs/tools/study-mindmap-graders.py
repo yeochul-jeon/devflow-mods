@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """study mindmap 의 eval 글자 일치 판정 두 개와 렌더 검사 시험 파일 세 개를 SKILL.md 에서 만든다(원본은 SKILL.md 하나).
-사용: study-mindmap-graders.py          → study/evals/mindmap/graders/07·08, docs/tools/study-mindmap-fixtures/*.html 을 다시 쓴다
+사용: study-mindmap-graders.py          → mindmap·mode-multi·split-both 사례의 글자 일치 판정, docs/tools/study-mindmap-fixtures/*.html 을 다시 쓴다
       study-mindmap-graders.py --check  → 파일이 SKILL.md 와 맞지 않으면 1 로 끝난다"""
 import os, re, sys
 root = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
@@ -13,8 +13,8 @@ js = re.search(r"모드 스크립트:\n\n```html\n(.*?)```", sec, re.S).group(1)
 def js_escape(s):  # JavaScript 정규식으로 글자 그대로 찾기. 줄바꿈은 \n 으로 써서 판정 파일을 한 줄로 둔다
     return re.sub(r"[\\^$.|?*+()\[\]{}/]", lambda m: "\\" + m.group(0), s.rstrip("\n")).replace("\n", "\\n")
 
-def grader(block):
-    return "---\ntype: regex\ntarget: {source: file, path: mindmap.html}\n---\n\n" + js_escape(block) + "\n"
+def grader(block, path="mindmap.html"):
+    return "---\ntype: regex\ntarget: {source: file, path: " + path + "}\n---\n\n" + js_escape(block) + "\n"
 
 def page(title, body):  # 모델이 지키는 규칙대로 뼈대에 모드 CSS·본문·모드 스크립트를 넣는다
     h = skel.replace("<title>주제 — 모드 이름</title>", f"<title>{title} — 마인드맵</title>").replace("/* 모드 CSS */\n", "/* 모드 CSS */\n" + css)
@@ -39,6 +39,12 @@ broken_body = '<div class="fold" data-study="branch"><div class="head"><b>몸통
 files = {
     "study/evals/mindmap/graders/07-mode-css-verbatim.md": grader(css),
     "study/evals/mindmap/graders/08-mode-script-verbatim.md": grader(js),
+    "study/evals/mode-multi/graders/03-mindmap-css-verbatim.md": grader(css),
+    "study/evals/mode-multi/graders/04-mindmap-script-verbatim.md": grader(js),
+    "study/evals/split-both/graders/05-p1-css-verbatim.md": grader(css, "mindmap-p1.html"),
+    "study/evals/split-both/graders/06-p1-script-verbatim.md": grader(js, "mindmap-p1.html"),
+    "study/evals/split-both/graders/07-p2-css-verbatim.md": grader(css, "mindmap-p2.html"),
+    "study/evals/split-both/graders/08-p2-script-verbatim.md": grader(js, "mindmap-p2.html"),
     "docs/tools/study-mindmap-fixtures/max.html": page("클라우드 네이티브 애플리케이션 관측 가능성 설계", '<div class="map">\n' + max_body + "</div>\n"),
     "docs/tools/study-mindmap-fixtures/closed.html": page("접힌 가지 사례", '<div class="map">\n' + closed_body + "</div>\n"),
     "docs/tools/study-mindmap-fixtures/broken.html": page("깨진 목록 사례", '<div class="map">\n' + broken_body + "</div>\n"),

@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: split-both
+expected_outcome: |
+  "Two sheets each" for mindmap and diagram makes one numbered set per mode: mindmap-p1/p2.html and diagram-p1/p2.html, no unnumbered mindmap.html or diagram.html, part marks 1/2 and 2/2, the mindmap script verbatim in both mindmap parts.
