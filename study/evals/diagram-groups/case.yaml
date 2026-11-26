@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: diagram-groups
+expected_outcome: |
+  diagram.html: an inline SVG of EKS for new hires with boxes and arrows, the AWS-managed and the self-managed parts drawn as dashed group frames (rect class="group"), arrow labels using the label class without inline text-anchor; no external resources.

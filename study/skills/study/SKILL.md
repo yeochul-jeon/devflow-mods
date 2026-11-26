@@ -188,10 +188,12 @@ addEventListener('resize',fit);
 
 - 그림은 파일 안의 `<svg>` 하나로 그린다(외부 이미지 금지).
 - 상자는 4~9개. 상자 하나 = `<g data-study="box">` 안에 `<rect>` 와 `<text>` 두 줄(이름, 설명 한 줄).
-- 화살표 하나 = `<line data-study="arrow" … marker-end="url(#arrow)">` 또는 `<path data-study="arrow" …>`. 화살표 옆에 무엇이 오가는지 짧은 라벨(10자 이내)을 붙여도 된다.
+- 화살표 하나 = `<line data-study="arrow" … marker-end="url(#arrow)">` 또는 `<path data-study="arrow" …>`.
 - 배치: 흐름 방향으로 위에서 아래, 한 줄에 상자 최대 3개. 상자 크기는 폭 240, 높이 64, 상자 사이 가로 40·세로 56 으로 고정한다. 좌표는 이 크기로 계산한다.
+- 화살표 이름표(무엇이 오가는지, 10자 이내)는 **세로 화살표에만** 붙인다. 자리는 고정이다: `<text class="label" x="<선 x + 8>" y="<두 상자 사이 가운데 + 4>">`. 가로·대각선 화살표에는 붙이지 않는다. 가로 틈은 40 이라 글자가 들어가지 않는다. 이름표가 꼭 필요한 흐름이면 두 상자를 위아래 줄로 놓는다.
+- 상자 몇 개를 한 영역으로 묶을 때(예: 누가 관리하는 부분)는 점선 사각형 `<rect class="group">` 과 묶음 이름 `<text class="group-name">` 을 쓴다. 묶음은 줄 단위로 묶는다. 테두리는 상자 바깥으로 왼쪽·오른쪽·아래 12, 위 32 띄운다. 묶음 이름은 8자 이내로, 테두리 왼쪽 위 안쪽(`x` = 테두리 x + 10, `y` = 테두리 y + 18)에 둔다. 묶음 테두리를 가로지르는 화살표에는 이름표를 붙이지 않는다. 테두리 선과 글자가 겹친다.
 - SVG 글자는 줄이 바뀌지 않는다. 그래서 상자 이름은 12자 이내(16px), 설명은 16자 이내(13px)로 쓴다. 더 길면 낱말을 줄이거나 상자를 나눈다. 넘치면 글자가 상자 밖으로 나간다.
-- `viewBox` 를 그린 범위에 맞추고, `width="100%"` 로 둔다.
+- `viewBox` 를 그린 범위(묶음 테두리와 이름표 포함)에 맞추고, `width="100%"` 로 둔다. 첫 줄이 묶음 안이면 테두리가 위로 32 나가므로 첫 줄 상자를 그만큼 내린다.
 - 그림 밖에 따로 목록이나 표를 덧붙이지 않는다. 조건에 없는 것이다.
 
 ```html
@@ -199,6 +201,7 @@ addEventListener('resize',fit);
   <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
   <g data-study="box"><rect x="20" y="20" width="240" height="64" rx="8"/><text x="140" y="46" class="name">이름</text><text x="140" y="68" class="desc">설명 한 줄</text></g>
   <line data-study="arrow" x1="140" y1="84" x2="140" y2="138" marker-end="url(#arrow)"/>
+  <text x="148" y="115" class="label">요청</text>
 </svg>
 ```
 
@@ -210,7 +213,9 @@ svg text{text-anchor:middle;fill:#222}
 svg .name{font-size:16px;font-weight:bold}
 svg .desc{font-size:13px;fill:#444}
 svg line,svg path.link{stroke:#555;stroke-width:1.5;fill:none}
-svg .label{font-size:12px;fill:#555}
+svg .label{font-size:12px;fill:#555;text-anchor:start}
+svg rect.group{fill:none;stroke:#999;stroke-dasharray:6 4}
+svg .group-name{font-size:12px;fill:#555;text-anchor:start}
 ```
 
 ### guide — 한 장 학습지 (`guide.html`)
